@@ -1,0 +1,429 @@
+{
+  "schema": "dagcert-check-result/v2",
+  "checker": "optional.independent-semantic-audit/v3",
+  "passed": true,
+  "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+  "contract_sha256": "640d1b3bbbb3702a6f2172b19e0c65b9bc665702d295d6310c7be64eab40689b",
+  "evidence_sha256": "73c813840a862e5c51950299216e0cf164b70618db730667f4083f9d554115b7",
+  "requirements_sha256": "f6a981cce5e5d0587462cf3aaab29b91cd48dbc0b6c762adebbaf90d93ba5576",
+  "primitive_refs": [
+    "resource:snapshot-work",
+    "resource:summary-lag",
+    "task:snapshot.render",
+    "task:summary.advance",
+    "task:vote.commit",
+    "task:vote.preview",
+    "timing:snapshot.render/completion",
+    "timing:snapshot.render/service-envelope",
+    "timing:summary.advance/completion",
+    "timing:summary.advance/service-envelope",
+    "timing:vote.commit/cadence",
+    "timing:vote.commit/completion",
+    "timing:vote.preview/completion",
+    "worker:renderer",
+    "worker:summarizer"
+  ],
+  "findings": [],
+  "facts": {
+    "worker_model": "gpt-5.6-luna",
+    "one_claim_per_packet": true,
+    "audits": [
+      {
+        "claim_index": 1,
+        "claim_id": "completion-and-structural-progress",
+        "english": "Each declared task's exact in-process Python implementation has ten successful completion samples, and the declared task/resource graph has no structural blocked state under its explicit scheduling assumptions.",
+        "packet_sha256": "7f2a93eacce51712c24c16ff1fbe35652d556a624cdead55ca2a65d876198550",
+        "passed": true,
+        "summary": "The claim is supported for the narrowly stated scope. certify.py directly invokes each exact function imported from app.py ten times, records successful non-None results with matching task, worker, input, output, and resource metadata, and the supplied structural checker reports no blocked task. The conclusion remains conditional on the explicitly stated resource-effect, atomic-acquisition, fairness, cadence, and service-model assumptions; it is not evidence of a production scheduler or runtime resource implementation.",
+        "claim_reasoning": "The four declared tasks map directly to preview_vote_total, commit_vote_total, advance_summary_generation, and render_vote_snapshot in app.py. certify.py performs ten iterations per task and rejects a None result, while the supplied evidence contains ten successful completion records for each task with the expected worker and type metadata. The flow-guarantees result reports structural_progress.passed true and claims that the declared DAG has no structurally blocked task. This entails the claim's completion and model-level structural statements, but only under the packet's explicit assumptions about declared resource effects, atomic acquisition, fair scheduling, and the timing assumptions used by the model.",
+        "rule0_assessment": "No arbitrary queue, timeout, retry, rejection path, concurrency reduction, resource cap, fake fast path, or product restriction is introduced in the supplied implementation. The measured operations are the actual app.py functions, not a timing stand-in, although they are extremely small pure in-process functions. The user-experience risk is therefore not an artificial slowdown but overinterpretation: the certificate does not demonstrate HTTP, browser, persistence, external-model, or real scheduler behavior. The declared resource effects are modeled in the contract and evidence rather than implemented by app.py, so the promise must remain conditional exactly as stated.",
+        "reviewed_files": [
+          "__init__.py",
+          "app.py",
+          "certify.py",
+          "README.md"
+        ],
+        "strengths": [
+          {
+            "subject": "Exact task invocation",
+            "evidence": "certify.py imports all four operations from app.py and invokes the selected operation directly inside the ten-sample loop for each declared task.",
+            "impact": "The completion evidence corresponds to the supplied implementations rather than a synthetic helper, supporting the claim's exact in-process scope."
+          },
+          {
+            "subject": "Per-task sample coverage",
+            "evidence": "The loop ranges over sample_index in range(10) for every entry in measured, and the supplied evidence and analysis report ten samples for vote.preview, vote.commit, summary.advance, and snapshot.render.",
+            "impact": "Every declared task has the required completion sample count, with no omitted task in the claim's primitive references."
+          },
+          {
+            "subject": "Structural checker result",
+            "evidence": "The supplied application check result identifies example.flow-guarantees/v1, reports passed true, and states that the declared DAG has no structurally blocked task.",
+            "impact": "The structural portion is backed by a separately recorded checker result tied to the supplied source, contract, evidence, and requirements hashes."
+          },
+          {
+            "subject": "Scope is documented",
+            "evidence": "README.md explicitly describes this as an in-process vote example and says it is not a browser, HTTP, database, external-model, or Comfy example.",
+            "impact": "This documentation reduces the risk that users interpret the narrow claim as a broader production-readiness guarantee."
+          }
+        ],
+        "weaknesses": [
+          {
+            "subject": "Modeled resources are not runtime mechanisms",
+            "evidence": "app.py contains pure arithmetic, validation, and string-rendering functions; it has no resource counters, acquisition operation, scheduler, worker pool, or atomic state transition. Contract resource production and consumption are represented in certify.py metadata and the checker model.",
+            "impact": "The resource-effect assumption is essential. If deployed runtime behavior differs from the declared effects, the structural conclusion does not describe actual execution."
+          },
+          {
+            "subject": "Sequential timing workload",
+            "evidence": "certify.py executes samples serially and records observed_worker_concurrency=1 even though the contract declares summarizer concurrency 3 and renderer concurrency 2.",
+            "impact": "The claim does not establish concurrent execution safety, contention behavior, fairness, or saturation handling; users need the explicit model qualification to avoid assuming those properties."
+          },
+          {
+            "subject": "Very trivial operations",
+            "evidence": "app.py operations are constant-time pure functions such as current + delta and f\"votes:{total}\", with measured durations near microseconds.",
+            "impact": "The completion evidence is valid for these exact functions but provides little predictive value for a richer vote application or future implementation with I/O, persistence, serialization, or expensive rendering."
+          }
+        ],
+        "improvements": [
+          {
+            "priority": "high",
+            "subject": "Runtime resource correspondence",
+            "recommendation": "If the application is intended to make runtime resource claims, implement or integrate the actual resource acquisition, production, consumption, and atomic state transitions, then audit those paths directly.",
+            "rationale": "The current claim passes only because the declared graph is analyzed under an assumption that its effects match runtime behavior; implementing the boundary would materially improve user-visible reliability and make the structural conclusion operationally meaningful."
+          },
+          {
+            "priority": "medium",
+            "subject": "Concurrency and saturation evidence",
+            "recommendation": "Add bounded, representative concurrent tests covering renderer and summarizer worker contention, resource exhaustion, fairness, and recovery from failed tasks without changing product behavior.",
+            "rationale": "The current sequential samples cannot expose races or blocked-state behavior under the contract's declared worker capacities, so additional evidence would reduce engineering uncertainty."
+          },
+          {
+            "priority": "low",
+            "subject": "Representative workload coverage",
+            "recommendation": "Retain the exact-function completion claim but add separate evidence for realistic input sizes and any future I/O or persistence paths, clearly labeling those as distinct claims.",
+            "rationale": "This preserves the narrow certificate while giving users more useful performance expectations than microsecond measurements of trivial pure functions."
+          }
+        ],
+        "test_fitting_risks": [
+          {
+            "subject": "Certificate-oriented recorder path",
+            "evidence": "certify.py only checks result is not None before recording success; it does not validate semantic output values against declared output types or a behavioral oracle.",
+            "impact": "A future function returning an incorrect but non-None value could still satisfy this completion claim, although correctness is outside the present English statement."
+          },
+          {
+            "subject": "Hand-selected fixed inputs",
+            "evidence": "vote.preview and vote.commit always receive (sample_index, 1), while the other tasks receive only sample_index, and no error, boundary, or concurrent cases are measured.",
+            "impact": "The ten successful samples may not represent realistic or adverse inputs, limiting confidence if the functions later become stateful or input-sensitive."
+          }
+        ],
+        "evidence_gaps": [
+          {
+            "subject": "Actual scheduling implementation",
+            "evidence": "No scheduler or runtime resource implementation appears in the four reviewed source files; scheduling fairness and atomic acquisition are assumptions in the packet.",
+            "impact": "The audit cannot independently verify those assumptions or demonstrate that a real runtime would avoid blocked states."
+          },
+          {
+            "subject": "Timing-assumption provenance",
+            "evidence": "The structural analysis relies on assumed vote.commit cadence and summary.advance and snapshot.render service envelopes, with zero measured samples for those assumed timing primitives.",
+            "impact": "The graph conclusion is conditional and may not hold when deployment cadence or service durations differ from the stated intervals."
+          },
+          {
+            "subject": "Failure and state-transition paths",
+            "evidence": "The supplied completion evidence covers only successful direct calls; no exceptions, partial updates, cancellation, retries, or resource rollback paths are exercised.",
+            "impact": "Failure safety and consistency remain outside this claim and require separate testing before operational use."
+          }
+        ]
+      },
+      {
+        "claim_index": 2,
+        "claim_id": "in-process-responsiveness",
+        "english": "For the measured exact-source in-process workload, preview_vote_total completes in less than 16ms and commit_vote_total completes in less than 50ms; this claim makes no browser, network, or persistence promise.",
+        "packet_sha256": "84edb509fd6fdc4e2ca9213f29cbc3a5445cb74601d12e2b56de1a90285c365b",
+        "passed": true,
+        "summary": "The claim is faithfully entailed for its deliberately narrow scope. The supplied source measures the exact preview_vote_total and commit_vote_total functions from app.py ten times each, records successful completion samples, and applies the declared 16 ms and 50 ms upper bounds. The statement explicitly limits itself to this measured in-process workload and disclaims browser, network, and persistence behavior, so no broader operational promise is being inferred.",
+        "claim_reasoning": "certify.py invokes preview_vote_total(sample_index, 1) and commit_vote_total(sample_index, 1) directly, wraps each invocation with perf_counter(), and records ten completion samples per task with the exact source fingerprint. The supplied analysis reports certified upper bounds of 0.001950014848 ms for preview and 0.000910006929 ms for commit, both below their respective limits. app.py contains the actual functions and their shared _add implementation; there is no alternate fast path in the measured path. Because the English claim is explicitly restricted to this exact in-process workload, the evidence entails it even though it does not generalize to other inputs or environments.",
+        "rule0_assessment": "No queue, queue limit, timeout, cancellation, retry, debounce, serialization, rejection path, reduced concurrency, resource cap, or fake asynchronous fast path is introduced in the reviewed implementation to satisfy this responsiveness check. preview_vote_total and commit_vote_total perform the promised pure integer addition, and certify.py measures those functions directly rather than a timing stand-in. The main Rule 0 limitation is scope: the workload uses only ten small integer cases and does not exercise contention, invalid inputs, large integers, or surrounding application boundaries. Those are valid product-quality concerns but do not invalidate this narrowly worded claim.",
+        "reviewed_files": [
+          "__init__.py",
+          "app.py",
+          "certify.py",
+          "README.md"
+        ],
+        "strengths": [
+          {
+            "subject": "Direct operation measurement",
+            "evidence": "certify.py assigns the actual imported preview_vote_total and commit_vote_total callables to the measured workload and times each invocation with perf_counter() around the call.",
+            "impact": "The evidence corresponds to the exact in-process functions named by the claim, avoiding substitution with a synthetic helper or unreachable code."
+          },
+          {
+            "subject": "Traceable evidence binding",
+            "evidence": "Each TimingSample records task identity, worker, input and output types, success, observed concurrency, and the source fingerprint; the packet also supplies matching source and evidence hashes.",
+            "impact": "The result is auditable and reduces the risk that timings came from a different source revision or operation."
+          },
+          {
+            "subject": "Narrow, honest promise",
+            "evidence": "The English requirement states the exact workload and explicitly says there is no browser, network, or persistence promise; README.md repeats that boundary.",
+            "impact": "Users are less likely to mistake a microbenchmark result for an end-to-end latency guarantee."
+          }
+        ],
+        "weaknesses": [
+          {
+            "subject": "Very narrow input coverage",
+            "evidence": "The measurement loop runs exactly ten cases, always using sample_index as current and 1 as delta, with values 0 through 9.",
+            "impact": "The claim does not characterize other valid integer magnitudes, negative deltas, or input distributions, so performance outside this workload remains unknown."
+          },
+          {
+            "subject": "Measurement sensitivity",
+            "evidence": "The measured operations are pure Python integer addition and the reported timings are approximately 0.0002 to 0.0015 ms, far below the thresholds.",
+            "impact": "Interpreter noise, timer resolution, CPU scheduling, and runtime warm-up can dominate these values; the evidence is useful for the stated benchmark but weak as a robust production latency characterization."
+          },
+          {
+            "subject": "No concurrent-path evidence",
+            "evidence": "The recorder reports observed_worker_concurrency 1 and the loop executes calls serially; app.py exposes no stateful contention path because both functions are pure.",
+            "impact": "The claim says nothing about latency under concurrent callers or application load, which may matter if these functions are later embedded in a shared service."
+          }
+        ],
+        "improvements": [
+          {
+            "priority": "medium",
+            "subject": "Workload representativeness",
+            "recommendation": "Expand the measured exact-source workload with documented representative positive, negative, zero, and larger integer operands while retaining the current ten-sample minimum.",
+            "rationale": "This would improve confidence that the narrow in-process promise covers normal input variation without adding artificial product restrictions."
+          },
+          {
+            "priority": "low",
+            "subject": "Benchmark reproducibility",
+            "recommendation": "Record interpreter version, platform, warm-up policy, timer resolution, and repeated-run summary statistics alongside the existing samples.",
+            "rationale": "The sub-millisecond results are sensitive to environment and measurement overhead; metadata would make the evidence easier to interpret and reproduce."
+          },
+          {
+            "priority": "low",
+            "subject": "Concurrency characterization",
+            "recommendation": "If concurrent use is part of the real product context, add a separate explicitly scoped benchmark under representative concurrency rather than extending this claim implicitly.",
+            "rationale": "A distinct workload and claim would expose contention behavior while preserving the current honest boundary."
+          }
+        ],
+        "test_fitting_risks": [
+          {
+            "subject": "Fixed trivial arguments",
+            "evidence": "certify.py always calls both functions with sample_index and delta 1, producing a minimal integer-addition path.",
+            "impact": "The certificate could be read too broadly if future implementations add input-dependent work that these fixed cases do not trigger; the current English wording prevents that overclaim but reviewers should preserve it."
+          },
+          {
+            "subject": "Microbenchmark-only evidence",
+            "evidence": "The measured functions are pure one-line arithmetic wrappers and all ten samples complete in roughly microseconds, with no surrounding request, validation, or persistence boundary.",
+            "impact": "This is not evidence for an HTTP, browser, database, or end-to-end user-visible response, although those boundaries are expressly excluded from the claim."
+          }
+        ],
+        "evidence_gaps": [
+          {
+            "subject": "Input-domain breadth",
+            "evidence": "No samples cover negative deltas, large integers, invalid types, or any workload beyond current values 0 through 9 and delta 1.",
+            "impact": "Performance and error-path behavior for those cases are unverified and must not be inferred from this certificate."
+          },
+          {
+            "subject": "Environmental robustness",
+            "evidence": "The packet provides one serial run of ten samples per operation and no cross-process, repeated-run, or load-test evidence.",
+            "impact": "Results may vary across machines, Python versions, or contention levels; the claim should remain tied to the supplied exact-source measurement."
+          }
+        ]
+      },
+      {
+        "claim_index": 3,
+        "claim_id": "snapshot-non-starvation",
+        "english": "In the declared conditional flow model, assuming vote.commit recurs between 100ms and 200ms and snapshot.render occupies a renderer for between 500ms and 1000ms, two renderer workers have sufficient snapshot-work after warm-up from two initial units.",
+        "packet_sha256": "d15d4dbfcd310106ebd052c967a15e755a16a2f17b6330d21299ee2394ac77af",
+        "passed": true,
+        "summary": "The claim is faithfully entailed as a conditional flow-model statement. The contract declares renderer concurrency 2, snapshot-work capacity 10 with initial level 2, vote.commit production of one unit per commit, and snapshot.render consumption of one unit. The supplied checker reports minimum modeled supply of 5 units/second, maximum modeled consumption of 4 units/second, initial work 2, and passed=true. The conclusion is conditional on the explicitly stated cadence and service-envelope assumptions, not a production-performance guarantee.",
+        "claim_reasoning": "The exact contract and checker evidence support the claimed arithmetic: a 100–200 ms commit interval yields a conservative minimum supply of 5 snapshot-work units per second, while two renderer workers with 500–1000 ms service duration yield a conservative maximum consumption rate of 4 units per second. Because supply exceeds consumption and the model starts with two units, the checker records snapshot.render as not starved after warm-up and passes the flow guarantee. certify.py wires the exact task/resource identifiers into check_flow_guarantees and verifies the resulting certificate. The conclusion is limited to the declared model and assumptions, as the English statement expressly says.",
+        "rule0_assessment": "No queue bound, timeout, retry, cancellation rule, rate limiter, rejection path, or reduced concurrency appears to have been added to force this claim to pass. The source application remains four simple in-process functions, and certify.py measures those exact functions before invoking the checker. However, the real snapshot function is only f\"votes:{total}\" and completes in roughly microseconds; the 500–1000 ms renderer occupancy is an explicit modeling assumption rather than observed runtime behavior. That is acceptable for this narrowly conditional model claim, but it must not be presented as evidence that a real renderer remains non-starved under production scheduling.",
+        "reviewed_files": [
+          "__init__.py",
+          "app.py",
+          "certify.py",
+          "README.md"
+        ],
+        "strengths": [
+          {
+            "subject": "Declared renderer capacity and resource flow",
+            "evidence": "dag_contract declares renderer concurrency 2, snapshot-work capacity 10 and initial 2; vote.commit produces one snapshot-work unit and snapshot.render consumes one.",
+            "impact": "The model contains the concrete worker and resource parameters needed to calculate supply versus consumption rather than relying on an unsupported narrative assertion."
+          },
+          {
+            "subject": "Conservative modeled rate comparison",
+            "evidence": "The checker result records minimum snapshot-work supply of 5.0 units/second and maximum consumption of 4.0 units/second, with passed=true and warm_start_required=2.0.",
+            "impact": "The positive rate margin supports non-starvation after warm-up across the stated cadence and service-duration bounds."
+          },
+          {
+            "subject": "Explicit conditional scope",
+            "evidence": "The English requirement and README identify the 100–200 ms vote cadence and 500–1000 ms snapshot service envelope as assumptions, and README says these are modeling assumptions rather than measured production facts.",
+            "impact": "Users can distinguish the certified conditional reasoning from an unconditional runtime or infrastructure promise."
+          },
+          {
+            "subject": "Checker and certificate linkage",
+            "evidence": "certify.py passes the exact task/resource IDs to check_flow_guarantees, issues the certificate, and calls verify_certificate; the packet includes matching source, contract, evidence, and requirements hashes.",
+            "impact": "The claim is tied to the supplied contract, evidence, and checker result, reducing the risk of an unrelated or stale check being cited."
+          }
+        ],
+        "weaknesses": [
+          {
+            "subject": "Unmeasured renderer occupancy",
+            "evidence": "app.py render_vote_snapshot only validates an integer and returns a short string; certify.py measures it as a microsecond-scale pure function, while the claim's 500–1000 ms occupancy is assumed.",
+            "impact": "The audit cannot infer that an actual renderer, browser, or rendering backend has this service envelope or that its workers schedule fairly under load."
+          },
+          {
+            "subject": "No runtime scheduler/resource enforcement",
+            "evidence": "The application has no renderer worker pool, snapshot-work ledger, queue, admission logic, or concurrent execution path; resource effects exist in the contract and evidence metadata rather than executable application state.",
+            "impact": "The result certifies the abstract flow model only; deploying the functions without a matching scheduler could still starve, oversubscribe, or lose work."
+          },
+          {
+            "subject": "Fairness and atomicity are model premises",
+            "evidence": "The structural analysis lists atomic resource acquisition and fair scheduling among assumptions, but neither app.py nor certify.py implements or tests those mechanisms.",
+            "impact": "Pathological scheduling or non-atomic resource updates are outside the certified conclusion and could invalidate a concrete runtime interpretation."
+          }
+        ],
+        "improvements": [
+          {
+            "priority": "high",
+            "subject": "Align model evidence with the promised renderer boundary",
+            "recommendation": "If this claim is intended to guide a real service, add an integration test using the actual renderer worker pool and resource accounting, measuring occupancy, concurrent workers, commit cadence, and starvation under saturation.",
+            "rationale": "The current evidence exercises only a pure string formatter; integration evidence would show that the modeled rates correspond to user-visible snapshot work and would expose scheduling or queue failures."
+          },
+          {
+            "priority": "medium",
+            "subject": "Make model-versus-runtime scope prominent at consumption points",
+            "recommendation": "Keep the conditional wording in certificate/report APIs and label the renderer service envelope as assumed/model-only wherever the claim is displayed.",
+            "rationale": "This prevents a downstream reader from interpreting the passed checker result as proof of production renderer availability."
+          },
+          {
+            "priority": "low",
+            "subject": "Add adversarial flow-model checks",
+            "recommendation": "Test boundary values and scheduling scenarios at 100 ms, 200 ms, 500 ms, and 1000 ms, including delayed production and concurrent resource acquisition.",
+            "rationale": "Boundary and unfair-scheduling cases would make the conditional guarantee easier to maintain and would detect arithmetic or checker regressions without changing product behavior."
+          }
+        ],
+        "test_fitting_risks": [
+          {
+            "subject": "Synthetic timing workload",
+            "evidence": "certify.py invokes each operation ten times with tiny integer/string inputs; snapshot.render is not delayed to its assumed service envelope.",
+            "impact": "Although these samples are not used to establish the assumed 500–1000 ms envelope, they could be mistakenly read as realistic renderer performance evidence."
+          },
+          {
+            "subject": "Metadata-driven resource accounting",
+            "evidence": "EvidenceRecorder receives resource_produced and resource_consumed dictionaries from certify.py, while the application functions themselves do not acquire or mutate snapshot-work.",
+            "impact": "A mismatch between metadata and a future implementation could let the certificate continue to pass unless integration checks validate runtime resource effects."
+          }
+        ],
+        "evidence_gaps": [
+          {
+            "subject": "Actual two-worker execution",
+            "evidence": "The evidence records observed_worker_concurrency=1 for serial measurement and contains no concurrent renderer workload or worker-pool trace.",
+            "impact": "There is no empirical confirmation that two renderer workers can execute independently or that scheduling remains fair under concurrent demand."
+          },
+          {
+            "subject": "Cadence and service-envelope observations",
+            "evidence": "The contract marks vote.commit cadence and snapshot.render service-envelope as assumed with zero required samples; no timing evidence establishes either interval or occupancy range.",
+            "impact": "The claim is valid only when operators independently ensure those assumptions hold."
+          },
+          {
+            "subject": "Saturation and failure behavior",
+            "evidence": "No evidence covers resource exhaustion, delayed commits, failed renders, cancellation, retries, or queue backpressure.",
+            "impact": "The model does not establish behavior during faults or transient overload, so production non-starvation remains unproven outside the stated idealized flow."
+          }
+        ]
+      },
+      {
+        "claim_index": 4,
+        "claim_id": "bounded-summary-lag",
+        "english": "In the declared conditional flow model, assuming the stated vote.commit cadence and summary.advance service envelope, three summarizer workers provide enough modeled service capacity to keep summary-lag at or below its declared three-generation capacity.",
+        "packet_sha256": "8488253e3397b11f19ff1316a737d06dfb32a6a89459522ea712965723daee59",
+        "passed": true,
+        "summary": "The bounded-summary-lag claim is faithfully entailed as a conditional capacity statement about the declared flow model. The contract declares three summarizer workers, vote.commit cadence of 100–200 ms, and summary.advance service duration of 80–200 ms. The supplied checker reports maximum generation rate 10/s, minimum modeled update rate 15/s, and a passed three-generation bound. This does not establish an independently observed runtime lag guarantee, but the English claim limits itself to the declared conditional model and explicitly stated assumptions.",
+        "claim_reasoning": "The relevant contract links vote.commit to summary.advance through summary-lag, with vote.commit producing one unit and summary.advance consuming one unit. Three summarizer workers and the assumed 200 ms worst-case service envelope yield 3/0.2 = 15 modeled updates per second, while the 200 ms maximum vote cadence yields at most 5 generations per second (the checker conservatively reports a 10/s maximum generation rate). The checker result passes with maximum_generations 3. The evidence does not execute a queue, scheduler, or concurrent summarizer pool; it measures ten successful calls to a pure increment function. That gap would invalidate an operational lag promise, but not this narrowly worded modeled-capacity claim.",
+        "rule0_assessment": "No arbitrary queue, queue limit, timeout, retry, cancellation, rate limiter, rejection path, reduced concurrency, or fake fast path is introduced in the reviewed source to satisfy the certificate. However, summary.advance is only a pure integer increment and the application has no runtime worker pool, queue, lag state, or scheduling implementation. The measured sub-millisecond completion samples therefore cannot be treated as evidence of an actual summarization service. The claim remains acceptable because it promises only enough capacity in the declared conditional flow model, while the packet explicitly states cadence and service-envelope assumptions. Users must not read it as a production freshness guarantee.",
+        "reviewed_files": [
+          "__init__.py",
+          "app.py",
+          "certify.py",
+          "README.md"
+        ],
+        "strengths": [
+          {
+            "subject": "Explicit conditional scope",
+            "evidence": "The claim says “In the declared conditional flow model” and names the vote.commit cadence and summary.advance service envelope as assumptions; README.md likewise describes cadence and service envelopes as modeling assumptions rather than measured production facts.",
+            "impact": "This keeps the promise narrower than an unqualified runtime latency or freshness guarantee and makes the principal limitation visible to users."
+          },
+          {
+            "subject": "Consistent modeled resource flow",
+            "evidence": "certify.py declares vote.commit producing summary-lag and summary.advance consuming summary-lag; the checker result reports the lag task as summary.advance with maximum_generations 3 and passed=true.",
+            "impact": "The modeled dependency and resource accounting directly correspond to the claimed bounded-generation relationship."
+          },
+          {
+            "subject": "Capacity margin in the checker",
+            "evidence": "The supplied application_check_results facts report maximum generation rate 10.0, minimum update rate 15.0, maximum_generations 3, and passed=true.",
+            "impact": "The model has positive service-capacity margin rather than merely asserting equality at the boundary, reducing sensitivity to ordinary modeled variation."
+          }
+        ],
+        "weaknesses": [
+          {
+            "subject": "No implemented summarizer runtime",
+            "evidence": "app.py implements advance_summary_generation as generation + 1, and certify.py measures it synchronously ten times; there is no queue, worker dispatch, concurrent execution, lag state, or end-to-end summary pipeline.",
+            "impact": "The result cannot establish actual user-visible summary freshness, backlog behavior, fairness, saturation handling, or state consistency."
+          },
+          {
+            "subject": "Assumed envelope is not measured",
+            "evidence": "The contract marks summary.advance/service-envelope as assumed with lower_ms 80 and upper_ms 200, and the checker facts repeat that assumption; measured completion samples are approximately 0.0002–0.0004 ms instead.",
+            "impact": "The central service rate is hypothetical. If real summarization work is slower than assumed, the modeled three-generation bound may no longer hold."
+          },
+          {
+            "subject": "Checker/model semantics are external to application behavior",
+            "evidence": "The certificate invokes examples.optional_flow_checker.check_flow_guarantees, while the application itself has no implementation of the modeled worker scheduling or atomic resource operations.",
+            "impact": "Correctness depends on the checker’s abstract scheduling and resource semantics, not on enforceable runtime invariants in this example."
+          }
+        ],
+        "improvements": [
+          {
+            "priority": "high",
+            "subject": "Runtime summary pipeline",
+            "recommendation": "If an operational lag guarantee is desired, implement and test the actual summary queue, worker dispatch, generation state, and resource accounting, then measure end-to-end lag under concurrent load.",
+            "rationale": "This would connect the certificate to the user-visible operation and expose saturation, fairness, ordering, and failure behavior instead of relying on a pure increment stand-in."
+          },
+          {
+            "priority": "medium",
+            "subject": "Service-envelope evidence",
+            "recommendation": "Collect representative summary.advance service-duration samples from the real summarization operation and document workload, percentile, and environmental conditions used to justify the 80–200 ms envelope.",
+            "rationale": "The current envelope is wholly assumed, so measured workload evidence would make the modeled capacity calculation materially more defensible."
+          },
+          {
+            "priority": "low",
+            "subject": "Assumption and model documentation",
+            "recommendation": "State explicitly that the bound relies on atomic resource updates and fair scheduling, and distinguish the checker’s conservative rate calculation from the raw cadence interval.",
+            "rationale": "Clearer model semantics would reduce the risk that readers mistake a conditional proof artifact for an enforced production guarantee."
+          }
+        ],
+        "test_fitting_risks": [
+          {
+            "subject": "Synthetic completion measurement",
+            "evidence": "certify.py invokes advance_summary_generation with small integers in a tight synchronous loop and records ten near-zero-duration samples.",
+            "impact": "This workload is trivially fitted to the implementation and says nothing about real summarization cost, blocking, queueing, or worker contention."
+          },
+          {
+            "subject": "Declared concurrency without runtime concurrency",
+            "evidence": "The contract declares summarizer concurrency 3, but certify.py observes worker concurrency 1 and app.py contains no worker implementation.",
+            "impact": "The three-worker capacity is a model parameter, not an experimentally demonstrated application property."
+          }
+        ],
+        "evidence_gaps": [
+          {
+            "subject": "No lag trajectory evidence",
+            "evidence": "The packet contains checker facts and timing samples but no execution trace showing generation arrivals, summary completions, queue depth, or lag over time.",
+            "impact": "There is no empirical confirmation that lag stays at or below three generations in an implementation."
+          },
+          {
+            "subject": "No overload or failure testing",
+            "evidence": "The supplied evidence covers only ten successful completion calls and does not exercise concurrent arrivals, delayed service, worker failure, retries, or resource saturation.",
+            "impact": "Important boundary conditions for bounded lag remain unverified, even within a prospective runtime implementation."
+          }
+        ]
+      }
+    ]
+  }
+}

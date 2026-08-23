@@ -1,0 +1,12 @@
+APPLICATION SOURCE
+       |
+       +-- mandatory plain-English requirements ------------+
+       |        (claims + assumptions + exact references)   |
+       +-- workers --+
+       +-- tasks ----+--> dependency + resource flow ------> analyze
+       +-- resources-+            + source-bound timings     |
+       +-- timings --+                                      +--> issue --> verify
+       |                                                     |
+       +-- optional app-owned checker results ---------------+
+
+Certification observes. It does not add queues, limits, timeouts, retries, or rejections.

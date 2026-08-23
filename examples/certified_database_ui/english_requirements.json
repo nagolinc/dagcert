@@ -1,0 +1,63 @@
+{
+  "schema": "dagcert-english-requirements/v1",
+  "claims": [
+    {
+      "id": "browse-sort-and-pagination",
+      "statement": "For the exact certified source and exercised SQLite dataset, the real browser displays exactly the database rows selected for the current page in the same order for initial load, ascending and descending sorts, and next/previous pagination; the list HTTP task and browser render task also satisfy their declared measured deadlines for the sequential reference workload.",
+      "primitive_refs": [
+        "task:items.list",
+        "task:ui.render",
+        "timing:items.list/http",
+        "timing:ui.render/visible"
+      ],
+      "checker_refs": [
+        "example.database-ui.browse-projection/v1"
+      ],
+      "assumptions": [
+        "The guarantee is limited to the exercised SQLite dataset and sequential reference workload.",
+        "The UI timing measures browser DOM mutation, not compositor paint or total network-to-paint latency."
+      ]
+    },
+    {
+      "id": "browser-insertion",
+      "statement": "For the exact certified source and exercised SQLite dataset, submitting the real browser form provides the measured immediate DOM feedback, crosses the real HTTP and SQLite insertion path, and then displays the newly committed row in the exact sorted page projection; the insertion and feedback tasks satisfy their declared deadlines for the sequential reference workload.",
+      "primitive_refs": [
+        "task:items.insert",
+        "task:items.list",
+        "task:ui.feedback",
+        "task:ui.render",
+        "timing:items.insert/http",
+        "timing:ui.feedback/visible",
+        "timing:ui.render/visible"
+      ],
+      "checker_refs": [
+        "example.database-ui.insertion-projection/v1"
+      ],
+      "assumptions": [
+        "The guarantee is limited to successful operations in the exercised SQLite dataset and sequential reference workload."
+      ]
+    },
+    {
+      "id": "browser-deletion",
+      "statement": "For the exact certified source and exercised SQLite dataset, activating a real browser delete control provides the measured immediate DOM feedback, crosses the real HTTP and SQLite deletion path, and then removes that committed record from the exact sorted page projection; the deletion and feedback tasks satisfy their declared deadlines for the sequential reference workload.",
+      "primitive_refs": [
+        "task:items.delete",
+        "task:items.list",
+        "task:ui.feedback",
+        "task:ui.render",
+        "timing:items.delete/http",
+        "timing:ui.feedback/visible",
+        "timing:ui.render/visible"
+      ],
+      "checker_refs": [
+        "example.database-ui.deletion-projection/v1"
+      ],
+      "assumptions": [
+        "The guarantee is limited to successful operations in the exercised SQLite dataset and sequential reference workload."
+      ]
+    }
+  ],
+  "metadata": {
+    "purpose": "Mandatory plain-English promises for the certified database-to-UI reference application."
+  }
+}

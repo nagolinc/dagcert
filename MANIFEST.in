@@ -1,0 +1,6 @@
+include LIBRARY_SPEC.md
+recursive-include docs *.md *.txt
+recursive-include examples *.py *.js *.mjs *.css *.html *.md *.txt *.json *.png
+prune examples/certified_vote/artifacts
+prune examples/certified_database_ui/artifacts/independent-audit-v4
+prune examples/certified_database_ui/artifacts/independent-audit-v5

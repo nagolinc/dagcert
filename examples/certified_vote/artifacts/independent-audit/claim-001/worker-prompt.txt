@@ -1,0 +1,1473 @@
+You are an independent senior software engineer auditing exactly one Dagcert claim.
+This is not a rubber-stamp exercise. Audit the supplied implementation, formal
+contract, timing evidence, deterministic analysis, assumptions, and English
+promise together.
+
+RULE 0
+
+The purpose of certification is to make the application provide a better
+real-world user experience, never to make it worse merely so a certificate
+passes.
+
+Look specifically for arbitrary finite queues, queue limits, rate limits,
+timeouts, cancellation, retries, debounce, serialization, rejection paths,
+reduced concurrency, resource caps, fake fast paths, mocked work, or altered
+product behavior introduced to satisfy a check. Treat a test-shaped
+implementation, measurement of a trivial stand-in instead of the promised
+operation, or evidence that bypasses real boundaries as a serious risk.
+
+Required review
+
+1. Read every relevant UTF-8 file in `source_files` and name it in
+   `reviewed_files`.
+2. Trace the actual implementation paths relevant to this claim. Compare them
+   with the declared workers, tasks, resources, types, dependencies, and
+   timings.
+3. Decide whether the evidence exercises the real user-visible or backend
+   operation being promised. Check relevant concurrency, failure, blocking,
+   and state-transition paths. A timed helper or stand-in is not evidence for
+   an HTTP, browser, database, model, or queue boundary that it does not cross.
+4. Distinguish measured facts from assumptions. Explain exactly how every
+   relevant assumption limits the English promise.
+5. Do not mistake a declared resource capacity for evidence that the code
+   enforces that capacity or handles saturation safely.
+6. Inspect for code that is overly fitted to passing the certificate: trivial
+   functions, synthetic timing loops, unreachable checks, omitted slow paths,
+   hand-authored evidence, or declarations that do not match runtime behavior.
+7. Assess engineering quality and best practices where they affect the claim:
+   error handling, state consistency, race safety, atomicity, observability,
+   realistic workload coverage, and preservation of existing product behavior.
+8. Explain concrete strengths as well as weaknesses. Recommend practical,
+   prioritized improvements and state their user-experience impact. Do not
+   recommend restrictions merely because they make a proof easier.
+
+Verdict rules
+
+- `passed` answers only whether this one English claim is faithfully and
+  completely entailed for the supplied exact source, evidence, and explicit
+  assumptions. It never means that the whole app is production-ready.
+- A claim may pass while the implementation still has weaknesses. Put
+  non-invalidating concerns in `weaknesses`, `test_fitting_risks`,
+  `evidence_gaps`, and `improvements`.
+- Put an issue in `findings` and set `passed` to false when the promise is not
+  fully entailed, evidence measures a substitute rather than the promised
+  behavior, a required assumption is hidden, relevant source cannot be
+  reviewed, or uncertainty prevents a defensible conclusion.
+- Do not infer unstated behavior. Do not manufacture praise or criticism.
+- Do not edit files or implement fixes.
+
+Response quality
+
+Write a genuinely detailed assessment. `summary`, `claim_reasoning`, and
+`rule0_assessment` must each be at least 200 characters and cite concrete
+supplied evidence. Each observation must identify its subject, supporting
+evidence, and user or engineering impact. Each improvement must have a
+priority, recommendation, and rationale. Empty review arrays are allowed only
+when there is honestly nothing in that category.
+
+Return only one JSON object conforming exactly to the response schema. Copy
+`audit_packet_sha256` exactly.
+
+audit_packet_sha256:
+7f2a93eacce51712c24c16ff1fbe35652d556a624cdead55ca2a65d876198550
+
+response_schema:
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "audit_packet_sha256",
+    "passed",
+    "summary",
+    "claim_reasoning",
+    "rule0_assessment",
+    "reviewed_files",
+    "strengths",
+    "weaknesses",
+    "improvements",
+    "test_fitting_risks",
+    "evidence_gaps",
+    "findings"
+  ],
+  "properties": {
+    "audit_packet_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "passed": {
+      "type": "boolean"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 200
+    },
+    "claim_reasoning": {
+      "type": "string",
+      "minLength": 200
+    },
+    "rule0_assessment": {
+      "type": "string",
+      "minLength": 200
+    },
+    "reviewed_files": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "strengths": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/observation"
+      }
+    },
+    "weaknesses": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/observation"
+      }
+    },
+    "improvements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "priority",
+          "subject",
+          "recommendation",
+          "rationale"
+        ],
+        "properties": {
+          "priority": {
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1
+          },
+          "recommendation": {
+            "type": "string",
+            "minLength": 1
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "test_fitting_risks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/observation"
+      }
+    },
+    "evidence_gaps": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/observation"
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "subject",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subject",
+        "evidence",
+        "impact"
+      ],
+      "properties": {
+        "subject": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1
+        },
+        "impact": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}
+
+audit_packet:
+{
+  "schema": "dagcert-semantic-audit-packet/v3",
+  "claim_index": 1,
+  "claim": {
+    "id": "completion-and-structural-progress",
+    "statement": "Each declared task's exact in-process Python implementation has ten successful completion samples, and the declared task/resource graph has no structural blocked state under its explicit scheduling assumptions.",
+    "primitive_refs": [
+      "task:vote.preview",
+      "task:vote.commit",
+      "task:summary.advance",
+      "task:snapshot.render",
+      "timing:vote.preview/completion",
+      "timing:vote.commit/completion",
+      "timing:summary.advance/completion",
+      "timing:snapshot.render/completion"
+    ],
+    "checker_refs": [],
+    "assumptions": [
+      "Declared resource effects match runtime behavior, acquisition is atomic, and scheduling is fair."
+    ]
+  },
+  "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+  "contract_sha256": "640d1b3bbbb3702a6f2172b19e0c65b9bc665702d295d6310c7be64eab40689b",
+  "evidence_sha256": "73c813840a862e5c51950299216e0cf164b70618db730667f4083f9d554115b7",
+  "requirements_sha256": "f6a981cce5e5d0587462cf3aaab29b91cd48dbc0b6c762adebbaf90d93ba5576",
+  "source_manifest": {
+    "__init__.py": "4872483b2a4a3c78fd4ff7143fc1ffd7d71a0fe3aa5077db6c3b5688f4dc0db3",
+    "app.py": "b45d9171afd5909a59c65195b43b9d1333905a13c763134b3373d20be0ab762a",
+    "certify.py": "6cf05c36b4dfac2434a3c7f96c34f0159bcd7a68b0162583a50fb3fe16a28894",
+    "README.md": "9ca30ae16006d6395331a5b72c4655349fb75a0fe148af1faa5a96d8be2766ed"
+  },
+  "source_files": {
+    "__init__.py": {
+      "sha256": "4872483b2a4a3c78fd4ff7143fc1ffd7d71a0fe3aa5077db6c3b5688f4dc0db3",
+      "encoding": "utf-8",
+      "content": "\"\"\"Complete fast-frontend/slow-backend certified vote example.\"\"\"\n\n"
+    },
+    "app.py": {
+      "sha256": "b45d9171afd5909a59c65195b43b9d1333905a13c763134b3373d20be0ab762a",
+      "encoding": "utf-8",
+      "content": "\"\"\"Small in-process vote calculation application with no Dagcert dependency.\"\"\"\n\n\ndef preview_vote_total(current: int, delta: int) -> int:\n    \"\"\"Return the proposed total without mutating authoritative state.\"\"\"\n    return _add(current, delta)\n\n\ndef commit_vote_total(current: int, delta: int) -> int:\n    \"\"\"Return the authoritative total for this pure in-process application.\"\"\"\n    return _add(current, delta)\n\n\ndef advance_summary_generation(generation: int) -> int:\n    \"\"\"Advance the application's summary-generation counter once.\"\"\"\n    if not isinstance(generation, int):\n        raise TypeError(\"generation must be an integer\")\n    return generation + 1\n\n\ndef render_vote_snapshot(total: int) -> str:\n    \"\"\"Render the application's complete text snapshot for a vote total.\"\"\"\n    if not isinstance(total, int):\n        raise TypeError(\"total must be an integer\")\n    return f\"votes:{total}\"\n\n\ndef _add(current: int, delta: int) -> int:\n    if not isinstance(current, int) or not isinstance(delta, int):\n        raise TypeError(\"current and delta must be integers\")\n    return current + delta\n"
+    },
+    "certify.py": {
+      "sha256": "6cf05c36b4dfac2434a3c7f96c34f0159bcd7a68b0162583a50fb3fe16a28894",
+      "encoding": "utf-8",
+      "content": "\"\"\"Measure the exact in-process operations, derive claims, issue, and verify.\"\"\"\n\nfrom pathlib import Path\nfrom time import perf_counter, time\nfrom typing import Callable\n\nfrom dagcert import (\n    CheckContext,\n    EvidenceRecorder,\n    TimingSample,\n    issue_certificate,\n    load_contract,\n    load_evidence,\n    load_requirements,\n    run_checker,\n    sha256_file,\n    source_fingerprint,\n    verify_certificate,\n)\nfrom examples.optional_flow_checker import LagClaim, SupplyClaim, check_flow_guarantees\n\nfrom .app import (\n    advance_summary_generation,\n    commit_vote_total,\n    preview_vote_total,\n    render_vote_snapshot,\n)\n\n\ndef main(source_root: Path | None = None) -> int:\n    root = (source_root or Path(__file__).parent).resolve()\n    contract_path = root / \"dag_contract.json\"\n    requirements_path = root / \"english_requirements.json\"\n    evidence_path = root / \"artifacts\" / \"timings.jsonl\"\n    check_path = root / \"artifacts\" / \"flow-guarantees.json\"\n    certificate_path = root / \"artifacts\" / \"certificate.json\"\n    evidence_path.parent.mkdir(exist_ok=True)\n    evidence_path.unlink(missing_ok=True)\n\n    fingerprint = source_fingerprint(\n        root, exclude=[\"dag_contract.json\", \"english_requirements.json\"]\n    )\n    recorder = EvidenceRecorder(evidence_path)\n    measured: tuple[\n        tuple[\n            str,\n            str,\n            str,\n            str,\n            dict[str, int],\n            dict[str, int],\n            Callable[..., object],\n        ],\n        ...,\n    ] = (\n        (\"vote.preview\", \"interface\", \"VoteDelta\", \"PreviewTotal\", {}, {}, preview_vote_total),\n        (\n            \"vote.commit\",\n            \"ledger\",\n            \"VoteDelta\",\n            \"CommittedTotal\",\n            {},\n            {\"snapshot-work\": 1, \"summary-lag\": 1},\n            commit_vote_total,\n        ),\n        (\n            \"summary.advance\",\n            \"summarizer\",\n            \"Generation\",\n            \"SummaryGeneration\",\n            {\"summary-lag\": 1},\n            {},\n            advance_summary_generation,\n        ),\n        (\n            \"snapshot.render\",\n            \"renderer\",\n            \"VoteTotal\",\n            \"TextSnapshot\",\n            {\"snapshot-work\": 1},\n            {},\n            render_vote_snapshot,\n        ),\n    )\n    for task_id, worker_id, input_type, output_type, consumed, produced, operation in measured:\n        for sample_index in range(10):\n            started = perf_counter()\n            if task_id in {\"vote.preview\", \"vote.commit\"}:\n                result = operation(sample_index, 1)\n            else:\n                result = operation(sample_index)\n            elapsed_ms = (perf_counter() - started) * 1000\n            if result is None:\n                raise RuntimeError(f\"{task_id} did not produce its declared output\")\n            recorder.append(TimingSample(\n                task_id=task_id,\n                case=\"completion\",\n                value_ms=elapsed_ms,\n                worker_id=worker_id,\n                source_fingerprint=fingerprint,\n                recorded_at=time(),\n                observed_worker_concurrency=1,\n                observed_input_type=input_type,\n                observed_output_type=output_type,\n                resource_consumed=consumed,\n                resource_produced=produced,\n            ))\n\n    contract = load_contract(contract_path)\n    context = CheckContext(\n        contract=contract,\n        timings=load_evidence(evidence_path),\n        source_root=root,\n        source_fingerprint=fingerprint,\n        contract_sha256=sha256_file(contract_path),\n        evidence_sha256=sha256_file(evidence_path),\n        requirements=load_requirements(requirements_path),\n        requirements_sha256=sha256_file(requirements_path),\n    )\n    run_checker(\n        lambda current: check_flow_guarantees(\n            current,\n            supply=SupplyClaim(\n                \"snapshot.render\", \"service-envelope\", \"vote.commit\", \"cadence\", \"snapshot-work\"\n            ),\n            lag=LagClaim(\n                \"vote.commit\", \"cadence\", \"summary.advance\", \"service-envelope\", \"summary-lag\", 3\n            ),\n        ),\n        context,\n        check_path,\n    )\n    issue_certificate(\n        contract_path,\n        evidence_path,\n        certificate_path,\n        source_root=root,\n        requirements_path=requirements_path,\n        check_result_paths=[check_path],\n    )\n    verification = verify_certificate(\n        certificate_path,\n        contract_path=contract_path,\n        evidence_path=evidence_path,\n        requirements_path=requirements_path,\n        source_root=root,\n        check_result_paths=[check_path],\n    )\n    if not verification.valid:\n        raise RuntimeError(\"verification failed: \" + \"; \".join(verification.problems))\n    print(\"issued and verified the exact in-process application certificate\")\n    return 0\n\n\nif __name__ == \"__main__\":\n    raise SystemExit(main())\n"
+    },
+    "README.md": {
+      "sha256": "9ca30ae16006d6395331a5b72c4655349fb75a0fe148af1faa5a96d8be2766ed",
+      "encoding": "utf-8",
+      "content": "# Certified in-process vote example\n\nRun `py -m examples.certified_vote.certify` from the repository root. It measures the exact\nfunctions in `app.py`, derives conditional flow-model guarantees, issues a certificate, and\nverifies it.\n\nThe example deliberately claims only what it implements:\n\n- **responsiveness:** `preview_vote_total` is measured below 16ms and `commit_vote_total` below\n  50ms for the exact in-process workload;\n- **computational liveness:** every declared Python task implementation has successful completion\n  evidence;\n- **no structural blocked state:** the declared acyclic task/resource graph passes structural\n  progress under its printed assumptions;\n- **non-starvation:** the declared worker/resource/timing model has sufficient snapshot work after\n  warm-up under its explicit cadence and service-envelope assumptions;\n- **bounded lag:** the same conditional model has enough summary service capacity to stay within\n  its declared three-generation lag capacity.\n\nThis is not a browser, HTTP, database, external-model, or Comfy example, and neither its contract nor\nits English claims imply those boundaries. The cadence and service envelopes are explicit modeling\nassumptions, not measured production facts. No queue limit, timeout, rate limit, retry, rejection,\nor runtime restriction is added to make the certificate pass.\n\n`english_requirements.json` is the mandatory plain-English source of truth embedded in every\ncertificate. On explicit request, the optional audit reads that exact file: run its `prepare`\ncommand, give each generated claim prompt to a different fresh\n`gpt-5.6-luna` subagent with no conversation fork, save each response, and run `accept`. Claims are\nnever bundled into one worker. See `../../docs/REFERENCE_AUDIT.md` for the latest audit result.\n"
+    }
+  },
+  "analysis": {
+    "passed": true,
+    "conditional": true,
+    "assumptions": [
+      "timing:vote.commit/cadence (interval) is assumed > 100ms and < 200ms",
+      "timing:summary.advance/service-envelope (duration) is assumed > 80ms and < 200ms",
+      "timing:snapshot.render/service-envelope (duration) is assumed > 500ms and < 1000ms"
+    ],
+    "structural_progress": {
+      "passed": true,
+      "claim": "every declared task has a feasible worker/resource path and finite completion evidence",
+      "task_order": [
+        "vote.preview",
+        "vote.commit",
+        "snapshot.render",
+        "summary.advance"
+      ],
+      "assumptions": [
+        "declared resource effects match runtime acquisition and flow",
+        "reachable producer task types may recur until a resource reaches usable capacity",
+        "resource acquisition is atomic and scheduling is fair",
+        "timing:vote.commit/cadence (interval) is assumed > 100ms and < 200ms",
+        "timing:summary.advance/service-envelope (duration) is assumed > 80ms and < 200ms",
+        "timing:snapshot.render/service-envelope (duration) is assumed > 500ms and < 1000ms"
+      ]
+    },
+    "timings": [
+      {
+        "task_id": "vote.preview",
+        "case": "completion",
+        "metric": "duration",
+        "evidence": "measured",
+        "samples": 10,
+        "observed_min_ms": 0.000300002284348011,
+        "observed_upper_ms": 0.001500011421740055,
+        "certified_lower_ms": 0.000230770988,
+        "certified_upper_ms": 0.001950014848,
+        "required_lower_ms": null,
+        "required_upper_ms": 16.0,
+        "passed": true
+      },
+      {
+        "task_id": "vote.commit",
+        "case": "completion",
+        "metric": "duration",
+        "evidence": "measured",
+        "samples": 10,
+        "observed_min_ms": 0.000300002284348011,
+        "observed_upper_ms": 0.000700005330145359,
+        "certified_lower_ms": 0.000230770988,
+        "certified_upper_ms": 0.000910006929,
+        "required_lower_ms": null,
+        "required_upper_ms": 50.0,
+        "passed": true
+      },
+      {
+        "task_id": "vote.commit",
+        "case": "cadence",
+        "metric": "interval",
+        "evidence": "assumed",
+        "samples": 0,
+        "observed_min_ms": null,
+        "observed_upper_ms": null,
+        "certified_lower_ms": 100.0,
+        "certified_upper_ms": 200.0,
+        "required_lower_ms": 100.0,
+        "required_upper_ms": 200.0,
+        "passed": true
+      },
+      {
+        "task_id": "summary.advance",
+        "case": "completion",
+        "metric": "duration",
+        "evidence": "measured",
+        "samples": 10,
+        "observed_min_ms": 0.000200001522898674,
+        "observed_upper_ms": 0.00100000761449337,
+        "certified_lower_ms": 0.000153847325,
+        "certified_upper_ms": 0.001300009899,
+        "required_lower_ms": null,
+        "required_upper_ms": 50.0,
+        "passed": true
+      },
+      {
+        "task_id": "summary.advance",
+        "case": "service-envelope",
+        "metric": "duration",
+        "evidence": "assumed",
+        "samples": 0,
+        "observed_min_ms": null,
+        "observed_upper_ms": null,
+        "certified_lower_ms": 80.0,
+        "certified_upper_ms": 200.0,
+        "required_lower_ms": 80.0,
+        "required_upper_ms": 200.0,
+        "passed": true
+      },
+      {
+        "task_id": "snapshot.render",
+        "case": "completion",
+        "metric": "duration",
+        "evidence": "measured",
+        "samples": 10,
+        "observed_min_ms": 0.000400003045797348,
+        "observed_upper_ms": 0.001500011421740055,
+        "certified_lower_ms": 0.000307694651,
+        "certified_upper_ms": 0.001950014848,
+        "required_lower_ms": null,
+        "required_upper_ms": 50.0,
+        "passed": true
+      },
+      {
+        "task_id": "snapshot.render",
+        "case": "service-envelope",
+        "metric": "duration",
+        "evidence": "assumed",
+        "samples": 0,
+        "observed_min_ms": null,
+        "observed_upper_ms": null,
+        "certified_lower_ms": 500.0,
+        "certified_upper_ms": 1000.0,
+        "required_lower_ms": 500.0,
+        "required_upper_ms": 1000.0,
+        "passed": true
+      }
+    ],
+    "findings": []
+  },
+  "timing_evidence": [
+    {
+      "task_id": "vote.preview",
+      "case": "completion",
+      "value_ms": 0.001500011421740055,
+      "worker_id": "interface",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3324056,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteDelta",
+      "observed_output_type": "PreviewTotal",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "vote.preview",
+      "case": "completion",
+      "value_ms": 0.001500011421740055,
+      "worker_id": "interface",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.332659,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteDelta",
+      "observed_output_type": "PreviewTotal",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "vote.preview",
+      "case": "completion",
+      "value_ms": 0.000900006853044033,
+      "worker_id": "interface",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3341153,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteDelta",
+      "observed_output_type": "PreviewTotal",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "vote.preview",
+      "case": "completion",
+      "value_ms": 0.000700005330145359,
+      "worker_id": "interface",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3342345,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteDelta",
+      "observed_output_type": "PreviewTotal",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "vote.preview",
+      "case": "completion",
+      "value_ms": 0.000600004568696022,
+      "worker_id": "interface",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3343225,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteDelta",
+      "observed_output_type": "PreviewTotal",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "vote.preview",
+      "case": "completion",
+      "value_ms": 0.000500003807246685,
+      "worker_id": "interface",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3344064,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteDelta",
+      "observed_output_type": "PreviewTotal",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "vote.preview",
+      "case": "completion",
+      "value_ms": 0.000400003045797348,
+      "worker_id": "interface",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3344822,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteDelta",
+      "observed_output_type": "PreviewTotal",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "vote.preview",
+      "case": "completion",
+      "value_ms": 0.000300002284348011,
+      "worker_id": "interface",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3345556,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteDelta",
+      "observed_output_type": "PreviewTotal",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "vote.preview",
+      "case": "completion",
+      "value_ms": 0.000300002284348011,
+      "worker_id": "interface",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.334627,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteDelta",
+      "observed_output_type": "PreviewTotal",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "vote.preview",
+      "case": "completion",
+      "value_ms": 0.000500003807246685,
+      "worker_id": "interface",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3346984,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteDelta",
+      "observed_output_type": "PreviewTotal",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "vote.commit",
+      "case": "completion",
+      "value_ms": 0.000700005330145359,
+      "worker_id": "ledger",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.334786,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteDelta",
+      "observed_output_type": "CommittedTotal",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {
+        "snapshot-work": 1.0,
+        "summary-lag": 1.0
+      },
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "vote.commit",
+      "case": "completion",
+      "value_ms": 0.000600004568696022,
+      "worker_id": "ledger",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3348763,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteDelta",
+      "observed_output_type": "CommittedTotal",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {
+        "snapshot-work": 1.0,
+        "summary-lag": 1.0
+      },
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "vote.commit",
+      "case": "completion",
+      "value_ms": 0.000500003807246685,
+      "worker_id": "ledger",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3349552,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteDelta",
+      "observed_output_type": "CommittedTotal",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {
+        "snapshot-work": 1.0,
+        "summary-lag": 1.0
+      },
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "vote.commit",
+      "case": "completion",
+      "value_ms": 0.000300002284348011,
+      "worker_id": "ledger",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.335029,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteDelta",
+      "observed_output_type": "CommittedTotal",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {
+        "snapshot-work": 1.0,
+        "summary-lag": 1.0
+      },
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "vote.commit",
+      "case": "completion",
+      "value_ms": 0.000500003807246685,
+      "worker_id": "ledger",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3351,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteDelta",
+      "observed_output_type": "CommittedTotal",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {
+        "snapshot-work": 1.0,
+        "summary-lag": 1.0
+      },
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "vote.commit",
+      "case": "completion",
+      "value_ms": 0.000400003045797348,
+      "worker_id": "ledger",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3351705,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteDelta",
+      "observed_output_type": "CommittedTotal",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {
+        "snapshot-work": 1.0,
+        "summary-lag": 1.0
+      },
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "vote.commit",
+      "case": "completion",
+      "value_ms": 0.000400003045797348,
+      "worker_id": "ledger",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3352418,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteDelta",
+      "observed_output_type": "CommittedTotal",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {
+        "snapshot-work": 1.0,
+        "summary-lag": 1.0
+      },
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "vote.commit",
+      "case": "completion",
+      "value_ms": 0.000400003045797348,
+      "worker_id": "ledger",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3353188,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteDelta",
+      "observed_output_type": "CommittedTotal",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {
+        "snapshot-work": 1.0,
+        "summary-lag": 1.0
+      },
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "vote.commit",
+      "case": "completion",
+      "value_ms": 0.000400003045797348,
+      "worker_id": "ledger",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.335403,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteDelta",
+      "observed_output_type": "CommittedTotal",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {
+        "snapshot-work": 1.0,
+        "summary-lag": 1.0
+      },
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "vote.commit",
+      "case": "completion",
+      "value_ms": 0.000500003807246685,
+      "worker_id": "ledger",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3354843,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteDelta",
+      "observed_output_type": "CommittedTotal",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {
+        "snapshot-work": 1.0,
+        "summary-lag": 1.0
+      },
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "summary.advance",
+      "case": "completion",
+      "value_ms": 0.00100000761449337,
+      "worker_id": "summarizer",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3355587,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "Generation",
+      "observed_output_type": "SummaryGeneration",
+      "resource_acquired": {},
+      "resource_consumed": {
+        "summary-lag": 1.0
+      },
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "summary.advance",
+      "case": "completion",
+      "value_ms": 0.000900006853044033,
+      "worker_id": "summarizer",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3356326,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "Generation",
+      "observed_output_type": "SummaryGeneration",
+      "resource_acquired": {},
+      "resource_consumed": {
+        "summary-lag": 1.0
+      },
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "summary.advance",
+      "case": "completion",
+      "value_ms": 0.000300002284348011,
+      "worker_id": "summarizer",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3357053,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "Generation",
+      "observed_output_type": "SummaryGeneration",
+      "resource_acquired": {},
+      "resource_consumed": {
+        "summary-lag": 1.0
+      },
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "summary.advance",
+      "case": "completion",
+      "value_ms": 0.000400003045797348,
+      "worker_id": "summarizer",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.335777,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "Generation",
+      "observed_output_type": "SummaryGeneration",
+      "resource_acquired": {},
+      "resource_consumed": {
+        "summary-lag": 1.0
+      },
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "summary.advance",
+      "case": "completion",
+      "value_ms": 0.000200001522898674,
+      "worker_id": "summarizer",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.335856,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "Generation",
+      "observed_output_type": "SummaryGeneration",
+      "resource_acquired": {},
+      "resource_consumed": {
+        "summary-lag": 1.0
+      },
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "summary.advance",
+      "case": "completion",
+      "value_ms": 0.000200001522898674,
+      "worker_id": "summarizer",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.335927,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "Generation",
+      "observed_output_type": "SummaryGeneration",
+      "resource_acquired": {},
+      "resource_consumed": {
+        "summary-lag": 1.0
+      },
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "summary.advance",
+      "case": "completion",
+      "value_ms": 0.000300002284348011,
+      "worker_id": "summarizer",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3359976,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "Generation",
+      "observed_output_type": "SummaryGeneration",
+      "resource_acquired": {},
+      "resource_consumed": {
+        "summary-lag": 1.0
+      },
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "summary.advance",
+      "case": "completion",
+      "value_ms": 0.000400003045797348,
+      "worker_id": "summarizer",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3360767,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "Generation",
+      "observed_output_type": "SummaryGeneration",
+      "resource_acquired": {},
+      "resource_consumed": {
+        "summary-lag": 1.0
+      },
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "summary.advance",
+      "case": "completion",
+      "value_ms": 0.000200001522898674,
+      "worker_id": "summarizer",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3361545,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "Generation",
+      "observed_output_type": "SummaryGeneration",
+      "resource_acquired": {},
+      "resource_consumed": {
+        "summary-lag": 1.0
+      },
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "summary.advance",
+      "case": "completion",
+      "value_ms": 0.000300002284348011,
+      "worker_id": "summarizer",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.336225,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "Generation",
+      "observed_output_type": "SummaryGeneration",
+      "resource_acquired": {},
+      "resource_consumed": {
+        "summary-lag": 1.0
+      },
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "snapshot.render",
+      "case": "completion",
+      "value_ms": 0.001500011421740055,
+      "worker_id": "renderer",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3362968,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteTotal",
+      "observed_output_type": "TextSnapshot",
+      "resource_acquired": {},
+      "resource_consumed": {
+        "snapshot-work": 1.0
+      },
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "snapshot.render",
+      "case": "completion",
+      "value_ms": 0.000900006853044033,
+      "worker_id": "renderer",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3363702,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteTotal",
+      "observed_output_type": "TextSnapshot",
+      "resource_acquired": {},
+      "resource_consumed": {
+        "snapshot-work": 1.0
+      },
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "snapshot.render",
+      "case": "completion",
+      "value_ms": 0.000600004568696022,
+      "worker_id": "renderer",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3364413,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteTotal",
+      "observed_output_type": "TextSnapshot",
+      "resource_acquired": {},
+      "resource_consumed": {
+        "snapshot-work": 1.0
+      },
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "snapshot.render",
+      "case": "completion",
+      "value_ms": 0.000600004568696022,
+      "worker_id": "renderer",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3365114,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteTotal",
+      "observed_output_type": "TextSnapshot",
+      "resource_acquired": {},
+      "resource_consumed": {
+        "snapshot-work": 1.0
+      },
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "snapshot.render",
+      "case": "completion",
+      "value_ms": 0.000500003807246685,
+      "worker_id": "renderer",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3365824,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteTotal",
+      "observed_output_type": "TextSnapshot",
+      "resource_acquired": {},
+      "resource_consumed": {
+        "snapshot-work": 1.0
+      },
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "snapshot.render",
+      "case": "completion",
+      "value_ms": 0.000400003045797348,
+      "worker_id": "renderer",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.336651,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteTotal",
+      "observed_output_type": "TextSnapshot",
+      "resource_acquired": {},
+      "resource_consumed": {
+        "snapshot-work": 1.0
+      },
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "snapshot.render",
+      "case": "completion",
+      "value_ms": 0.000600004568696022,
+      "worker_id": "renderer",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3367329,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteTotal",
+      "observed_output_type": "TextSnapshot",
+      "resource_acquired": {},
+      "resource_consumed": {
+        "snapshot-work": 1.0
+      },
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "snapshot.render",
+      "case": "completion",
+      "value_ms": 0.000500003807246685,
+      "worker_id": "renderer",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3368092,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteTotal",
+      "observed_output_type": "TextSnapshot",
+      "resource_acquired": {},
+      "resource_consumed": {
+        "snapshot-work": 1.0
+      },
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "snapshot.render",
+      "case": "completion",
+      "value_ms": 0.000500003807246685,
+      "worker_id": "renderer",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.3368824,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteTotal",
+      "observed_output_type": "TextSnapshot",
+      "resource_acquired": {},
+      "resource_consumed": {
+        "snapshot-work": 1.0
+      },
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    },
+    {
+      "task_id": "snapshot.render",
+      "case": "completion",
+      "value_ms": 0.000500003807246685,
+      "worker_id": "renderer",
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "succeeded": true,
+      "recorded_at": 1787445497.336953,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "VoteTotal",
+      "observed_output_type": "TextSnapshot",
+      "resource_acquired": {},
+      "resource_consumed": {
+        "snapshot-work": 1.0
+      },
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {}
+    }
+  ],
+  "application_check_results": [
+    {
+      "schema": "dagcert-check-result/v2",
+      "checker": "example.flow-guarantees/v1",
+      "passed": true,
+      "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+      "contract_sha256": "640d1b3bbbb3702a6f2172b19e0c65b9bc665702d295d6310c7be64eab40689b",
+      "evidence_sha256": "73c813840a862e5c51950299216e0cf164b70618db730667f4083f9d554115b7",
+      "requirements_sha256": "f6a981cce5e5d0587462cf3aaab29b91cd48dbc0b6c762adebbaf90d93ba5576",
+      "primitive_refs": [
+        "resource:snapshot-work",
+        "resource:summary-lag",
+        "task:snapshot.render",
+        "task:summary.advance",
+        "task:vote.commit",
+        "timing:snapshot.render/service-envelope",
+        "timing:summary.advance/service-envelope",
+        "timing:vote.commit/cadence"
+      ],
+      "findings": [],
+      "facts": {
+        "conditional": true,
+        "assumptions": [
+          "timing:vote.commit/cadence (interval) is assumed > 100ms and < 200ms",
+          "timing:summary.advance/service-envelope (duration) is assumed > 80ms and < 200ms",
+          "timing:snapshot.render/service-envelope (duration) is assumed > 500ms and < 1000ms"
+        ],
+        "claims": [
+          "task:snapshot.render is not starved after warm-up",
+          "task:summary.advance remains at most 3 generations out of date",
+          "the declared DAG has no structurally blocked task"
+        ],
+        "supply": {
+          "task": "snapshot.render",
+          "minimum_supply_per_second": 5.0,
+          "maximum_consumption_per_second": 4.0,
+          "initial_work": 2.0,
+          "warm_start_required": 2.0,
+          "passed": true
+        },
+        "lag": {
+          "task": "summary.advance",
+          "maximum_generation_rate": 10.0,
+          "minimum_update_rate": 15.0,
+          "maximum_generations": 3,
+          "passed": true
+        }
+      }
+    }
+  ],
+  "contract": {
+    "workers": [
+      {
+        "id": "interface",
+        "concurrency": 1,
+        "metadata": {}
+      },
+      {
+        "id": "ledger",
+        "concurrency": 1,
+        "metadata": {}
+      },
+      {
+        "id": "summarizer",
+        "concurrency": 3,
+        "metadata": {}
+      },
+      {
+        "id": "renderer",
+        "concurrency": 2,
+        "metadata": {}
+      }
+    ],
+    "tasks": [
+      {
+        "id": "vote.preview",
+        "worker": "interface",
+        "input_type": "VoteDelta",
+        "output_type": "PreviewTotal",
+        "depends_on": [],
+        "resources": {},
+        "timings": {
+          "completion": {
+            "metric": "duration",
+            "upper_ms": 16.0,
+            "lower_ms": null,
+            "evidence": "measured",
+            "minimum_samples": 10,
+            "policy": "max",
+            "percentile": null,
+            "safety_factor": 1.3
+          }
+        },
+        "metadata": {}
+      },
+      {
+        "id": "vote.commit",
+        "worker": "ledger",
+        "input_type": "VoteDelta",
+        "output_type": "CommittedTotal",
+        "depends_on": [
+          "vote.preview"
+        ],
+        "resources": {
+          "snapshot-work": {
+            "acquire": 0.0,
+            "consume": 0.0,
+            "produce": 1.0
+          },
+          "summary-lag": {
+            "acquire": 0.0,
+            "consume": 0.0,
+            "produce": 1.0
+          }
+        },
+        "timings": {
+          "completion": {
+            "metric": "duration",
+            "upper_ms": 50.0,
+            "lower_ms": null,
+            "evidence": "measured",
+            "minimum_samples": 10,
+            "policy": "max",
+            "percentile": null,
+            "safety_factor": 1.3
+          },
+          "cadence": {
+            "metric": "interval",
+            "upper_ms": 200.0,
+            "lower_ms": 100.0,
+            "evidence": "assumed",
+            "minimum_samples": 0,
+            "policy": "max",
+            "percentile": null,
+            "safety_factor": 1.3
+          }
+        },
+        "metadata": {}
+      },
+      {
+        "id": "summary.advance",
+        "worker": "summarizer",
+        "input_type": "Generation",
+        "output_type": "SummaryGeneration",
+        "depends_on": [
+          "vote.commit"
+        ],
+        "resources": {
+          "summary-lag": {
+            "acquire": 0.0,
+            "consume": 1.0,
+            "produce": 0.0
+          }
+        },
+        "timings": {
+          "completion": {
+            "metric": "duration",
+            "upper_ms": 50.0,
+            "lower_ms": null,
+            "evidence": "measured",
+            "minimum_samples": 10,
+            "policy": "max",
+            "percentile": null,
+            "safety_factor": 1.3
+          },
+          "service-envelope": {
+            "metric": "duration",
+            "upper_ms": 200.0,
+            "lower_ms": 80.0,
+            "evidence": "assumed",
+            "minimum_samples": 0,
+            "policy": "max",
+            "percentile": null,
+            "safety_factor": 1.3
+          }
+        },
+        "metadata": {}
+      },
+      {
+        "id": "snapshot.render",
+        "worker": "renderer",
+        "input_type": "VoteTotal",
+        "output_type": "TextSnapshot",
+        "depends_on": [
+          "vote.commit"
+        ],
+        "resources": {
+          "snapshot-work": {
+            "acquire": 0.0,
+            "consume": 1.0,
+            "produce": 0.0
+          }
+        },
+        "timings": {
+          "completion": {
+            "metric": "duration",
+            "upper_ms": 50.0,
+            "lower_ms": null,
+            "evidence": "measured",
+            "minimum_samples": 10,
+            "policy": "max",
+            "percentile": null,
+            "safety_factor": 1.3
+          },
+          "service-envelope": {
+            "metric": "duration",
+            "upper_ms": 1000.0,
+            "lower_ms": 500.0,
+            "evidence": "assumed",
+            "minimum_samples": 0,
+            "policy": "max",
+            "percentile": null,
+            "safety_factor": 1.3
+          }
+        },
+        "metadata": {}
+      }
+    ],
+    "resources": [
+      {
+        "id": "snapshot-work",
+        "capacity": 10.0,
+        "initial": 2.0,
+        "unit": "snapshots",
+        "metadata": {}
+      },
+      {
+        "id": "summary-lag",
+        "capacity": 3.0,
+        "initial": 0.0,
+        "unit": "generations",
+        "metadata": {}
+      }
+    ]
+  },
+  "english_requirements": {
+    "schema": "dagcert-english-requirements/v1",
+    "claims": [
+      {
+        "id": "completion-and-structural-progress",
+        "statement": "Each declared task's exact in-process Python implementation has ten successful completion samples, and the declared task/resource graph has no structural blocked state under its explicit scheduling assumptions.",
+        "primitive_refs": [
+          "task:vote.preview",
+          "task:vote.commit",
+          "task:summary.advance",
+          "task:snapshot.render",
+          "timing:vote.preview/completion",
+          "timing:vote.commit/completion",
+          "timing:summary.advance/completion",
+          "timing:snapshot.render/completion"
+        ],
+        "checker_refs": [],
+        "assumptions": [
+          "Declared resource effects match runtime behavior, acquisition is atomic, and scheduling is fair."
+        ]
+      },
+      {
+        "id": "in-process-responsiveness",
+        "statement": "For the measured exact-source in-process workload, preview_vote_total completes in less than 16ms and commit_vote_total completes in less than 50ms; this claim makes no browser, network, or persistence promise.",
+        "primitive_refs": [
+          "timing:vote.preview/completion",
+          "timing:vote.commit/completion"
+        ],
+        "checker_refs": [],
+        "assumptions": []
+      },
+      {
+        "id": "snapshot-non-starvation",
+        "statement": "In the declared conditional flow model, assuming vote.commit recurs between 100ms and 200ms and snapshot.render occupies a renderer for between 500ms and 1000ms, two renderer workers have sufficient snapshot-work after warm-up from two initial units.",
+        "primitive_refs": [
+          "worker:renderer",
+          "task:vote.commit",
+          "task:snapshot.render",
+          "resource:snapshot-work",
+          "timing:vote.commit/cadence",
+          "timing:snapshot.render/service-envelope"
+        ],
+        "checker_refs": [
+          "example.flow-guarantees/v1"
+        ],
+        "assumptions": [
+          "vote.commit recurs between 100 ms and 200 ms.",
+          "snapshot.render service duration remains between 500 ms and 1000 ms."
+        ]
+      },
+      {
+        "id": "bounded-summary-lag",
+        "statement": "In the declared conditional flow model, assuming the stated vote.commit cadence and summary.advance service envelope, three summarizer workers provide enough modeled service capacity to keep summary-lag at or below its declared three-generation capacity.",
+        "primitive_refs": [
+          "worker:summarizer",
+          "task:vote.commit",
+          "task:summary.advance",
+          "resource:summary-lag",
+          "timing:vote.commit/cadence",
+          "timing:summary.advance/service-envelope"
+        ],
+        "checker_refs": [
+          "example.flow-guarantees/v1"
+        ],
+        "assumptions": [
+          "The declared vote.commit cadence and summary.advance service envelope hold."
+        ]
+      }
+    ],
+    "metadata": {
+      "purpose": "Mandatory plain-English promises for the certified vote reference application."
+    }
+  }
+}

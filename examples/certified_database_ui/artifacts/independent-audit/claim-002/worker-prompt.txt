@@ -1,0 +1,2315 @@
+You are an independent senior software engineer auditing exactly one Dagcert claim.
+This is not a rubber-stamp exercise. Audit the supplied implementation, formal
+contract, timing evidence, deterministic analysis, assumptions, and English
+promise together.
+
+RULE 0
+
+The purpose of certification is to make the application provide a better
+real-world user experience, never to make it worse merely so a certificate
+passes.
+
+Look specifically for arbitrary finite queues, queue limits, rate limits,
+timeouts, cancellation, retries, debounce, serialization, rejection paths,
+reduced concurrency, resource caps, fake fast paths, mocked work, or altered
+product behavior introduced to satisfy a check. Treat a test-shaped
+implementation, measurement of a trivial stand-in instead of the promised
+operation, or evidence that bypasses real boundaries as a serious risk.
+
+Required review
+
+1. Read every relevant UTF-8 file in `source_files` and name it in
+   `reviewed_files`.
+2. Trace the actual implementation paths relevant to this claim. Compare them
+   with the declared workers, tasks, resources, types, dependencies, and
+   timings.
+3. Decide whether the evidence exercises the real user-visible or backend
+   operation being promised. Check relevant concurrency, failure, blocking,
+   and state-transition paths. A timed helper or stand-in is not evidence for
+   an HTTP, browser, database, model, or queue boundary that it does not cross.
+4. Distinguish measured facts from assumptions. Explain exactly how every
+   relevant assumption limits the English promise.
+5. Do not mistake a declared resource capacity for evidence that the code
+   enforces that capacity or handles saturation safely.
+6. Inspect for code that is overly fitted to passing the certificate: trivial
+   functions, synthetic timing loops, unreachable checks, omitted slow paths,
+   hand-authored evidence, or declarations that do not match runtime behavior.
+7. Assess engineering quality and best practices where they affect the claim:
+   error handling, state consistency, race safety, atomicity, observability,
+   realistic workload coverage, and preservation of existing product behavior.
+8. Explain concrete strengths as well as weaknesses. Recommend practical,
+   prioritized improvements and state their user-experience impact. Do not
+   recommend restrictions merely because they make a proof easier.
+
+Verdict rules
+
+- `passed` answers only whether this one English claim is faithfully and
+  completely entailed for the supplied exact source, evidence, and explicit
+  assumptions. It never means that the whole app is production-ready.
+- A claim may pass while the implementation still has weaknesses. Put
+  non-invalidating concerns in `weaknesses`, `test_fitting_risks`,
+  `evidence_gaps`, and `improvements`.
+- Put an issue in `findings` and set `passed` to false when the promise is not
+  fully entailed, evidence measures a substitute rather than the promised
+  behavior, a required assumption is hidden, relevant source cannot be
+  reviewed, or uncertainty prevents a defensible conclusion.
+- Do not infer unstated behavior. Do not manufacture praise or criticism.
+- Do not edit files or implement fixes.
+
+Response quality
+
+Write a genuinely detailed assessment. `summary`, `claim_reasoning`, and
+`rule0_assessment` must each be at least 200 characters and cite concrete
+supplied evidence. Each observation must identify its subject, supporting
+evidence, and user or engineering impact. Each improvement must have a
+priority, recommendation, and rationale. Empty review arrays are allowed only
+when there is honestly nothing in that category.
+
+Return only one JSON object conforming exactly to the response schema. Copy
+`audit_packet_sha256` exactly.
+
+audit_packet_sha256:
+25dff0e3984bf9fb35af686b8331043a6ec47989aa0315657adf39e5f4c01782
+
+response_schema:
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "audit_packet_sha256",
+    "passed",
+    "summary",
+    "claim_reasoning",
+    "rule0_assessment",
+    "reviewed_files",
+    "strengths",
+    "weaknesses",
+    "improvements",
+    "test_fitting_risks",
+    "evidence_gaps",
+    "findings"
+  ],
+  "properties": {
+    "audit_packet_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "passed": {
+      "type": "boolean"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 200
+    },
+    "claim_reasoning": {
+      "type": "string",
+      "minLength": 200
+    },
+    "rule0_assessment": {
+      "type": "string",
+      "minLength": 200
+    },
+    "reviewed_files": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "strengths": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/observation"
+      }
+    },
+    "weaknesses": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/observation"
+      }
+    },
+    "improvements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "priority",
+          "subject",
+          "recommendation",
+          "rationale"
+        ],
+        "properties": {
+          "priority": {
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1
+          },
+          "recommendation": {
+            "type": "string",
+            "minLength": 1
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "test_fitting_risks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/observation"
+      }
+    },
+    "evidence_gaps": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/observation"
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "subject",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subject",
+        "evidence",
+        "impact"
+      ],
+      "properties": {
+        "subject": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1
+        },
+        "impact": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}
+
+audit_packet:
+{
+  "schema": "dagcert-semantic-audit-packet/v3",
+  "claim_index": 2,
+  "claim": {
+    "id": "browser-insertion",
+    "statement": "For the exact certified source and exercised SQLite dataset, submitting the real browser form provides the measured immediate DOM feedback, crosses the real HTTP and SQLite insertion path, and then displays the newly committed row in the exact sorted page projection; the insertion and feedback tasks satisfy their declared deadlines for the sequential reference workload.",
+    "primitive_refs": [
+      "task:items.insert",
+      "task:items.list",
+      "task:ui.feedback",
+      "task:ui.render",
+      "timing:items.insert/http",
+      "timing:ui.feedback/visible",
+      "timing:ui.render/visible"
+    ],
+    "checker_refs": [
+      "example.database-ui.insertion-projection/v1"
+    ],
+    "assumptions": [
+      "The guarantee is limited to successful operations in the exercised SQLite dataset and sequential reference workload."
+    ]
+  },
+  "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+  "contract_sha256": "5962419cfcbfdb2175522c6c825cb824dda73f705b6b53712b19ab0a1737dd0b",
+  "evidence_sha256": "adfa038083c116fb78008a9ba03a677b55837cc647ece2ad0b1246f93676f2bc",
+  "requirements_sha256": "f612140a6b7ec6f2caf3bc4d5e44ea2b3be709487aeb6691271220df97cb45a5",
+  "source_manifest": {
+    ".dagcertignore": "6c825b6dee061147f2c232f2d81e2a03e6ecec598ce5e55d0395e5c2a218bace",
+    "__init__.py": "c84967ca16138c12e2ffcbfea1fb7c7d1cc1bd4d556e409118c9244061ccd5a0",
+    "app.py": "8190fae8076fb7643c9efbc6de86b9834b4dc78a3a7833feb7e98d760a06e958",
+    "certify.py": "7492e8d493db5579f8ee892f6c051b841fcf665c9e70790b8909d36376f5b339",
+    "README.md": "ea61919b389d9cd3e566b7ff3e8c9e10ac2f157545437750e720ba9ad9164cfd",
+    "static/app.js": "5b44e028ed7bcd82798858374f5568a71613fb91541433acd17fce36abcb9828",
+    "static/index.html": "bcb965b72a3a0e9e292f3d4dd5ae826a6dc8e6bf52f7755588514667e81e8618",
+    "static/style.css": "87130fcb54eb4b2b2bf5fd9f34c1d3f87416f131427e30e9a4b34fcf500407f5"
+  },
+  "source_files": {
+    ".dagcertignore": {
+      "sha256": "6c825b6dee061147f2c232f2d81e2a03e6ecec598ce5e55d0395e5c2a218bace",
+      "encoding": "utf-8",
+      "content": "app.sqlite3\n"
+    },
+    "__init__.py": {
+      "sha256": "c84967ca16138c12e2ffcbfea1fb7c7d1cc1bd4d556e409118c9244061ccd5a0",
+      "encoding": "utf-8",
+      "content": "\"\"\"Certified SQLite-to-browser reference application.\"\"\"\n"
+    },
+    "app.py": {
+      "sha256": "8190fae8076fb7643c9efbc6de86b9834b4dc78a3a7833feb7e98d760a06e958",
+      "encoding": "utf-8",
+      "content": "\"\"\"Small real SQLite-backed HTTP application used by the reference certificate.\"\"\"\n\nfrom __future__ import annotations\n\nfrom http import HTTPStatus\nfrom http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\nfrom pathlib import Path\nfrom typing import Any\nfrom urllib.parse import parse_qs, urlparse\nimport argparse\nimport json\nimport sqlite3\n\n\nSTATIC_DIRECTORY = Path(__file__).with_name(\"static\")\nSORT_COLUMNS = {\"title\": \"title\", \"category\": \"category\", \"created\": \"id\"}\nSEED_ITEMS = (\n    (\"Atlas\", \"reference\"),\n    (\"Beacon\", \"active\"),\n    (\"Cedar\", \"archive\"),\n    (\"Delta\", \"active\"),\n    (\"Ember\", \"reference\"),\n    (\"Fjord\", \"archive\"),\n    (\"Grove\", \"active\"),\n)\n\n\ndef initialize_database(path: str | Path, *, reset: bool = False) -> None:\n    database = Path(path)\n    database.parent.mkdir(parents=True, exist_ok=True)\n    if reset:\n        database.unlink(missing_ok=True)\n    with sqlite3.connect(database) as connection:\n        connection.execute(\n            \"\"\"\n            CREATE TABLE IF NOT EXISTS items (\n                id INTEGER PRIMARY KEY AUTOINCREMENT,\n                title TEXT NOT NULL,\n                category TEXT NOT NULL\n            )\n            \"\"\"\n        )\n        count = int(connection.execute(\"SELECT COUNT(*) FROM items\").fetchone()[0])\n        if count == 0:\n            connection.executemany(\n                \"INSERT INTO items (title, category) VALUES (?, ?)\",\n                SEED_ITEMS,\n            )\n\n\ndef list_items(\n    path: str | Path,\n    *,\n    page: int,\n    page_size: int,\n    sort: str,\n    direction: str,\n) -> dict[str, Any]:\n    if page < 1 or page_size < 1:\n        raise ValueError(\"page and page_size must be positive\")\n    if sort not in SORT_COLUMNS or direction not in {\"asc\", \"desc\"}:\n        raise ValueError(\"unsupported sort or direction\")\n    order_column = SORT_COLUMNS[sort]\n    order_direction = direction.upper()\n    offset = (page - 1) * page_size\n    with sqlite3.connect(path) as connection:\n        connection.row_factory = sqlite3.Row\n        total = int(connection.execute(\"SELECT COUNT(*) FROM items\").fetchone()[0])\n        rows = connection.execute(\n            f\"\"\"\n            SELECT id, title, category\n            FROM items\n            ORDER BY {order_column} {order_direction}, id {order_direction}\n            LIMIT ? OFFSET ?\n            \"\"\",\n            (page_size, offset),\n        ).fetchall()\n    return {\n        \"items\": [dict(row) for row in rows],\n        \"page\": page,\n        \"page_size\": page_size,\n        \"total\": total,\n        \"has_previous\": page > 1,\n        \"has_next\": offset + len(rows) < total,\n        \"sort\": sort,\n        \"direction\": direction,\n    }\n\n\ndef insert_item(path: str | Path, *, title: str, category: str) -> dict[str, Any]:\n    normalized_title = title.strip()\n    normalized_category = category.strip()\n    if not normalized_title or not normalized_category:\n        raise ValueError(\"title and category are required\")\n    with sqlite3.connect(path) as connection:\n        cursor = connection.execute(\n            \"INSERT INTO items (title, category) VALUES (?, ?)\",\n            (normalized_title, normalized_category),\n        )\n        identifier = int(cursor.lastrowid)\n    return {\"id\": identifier, \"title\": normalized_title, \"category\": normalized_category}\n\n\ndef delete_item(path: str | Path, identifier: int) -> bool:\n    with sqlite3.connect(path) as connection:\n        cursor = connection.execute(\"DELETE FROM items WHERE id = ?\", (identifier,))\n    return cursor.rowcount == 1\n\n\nclass ApplicationServer(ThreadingHTTPServer):\n    database_path: Path\n\n\nclass ApplicationHandler(BaseHTTPRequestHandler):\n    server: ApplicationServer\n\n    def do_GET(self) -> None:\n        parsed = urlparse(self.path)\n        if parsed.path == \"/api/items\":\n            self._list(parse_qs(parsed.query))\n            return\n        static_files = {\n            \"/\": (\"index.html\", \"text/html; charset=utf-8\"),\n            \"/app.js\": (\"app.js\", \"text/javascript; charset=utf-8\"),\n            \"/style.css\": (\"style.css\", \"text/css; charset=utf-8\"),\n        }\n        if parsed.path in static_files:\n            filename, content_type = static_files[parsed.path]\n            self._bytes(HTTPStatus.OK, (STATIC_DIRECTORY / filename).read_bytes(), content_type)\n            return\n        self._json(HTTPStatus.NOT_FOUND, {\"error\": \"not found\"})\n\n    def do_POST(self) -> None:\n        if urlparse(self.path).path != \"/api/items\":\n            self._json(HTTPStatus.NOT_FOUND, {\"error\": \"not found\"})\n            return\n        try:\n            payload = self._request_json()\n            item = insert_item(\n                self.server.database_path,\n                title=str(payload.get(\"title\", \"\")),\n                category=str(payload.get(\"category\", \"\")),\n            )\n        except (ValueError, json.JSONDecodeError) as exc:\n            self._json(HTTPStatus.BAD_REQUEST, {\"error\": str(exc)})\n            return\n        self._json(HTTPStatus.CREATED, item)\n\n    def do_DELETE(self) -> None:\n        segments = urlparse(self.path).path.strip(\"/\").split(\"/\")\n        if len(segments) != 3 or segments[:2] != [\"api\", \"items\"]:\n            self._json(HTTPStatus.NOT_FOUND, {\"error\": \"not found\"})\n            return\n        try:\n            identifier = int(segments[2])\n        except ValueError:\n            self._json(HTTPStatus.BAD_REQUEST, {\"error\": \"item ID must be an integer\"})\n            return\n        if not delete_item(self.server.database_path, identifier):\n            self._json(HTTPStatus.NOT_FOUND, {\"error\": \"item not found\"})\n            return\n        self._json(HTTPStatus.OK, {\"deleted\": identifier})\n\n    def log_message(self, format: str, *args: object) -> None:\n        return\n\n    def _list(self, query: dict[str, list[str]]) -> None:\n        try:\n            result = list_items(\n                self.server.database_path,\n                page=int(query.get(\"page\", [\"1\"])[0]),\n                page_size=int(query.get(\"page_size\", [\"3\"])[0]),\n                sort=query.get(\"sort\", [\"title\"])[0],\n                direction=query.get(\"direction\", [\"asc\"])[0],\n            )\n        except (ValueError, IndexError) as exc:\n            self._json(HTTPStatus.BAD_REQUEST, {\"error\": str(exc)})\n            return\n        self._json(HTTPStatus.OK, result)\n\n    def _request_json(self) -> dict[str, Any]:\n        length = int(self.headers.get(\"Content-Length\", \"0\"))\n        value = json.loads(self.rfile.read(length).decode(\"utf-8\"))\n        if not isinstance(value, dict):\n            raise ValueError(\"request body must be an object\")\n        return value\n\n    def _json(self, status: HTTPStatus, value: dict[str, Any]) -> None:\n        self._bytes(\n            status,\n            json.dumps(value, ensure_ascii=False, separators=(\",\", \":\")).encode(\"utf-8\"),\n            \"application/json; charset=utf-8\",\n        )\n\n    def _bytes(self, status: HTTPStatus, content: bytes, content_type: str) -> None:\n        self.send_response(status)\n        self.send_header(\"Content-Type\", content_type)\n        self.send_header(\"Content-Length\", str(len(content)))\n        self.send_header(\"Cache-Control\", \"no-store\")\n        self.end_headers()\n        self.wfile.write(content)\n\n\ndef create_server(database_path: str | Path, *, port: int = 0) -> ApplicationServer:\n    initialize_database(database_path)\n    server = ApplicationServer((\"127.0.0.1\", port), ApplicationHandler)\n    server.database_path = Path(database_path)\n    return server\n\n\ndef main() -> int:\n    parser = argparse.ArgumentParser(description=\"Run the certified database/UI example\")\n    parser.add_argument(\"--database\", default=str(Path(__file__).with_name(\"app.sqlite3\")))\n    parser.add_argument(\"--port\", type=int, default=8766)\n    parser.add_argument(\"--reset\", action=\"store_true\")\n    args = parser.parse_args()\n    initialize_database(args.database, reset=args.reset)\n    server = create_server(args.database, port=args.port)\n    print(f\"serving http://127.0.0.1:{server.server_port}\", flush=True)\n    try:\n        server.serve_forever()\n    except KeyboardInterrupt:\n        pass\n    finally:\n        server.server_close()\n    return 0\n\n\nif __name__ == \"__main__\":\n    raise SystemExit(main())\n"
+    },
+    "certify.py": {
+      "sha256": "7492e8d493db5579f8ee892f6c051b841fcf665c9e70790b8909d36376f5b339",
+      "encoding": "utf-8",
+      "content": "\"\"\"Collect real evidence and issue the certified database-to-UI example.\"\"\"\n\nfrom __future__ import annotations\n\nfrom argparse import ArgumentParser\nfrom pathlib import Path\nfrom threading import Thread\nfrom time import perf_counter, time\nfrom typing import Any\nfrom urllib.request import Request, urlopen\nimport json\n\nfrom dagcert import (\n    CheckContext,\n    EvidenceRecorder,\n    TimingSample,\n    analyze_contract,\n    issue_certificate,\n    load_contract,\n    load_evidence,\n    load_requirements,\n    run_checker,\n    sha256_file,\n    source_fingerprint,\n    verify_certificate,\n)\nfrom examples.optional_browser_checker import (\n    ProjectionCase,\n    check_exact_projection_cases,\n    observe_dom_projection,\n    read_sql_projection,\n)\nfrom examples.stats_viewer.screenshot import open_browser\nfrom selenium.webdriver.common.by import By\nfrom selenium.webdriver.support.ui import Select, WebDriverWait\n\nfrom .app import create_server, initialize_database\n\n\nPROJECTION_RESULTS = (\n    \"browse-projection.json\",\n    \"insertion-projection.json\",\n    \"deletion-projection.json\",\n)\nEXPECTED_SORT_COLUMNS = {\"title\": \"title\", \"category\": \"category\", \"created\": \"id\"}\n\n\ndef request_json(\n    base_url: str,\n    path: str,\n    *,\n    method: str = \"GET\",\n    payload: dict[str, Any] | None = None,\n) -> tuple[dict[str, Any], float]:\n    body = None if payload is None else json.dumps(payload).encode(\"utf-8\")\n    request = Request(\n        base_url + path,\n        data=body,\n        method=method,\n        headers={\"Content-Type\": \"application/json\"} if body is not None else {},\n    )\n    started = perf_counter()\n    with urlopen(request) as response:\n        result = json.loads(response.read().decode(\"utf-8\"))\n    elapsed_ms = (perf_counter() - started) * 1000\n    if not isinstance(result, dict):\n        raise RuntimeError(\"HTTP endpoint returned a non-object JSON value\")\n    return result, elapsed_ms\n\n\ndef expected_projection(\n    database: Path,\n    *,\n    page: int,\n    page_size: int,\n    sort: str,\n    direction: str,\n):\n    column = EXPECTED_SORT_COLUMNS[sort]\n    sql_direction = direction.upper()\n    return read_sql_projection(\n        database,\n        query=f\"\"\"\n            SELECT id AS row_key, title, category\n            FROM items\n            ORDER BY {column} {sql_direction}, id {sql_direction}\n            LIMIT ? OFFSET ?\n        \"\"\",\n        key_column=\"row_key\",\n        field_columns=(\"title\", \"category\"),\n        parameters=(page_size, (page - 1) * page_size),\n    )\n\n\ndef observed_projection(browser: Any):\n    return observe_dom_projection(\n        browser,\n        row_selector=\"[data-item-row]\",\n        key_attribute=\"data-row-key\",\n        field_selectors={\n            \"title\": \"[data-field='title']\",\n            \"category\": \"[data-field='category']\",\n        },\n    )\n\n\ndef wait_for_next_load(browser: Any, previous_version: int) -> None:\n    WebDriverWait(browser, 5).until(\n        lambda current: int(current.find_element(By.TAG_NAME, \"body\").get_attribute(\"data-load-version\") or 0)\n        > previous_version\n    )\n\n\ndef load_version(browser: Any) -> int:\n    return int(browser.find_element(By.TAG_NAME, \"body\").get_attribute(\"data-load-version\") or 0)\n\n\ndef capture_case(\n    browser: Any,\n    database: Path,\n    name: str,\n    *,\n    page: int,\n    sort: str,\n    direction: str,\n) -> ProjectionCase:\n    return ProjectionCase(\n        name=name,\n        expected=expected_projection(\n            database,\n            page=page,\n            page_size=3,\n            sort=sort,\n            direction=direction,\n        ),\n        observed=observed_projection(browser),\n        require_order=True,\n    )\n\n\ndef record_http_evidence(\n    recorder: EvidenceRecorder,\n    fingerprint: str,\n    base_url: str,\n) -> None:\n    for index in range(12):\n        direction = \"asc\" if index % 2 == 0 else \"desc\"\n        sort = (\"title\", \"category\", \"created\")[index % 3]\n        _, elapsed = request_json(\n            base_url,\n            f\"/api/items?page={(index % 3) + 1}&page_size=3&sort={sort}&direction={direction}\",\n        )\n        recorder.append(TimingSample(\n            task_id=\"items.list\",\n            case=\"http\",\n            value_ms=elapsed,\n            worker_id=\"http-server\",\n            source_fingerprint=fingerprint,\n            recorded_at=time(),\n            observed_worker_concurrency=1,\n            observed_input_type=\"ItemPageQuery\",\n            observed_output_type=\"ItemPage\",\n            metadata={\"boundary\": \"HTTP+SQLite+JSON\", \"sample\": index},\n        ))\n\n    inserted_ids: list[int] = []\n    for index in range(10):\n        result, elapsed = request_json(\n            base_url,\n            \"/api/items\",\n            method=\"POST\",\n            payload={\"title\": f\"Timing item {index:02d}\", \"category\": \"timing\"},\n        )\n        inserted_ids.append(int(result[\"id\"]))\n        recorder.append(TimingSample(\n            task_id=\"items.insert\",\n            case=\"http\",\n            value_ms=elapsed,\n            worker_id=\"http-server\",\n            source_fingerprint=fingerprint,\n            recorded_at=time(),\n            observed_worker_concurrency=1,\n            observed_input_type=\"NewItem\",\n            observed_output_type=\"StoredItem\",\n            metadata={\"boundary\": \"HTTP+SQLite commit+JSON\", \"sample\": index},\n        ))\n\n    for index, identifier in enumerate(inserted_ids):\n        result, elapsed = request_json(\n            base_url,\n            f\"/api/items/{identifier}\",\n            method=\"DELETE\",\n        )\n        if int(result[\"deleted\"]) != identifier:\n            raise RuntimeError(\"delete endpoint acknowledged the wrong item\")\n        recorder.append(TimingSample(\n            task_id=\"items.delete\",\n            case=\"http\",\n            value_ms=elapsed,\n            worker_id=\"http-server\",\n            source_fingerprint=fingerprint,\n            recorded_at=time(),\n            observed_worker_concurrency=1,\n            observed_input_type=\"ItemId\",\n            observed_output_type=\"DeletionResult\",\n            metadata={\"boundary\": \"HTTP+SQLite commit+JSON\", \"sample\": index},\n        ))\n\n\ndef exercise_browser(base_url: str, database: Path, screenshot: Path):\n    browser = open_browser()\n    browse_cases: list[ProjectionCase] = []\n    insert_cases: list[ProjectionCase] = []\n    delete_cases: list[ProjectionCase] = []\n    try:\n        browser.set_window_size(1280, 900)\n        browser.get(base_url)\n        wait_for_next_load(browser, 0)\n        browse_cases.append(capture_case(\n            browser, database, \"initial-title-ascending\", page=1, sort=\"title\", direction=\"asc\"\n        ))\n\n        version = load_version(browser)\n        browser.find_element(By.ID, \"sort-direction\").click()\n        wait_for_next_load(browser, version)\n        browse_cases.append(capture_case(\n            browser, database, \"title-descending\", page=1, sort=\"title\", direction=\"desc\"\n        ))\n\n        version = load_version(browser)\n        browser.find_element(By.ID, \"next-page\").click()\n        wait_for_next_load(browser, version)\n        browse_cases.append(capture_case(\n            browser, database, \"next-page\", page=2, sort=\"title\", direction=\"desc\"\n        ))\n\n        version = load_version(browser)\n        browser.find_element(By.ID, \"previous-page\").click()\n        wait_for_next_load(browser, version)\n        browse_cases.append(capture_case(\n            browser, database, \"previous-page\", page=1, sort=\"title\", direction=\"desc\"\n        ))\n\n        direction = \"desc\"\n        for sort in (\"category\", \"created\"):\n            version = load_version(browser)\n            Select(browser.find_element(By.ID, \"sort-field\")).select_by_value(sort)\n            wait_for_next_load(browser, version)\n            browse_cases.append(capture_case(\n                browser, database, f\"{sort}-{direction}\", page=1, sort=sort, direction=direction\n            ))\n\n            version = load_version(browser)\n            browser.find_element(By.ID, \"sort-direction\").click()\n            wait_for_next_load(browser, version)\n            direction = \"asc\" if direction == \"desc\" else \"desc\"\n            browse_cases.append(capture_case(\n                browser, database, f\"{sort}-{direction}\", page=1, sort=sort, direction=direction\n            ))\n\n        version = load_version(browser)\n        Select(browser.find_element(By.ID, \"sort-field\")).select_by_value(\"title\")\n        wait_for_next_load(browser, version)\n\n        for index in range(5):\n            title = f\"Zulu browser {index:02d}\"\n            browser.find_element(By.ID, \"title\").send_keys(title)\n            browser.find_element(By.ID, \"category\").send_keys(\"browser\")\n            version = load_version(browser)\n            browser.find_element(By.CSS_SELECTOR, \"#add-form button[type='submit']\").click()\n            wait_for_next_load(browser, version)\n            inserted = capture_case(\n                browser,\n                database,\n                f\"insert-{index:02d}\",\n                page=1,\n                sort=\"title\",\n                direction=\"desc\",\n            )\n            insert_cases.append(inserted)\n            inserted_id = next(\n                row.key for row in inserted.observed if row.fields.get(\"title\") == title\n            )\n\n            version = load_version(browser)\n            browser.find_element(By.CSS_SELECTOR, f\"[data-delete-id='{inserted_id}']\").click()\n            wait_for_next_load(browser, version)\n            delete_cases.append(capture_case(\n                browser,\n                database,\n                f\"delete-{index:02d}\",\n                page=1,\n                sort=\"title\",\n                direction=\"desc\",\n            ))\n\n        screenshot.parent.mkdir(parents=True, exist_ok=True)\n        height = max(\n            900,\n            int(browser.execute_script(\"return document.documentElement.scrollHeight\")),\n        )\n        browser.set_window_size(1280, height)\n        browser.execute_script(\"window.scrollTo(0, 0);\")\n        if not browser.save_screenshot(str(screenshot)):\n            raise RuntimeError(\"Selenium did not save the database UI screenshot\")\n        events = browser.execute_script(\"return window.__dagcertEvents.slice();\")\n        if not isinstance(events, list):\n            raise RuntimeError(\"browser timing events were unavailable\")\n        return tuple(browse_cases), tuple(insert_cases), tuple(delete_cases), tuple(events)\n    finally:\n        browser.quit()\n\n\ndef record_browser_evidence(\n    recorder: EvidenceRecorder,\n    fingerprint: str,\n    events: tuple[dict[str, Any], ...],\n) -> None:\n    types = {\n        \"ui.feedback\": (\"UserAction\", \"VisibleStatus\"),\n        \"ui.render\": (\"ItemPage\", \"RenderedItemRows\"),\n    }\n    counts = {task: 0 for task in types}\n    for event in events:\n        task = str(event.get(\"task\"))\n        if task not in types:\n            continue\n        input_type, output_type = types[task]\n        recorder.append(TimingSample(\n            task_id=task,\n            case=str(event[\"case\"]),\n            value_ms=float(event[\"value_ms\"]),\n            worker_id=\"browser\",\n            source_fingerprint=fingerprint,\n            recorded_at=time(),\n            observed_worker_concurrency=1,\n            observed_input_type=input_type,\n            observed_output_type=output_type,\n            metadata={\"boundary\": \"real browser DOM\", **dict(event.get(\"metadata\", {}))},\n        ))\n        counts[task] += 1\n    deficient = {task: count for task, count in counts.items() if count < 10}\n    if deficient:\n        raise RuntimeError(f\"insufficient browser timing samples: {deficient}\")\n\n\ndef collect(root: Path) -> None:\n    artifacts = root / \"artifacts\"\n    artifacts.mkdir(exist_ok=True)\n    database = artifacts / \"runtime.sqlite3\"\n    evidence_path = artifacts / \"timings.jsonl\"\n    evidence_path.unlink(missing_ok=True)\n    initialize_database(database, reset=True)\n\n    fingerprint = source_fingerprint(\n        root, exclude=[\"dag_contract.json\", \"english_requirements.json\"]\n    )\n    recorder = EvidenceRecorder(evidence_path)\n    server = create_server(database)\n    thread = Thread(target=server.serve_forever, name=\"certified-database-ui\", daemon=True)\n    thread.start()\n    base_url = f\"http://127.0.0.1:{server.server_port}\"\n    try:\n        record_http_evidence(recorder, fingerprint, base_url)\n        browse, insertions, deletions, events = exercise_browser(\n            base_url,\n            database,\n            artifacts / \"database-ui.png\",\n        )\n        record_browser_evidence(recorder, fingerprint, events)\n    finally:\n        server.shutdown()\n        thread.join(timeout=5)\n        server.server_close()\n\n    contract_path = root / \"dag_contract.json\"\n    requirements_path = root / \"english_requirements.json\"\n    context = CheckContext(\n        contract=load_contract(contract_path),\n        timings=load_evidence(evidence_path),\n        source_root=root,\n        source_fingerprint=fingerprint,\n        contract_sha256=sha256_file(contract_path),\n        evidence_sha256=sha256_file(evidence_path),\n        requirements=load_requirements(requirements_path),\n        requirements_sha256=sha256_file(requirements_path),\n    )\n    checks = (\n        (\n            artifacts / PROJECTION_RESULTS[0],\n            browse,\n            (\"task:items.list\", \"task:ui.render\", \"timing:items.list/http\", \"timing:ui.render/visible\"),\n            \"example.database-ui.browse-projection/v1\",\n        ),\n        (\n            artifacts / PROJECTION_RESULTS[1],\n            insertions,\n            (\"task:items.insert\", \"task:items.list\", \"task:ui.feedback\", \"task:ui.render\"),\n            \"example.database-ui.insertion-projection/v1\",\n        ),\n        (\n            artifacts / PROJECTION_RESULTS[2],\n            deletions,\n            (\"task:items.delete\", \"task:items.list\", \"task:ui.feedback\", \"task:ui.render\"),\n            \"example.database-ui.deletion-projection/v1\",\n        ),\n    )\n    for output, cases, refs, checker in checks:\n        result = run_checker(\n            lambda current, cases=cases, refs=refs, checker=checker: check_exact_projection_cases(\n                current,\n                cases=cases,\n                primitive_refs=refs,\n                checker=checker,\n            ),\n            context,\n            output,\n        )\n        if not result.passed:\n            raise RuntimeError(f\"projection checker failed: {checker}\")\n    analysis = analyze_contract(context.contract, context.timings, source_fingerprint=fingerprint)\n    if not analysis.passed:\n        raise RuntimeError(\"primitive analysis failed: \" + \"; \".join(\n            f\"{finding.code}: {finding.message}\" for finding in analysis.findings\n        ))\n    print(f\"collected real HTTP/browser evidence for source {fingerprint}\")\n\n\ndef issue(root: Path, audit_result: Path | None) -> None:\n    artifacts = root / \"artifacts\"\n    contract = root / \"dag_contract.json\"\n    requirements = root / \"english_requirements.json\"\n    evidence = artifacts / \"timings.jsonl\"\n    projection_paths = [artifacts / name for name in PROJECTION_RESULTS]\n    checks = list(projection_paths)\n    if audit_result is not None:\n        if not audit_result.is_file():\n            raise RuntimeError(f\"requested audit result does not exist: {audit_result}\")\n        checks.append(audit_result)\n    certificate = artifacts / \"certificate.json\"\n    document = issue_certificate(\n        contract,\n        evidence,\n        certificate,\n        source_root=root,\n        requirements_path=requirements,\n        check_result_paths=checks,\n    )\n    verification = verify_certificate(\n        certificate,\n        contract_path=contract,\n        evidence_path=evidence,\n        requirements_path=requirements,\n        source_root=root,\n        check_result_paths=checks,\n    )\n    if not verification.valid:\n        raise RuntimeError(\"verification failed: \" + \"; \".join(verification.problems))\n    label = \"audited certificate\" if audit_result is not None else \"certificate\"\n    print(f\"issued and verified {label} {document['certificate_sha256']}\")\n\n\ndef main(argv: list[str] | None = None) -> int:\n    parser = ArgumentParser(description=\"Certify the real database-to-UI reference application\")\n    commands = parser.add_subparsers(dest=\"command\", required=True)\n    commands.add_parser(\"collect\")\n    issue_command = commands.add_parser(\"issue\")\n    issue_command.add_argument(\"--audit-result\")\n    args = parser.parse_args(argv)\n    root = Path(__file__).parent.resolve()\n    if args.command == \"collect\":\n        collect(root)\n    else:\n        audit_result = Path(args.audit_result) if args.audit_result else None\n        if audit_result is not None and not audit_result.is_absolute():\n            audit_result = root / audit_result\n        issue(root, audit_result)\n    return 0\n\n\nif __name__ == \"__main__\":\n    raise SystemExit(main())\n"
+    },
+    "README.md": {
+      "sha256": "ea61919b389d9cd3e566b7ff3e8c9e10ac2f157545437750e720ba9ad9164cfd",
+      "encoding": "utf-8",
+      "content": "# Certified database-to-UI reference application\n\nThis is a real SQLite, HTTP, JavaScript, and Selenium reference application. Its certificate covers\nthe exact source and exercised sequential workload, not every possible deployment or dataset.\n\nIt demonstrates and independently audits three narrow promises:\n\n- exact row membership and ordering across initial load, ascending/descending sorting, and\n  next/previous pagination;\n- insertion through the real browser, HTTP endpoint, and SQLite path, followed by exact rendering;\n- deletion through the real browser, HTTP endpoint, and SQLite path, followed by exact rendering.\n\nThe ordinary non-streaming HTTP deadlines are 50 ms. Immediate browser DOM feedback and local row\nrendering use the 16 ms defaults. The browser checks compare application-owned read-only SQL\nprojections with Selenium observations using stable semantic row keys and visible fields.\n\n## Rebuild the certificate\n\nFrom the Dagcert repository root, collect fresh evidence through real HTTP and Selenium boundaries:\n\n```text\npy -m examples.certified_database_ui.certify collect\n```\n\nPrepare three independently sealed audit handoffs. All three projection results are supplied to\nevery auditor so it can inspect the semantic browser evidence relevant to its one claim:\n\n```text\npy -m examples.optional_openai_luna_audit prepare \\\n  --contract examples/certified_database_ui/dag_contract.json \\\n  --evidence examples/certified_database_ui/artifacts/timings.jsonl \\\n  --requirements examples/certified_database_ui/english_requirements.json \\\n  --source-root examples/certified_database_ui \\\n  --check-result examples/certified_database_ui/artifacts/browse-projection.json \\\n  --check-result examples/certified_database_ui/artifacts/insertion-projection.json \\\n  --check-result examples/certified_database_ui/artifacts/deletion-projection.json \\\n  --output-directory examples/certified_database_ui/artifacts/independent-audit\n```\n\nFor each `claim-NNN`, the active ChatGPT/Codex agent must launch a different fresh built-in\n`spawn_agent` worker with `model=\"gpt-5.6-luna\"`, `fork_turns=\"none\"`, and the complete contents of\nthat claim's `worker-prompt.txt`. Save each final JSON to its `worker-response.json`. Do not batch\nclaims and do not replace the subscription-backed worker with an API-key call.\n\nAccept the sealed responses with the same three check-result inputs:\n\n```text\npy -m examples.optional_openai_luna_audit accept \\\n  --contract examples/certified_database_ui/dag_contract.json \\\n  --evidence examples/certified_database_ui/artifacts/timings.jsonl \\\n  --requirements examples/certified_database_ui/english_requirements.json \\\n  --source-root examples/certified_database_ui \\\n  --check-result examples/certified_database_ui/artifacts/browse-projection.json \\\n  --check-result examples/certified_database_ui/artifacts/insertion-projection.json \\\n  --check-result examples/certified_database_ui/artifacts/deletion-projection.json \\\n  --handoff-directory examples/certified_database_ui/artifacts/independent-audit \\\n  --output examples/certified_database_ui/artifacts/independent-audit-result.json\n```\n\nFinally issue and immediately verify a certificate that requires the projection checks and the\naccepted independent audit:\n\n```text\npy -m examples.certified_database_ui.certify issue \\\n  --audit-result artifacts/independent-audit-result.json\n```\n\nCollecting again changes the evidence digest and intentionally invalidates prior audit responses.\nNever reuse an audit response or certificate after collection or source changes.\n\nNo queue, queue limit, runtime timeout, rate limit, retry, debounce, rejection policy, or reduced\napplication behavior exists merely to make the certificate pass. Selenium waits are test-harness\nguards derived from the declared interaction under test and do not change the application.\n"
+    },
+    "static/app.js": {
+      "sha256": "5b44e028ed7bcd82798858374f5568a71613fb91541433acd17fce36abcb9828",
+      "encoding": "utf-8",
+      "content": "\"use strict\";\n\nconst state = {\n  page: 1,\n  pageSize: 3,\n  sort: \"title\",\n  direction: \"asc\",\n  loadVersion: 0,\n};\n\nwindow.__dagcertEvents = [];\n\nfunction recordTiming(task, caseName, started, metadata = {}) {\n  window.__dagcertEvents.push({\n    task,\n    case: caseName,\n    value_ms: performance.now() - started,\n    metadata,\n  });\n}\n\nfunction showFeedback(message, action) {\n  const started = performance.now();\n  const status = document.querySelector(\"#action-status\");\n  status.textContent = message;\n  status.dataset.action = action;\n  recordTiming(\"ui.feedback\", \"visible\", started, {action});\n}\n\nfunction renderRows(result) {\n  const started = performance.now();\n  const body = document.querySelector(\"#item-rows\");\n  body.replaceChildren();\n  for (const item of result.items) {\n    const row = document.createElement(\"tr\");\n    row.dataset.itemRow = \"\";\n    row.dataset.rowKey = String(item.id);\n\n    const title = document.createElement(\"td\");\n    title.dataset.field = \"title\";\n    title.textContent = item.title;\n    row.append(title);\n\n    const category = document.createElement(\"td\");\n    category.dataset.field = \"category\";\n    category.textContent = item.category;\n    row.append(category);\n\n    const action = document.createElement(\"td\");\n    const remove = document.createElement(\"button\");\n    remove.type = \"button\";\n    remove.dataset.deleteId = String(item.id);\n    remove.textContent = `Delete ${item.title}`;\n    remove.addEventListener(\"click\", () => removeItem(item.id, row));\n    action.append(remove);\n    row.append(action);\n    body.append(row);\n  }\n\n  document.querySelector(\"#empty-state\").hidden = result.items.length !== 0;\n  document.querySelector(\"#result-summary\").textContent = `${result.total} total items`;\n  document.querySelector(\"#page-label\").textContent = `Page ${result.page}`;\n  document.querySelector(\"#previous-page\").disabled = !result.has_previous;\n  document.querySelector(\"#next-page\").disabled = !result.has_next;\n  state.loadVersion += 1;\n  document.body.dataset.loadVersion = String(state.loadVersion);\n  recordTiming(\"ui.render\", \"visible\", started, {\n    page: result.page,\n    sort: result.sort,\n    direction: result.direction,\n    count: result.items.length,\n  });\n}\n\nasync function loadRows() {\n  const query = new URLSearchParams({\n    page: String(state.page),\n    page_size: String(state.pageSize),\n    sort: state.sort,\n    direction: state.direction,\n  });\n  const response = await fetch(`/api/items?${query}`);\n  if (!response.ok) {\n    throw new Error(`list failed: ${response.status}`);\n  }\n  const result = await response.json();\n  renderRows(result);\n  return result;\n}\n\nasync function addItem(event) {\n  event.preventDefault();\n  const form = event.currentTarget;\n  showFeedback(\"Saving item...\", \"insert\");\n  try {\n    const response = await fetch(\"/api/items\", {\n      method: \"POST\",\n      headers: {\"Content-Type\": \"application/json\"},\n      body: JSON.stringify({\n        title: form.elements.title.value,\n        category: form.elements.category.value,\n      }),\n    });\n    if (!response.ok) {\n      showFeedback(\"Insert failed\", \"insert-error\");\n      return;\n    }\n    form.reset();\n    showFeedback(\"Item saved\", \"insert-complete\");\n    await loadRows();\n  } catch (error) {\n    showFeedback(\"Insert failed\", \"insert-error\");\n  }\n}\n\nasync function removeItem(identifier, row) {\n  showFeedback(\"Deleting item...\", \"delete\");\n  row.dataset.pending = \"delete\";\n  try {\n    const response = await fetch(`/api/items/${identifier}`, {method: \"DELETE\"});\n    if (!response.ok) {\n      row.removeAttribute(\"data-pending\");\n      showFeedback(\"Delete failed\", \"delete-error\");\n      return;\n    }\n    showFeedback(\"Item deleted\", \"delete-complete\");\n    const result = await loadRows();\n    if (result.items.length === 0 && state.page > 1) {\n      state.page -= 1;\n      await loadRows();\n    }\n  } catch (error) {\n    row.removeAttribute(\"data-pending\");\n    showFeedback(\"Delete failed\", \"delete-error\");\n  }\n}\n\ndocument.querySelector(\"#add-form\").addEventListener(\"submit\", addItem);\ndocument.querySelector(\"#sort-field\").addEventListener(\"change\", async (event) => {\n  state.sort = event.currentTarget.value;\n  state.page = 1;\n  await loadRows();\n});\ndocument.querySelector(\"#sort-direction\").addEventListener(\"click\", async (event) => {\n  state.direction = state.direction === \"asc\" ? \"desc\" : \"asc\";\n  event.currentTarget.dataset.direction = state.direction;\n  event.currentTarget.textContent = state.direction === \"asc\" ? \"Ascending\" : \"Descending\";\n  state.page = 1;\n  await loadRows();\n});\ndocument.querySelector(\"#previous-page\").addEventListener(\"click\", async () => {\n  state.page -= 1;\n  await loadRows();\n});\ndocument.querySelector(\"#next-page\").addEventListener(\"click\", async () => {\n  state.page += 1;\n  await loadRows();\n});\n\nloadRows().catch((error) => showFeedback(error.message, \"load-error\"));\n"
+    },
+    "static/index.html": {
+      "sha256": "bcb965b72a3a0e9e292f3d4dd5ae826a6dc8e6bf52f7755588514667e81e8618",
+      "encoding": "utf-8",
+      "content": "<!doctype html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"utf-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n  <title>Certified item registry</title>\n  <link rel=\"stylesheet\" href=\"/style.css\">\n</head>\n<body>\n  <main>\n    <header>\n      <p class=\"eyebrow\">Dagcert reference application</p>\n      <h1>Item registry</h1>\n      <p>SQLite records rendered through a real HTTP API and browser UI.</p>\n    </header>\n\n    <section class=\"panel\" aria-labelledby=\"add-heading\">\n      <h2 id=\"add-heading\">Add an item</h2>\n      <form id=\"add-form\">\n        <label>Title <input id=\"title\" name=\"title\" required autocomplete=\"off\"></label>\n        <label>Category <input id=\"category\" name=\"category\" required autocomplete=\"off\"></label>\n        <button type=\"submit\">Add item</button>\n      </form>\n      <p id=\"action-status\" role=\"status\" aria-live=\"polite\">Ready</p>\n    </section>\n\n    <section class=\"panel\" aria-labelledby=\"items-heading\">\n      <div class=\"toolbar\">\n        <div>\n          <h2 id=\"items-heading\">Database items</h2>\n          <p id=\"result-summary\">Loading...</p>\n        </div>\n        <div class=\"sort-controls\">\n          <label>Sort\n            <select id=\"sort-field\">\n              <option value=\"title\">Title</option>\n              <option value=\"category\">Category</option>\n              <option value=\"created\">Created</option>\n            </select>\n          </label>\n          <button id=\"sort-direction\" type=\"button\" data-direction=\"asc\">Ascending</button>\n        </div>\n      </div>\n\n      <table>\n        <thead><tr><th>Title</th><th>Category</th><th>Action</th></tr></thead>\n        <tbody id=\"item-rows\"></tbody>\n      </table>\n      <p id=\"empty-state\" hidden>No items on this page.</p>\n\n      <nav class=\"pagination\" aria-label=\"Item pages\">\n        <button id=\"previous-page\" type=\"button\">Previous</button>\n        <span id=\"page-label\">Page 1</span>\n        <button id=\"next-page\" type=\"button\">Next</button>\n      </nav>\n    </section>\n  </main>\n  <script src=\"/app.js\"></script>\n</body>\n</html>\n"
+    },
+    "static/style.css": {
+      "sha256": "87130fcb54eb4b2b2bf5fd9f34c1d3f87416f131427e30e9a4b34fcf500407f5",
+      "encoding": "utf-8",
+      "content": ":root {\n  color-scheme: light;\n  font-family: Inter, ui-sans-serif, system-ui, sans-serif;\n  color: #16221d;\n  background: #eef3ef;\n}\n\n* { box-sizing: border-box; }\nbody { margin: 0; }\nmain { width: min(920px, calc(100% - 32px)); margin: 48px auto; }\nheader { margin-bottom: 28px; }\nh1 { margin: 4px 0 8px; font-size: clamp(32px, 6vw, 54px); letter-spacing: -0.04em; }\nh2 { margin: 0 0 12px; }\np { color: #56645d; }\n.eyebrow { color: #18744a; font-size: 12px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }\n.panel { margin: 18px 0; padding: 24px; border: 1px solid #d2ddd6; border-radius: 16px; background: #fff; box-shadow: 0 12px 32px rgb(22 34 29 / 7%); }\nform, .toolbar, .sort-controls, .pagination { display: flex; align-items: end; gap: 12px; }\n.toolbar { justify-content: space-between; }\nlabel { display: grid; gap: 6px; color: #44524b; font-size: 13px; font-weight: 700; }\ninput, select, button { min-height: 40px; border: 1px solid #bdcbc2; border-radius: 9px; padding: 8px 12px; font: inherit; }\nbutton { cursor: pointer; color: #fff; border-color: #176942; background: #176942; font-weight: 750; }\nbutton:disabled { cursor: default; opacity: 0.42; }\ntable { width: 100%; margin: 18px 0; border-collapse: collapse; }\nth, td { padding: 13px 10px; border-bottom: 1px solid #e5ebe7; text-align: left; }\nth { color: #627068; font-size: 12px; text-transform: uppercase; }\ntr[data-pending=\"delete\"] { opacity: 0.48; }\n.pagination { justify-content: center; align-items: center; }\n#action-status { min-height: 24px; margin-bottom: 0; }\n\n@media (max-width: 680px) {\n  main { margin: 24px auto; }\n  .panel { padding: 18px; overflow-x: auto; }\n  form, .toolbar { align-items: stretch; flex-direction: column; }\n  .sort-controls { align-items: end; }\n}\n"
+    }
+  },
+  "analysis": {
+    "passed": true,
+    "conditional": false,
+    "assumptions": [],
+    "structural_progress": {
+      "passed": true,
+      "claim": "every declared task has a feasible worker/resource path and finite completion evidence",
+      "task_order": [
+        "items.delete",
+        "items.insert",
+        "items.list",
+        "ui.feedback",
+        "ui.render"
+      ],
+      "assumptions": [
+        "declared resource effects match runtime acquisition and flow",
+        "reachable producer task types may recur until a resource reaches usable capacity",
+        "resource acquisition is atomic and scheduling is fair"
+      ]
+    },
+    "timings": [
+      {
+        "task_id": "items.list",
+        "case": "http",
+        "metric": "duration",
+        "evidence": "measured",
+        "samples": 12,
+        "observed_min_ms": 0.8064999710768461,
+        "observed_upper_ms": 12.435799930244684,
+        "certified_lower_ms": 0.620384593136,
+        "certified_upper_ms": 16.166539909318,
+        "required_lower_ms": null,
+        "required_upper_ms": 50.0,
+        "passed": true
+      },
+      {
+        "task_id": "items.insert",
+        "case": "http",
+        "metric": "duration",
+        "evidence": "measured",
+        "samples": 10,
+        "observed_min_ms": 7.895799935795367,
+        "observed_upper_ms": 9.327600011602044,
+        "certified_lower_ms": 6.073692258304,
+        "certified_upper_ms": 12.125880015083,
+        "required_lower_ms": null,
+        "required_upper_ms": 50.0,
+        "passed": true
+      },
+      {
+        "task_id": "items.delete",
+        "case": "http",
+        "metric": "duration",
+        "evidence": "measured",
+        "samples": 10,
+        "observed_min_ms": 7.940600044094026,
+        "observed_upper_ms": 9.23619989771396,
+        "certified_lower_ms": 6.108153880072,
+        "certified_upper_ms": 12.007059867028,
+        "required_lower_ms": null,
+        "required_upper_ms": 50.0,
+        "passed": true
+      },
+      {
+        "task_id": "ui.feedback",
+        "case": "visible",
+        "metric": "duration",
+        "evidence": "measured",
+        "samples": 20,
+        "observed_min_ms": 0.0,
+        "observed_upper_ms": 0.10000002384185791,
+        "certified_lower_ms": 0.0,
+        "certified_upper_ms": 0.130000030994,
+        "required_lower_ms": null,
+        "required_upper_ms": 16.0,
+        "passed": true
+      },
+      {
+        "task_id": "ui.render",
+        "case": "visible",
+        "metric": "duration",
+        "evidence": "measured",
+        "samples": 19,
+        "observed_min_ms": 0.0,
+        "observed_upper_ms": 0.40000009536743164,
+        "certified_lower_ms": 0.0,
+        "certified_upper_ms": 0.520000123978,
+        "required_lower_ms": null,
+        "required_upper_ms": 16.0,
+        "passed": true
+      }
+    ],
+    "findings": []
+  },
+  "timing_evidence": [
+    {
+      "task_id": "items.list",
+      "case": "http",
+      "value_ms": 12.435799930244684,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.5704114,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPageQuery",
+      "observed_output_type": "ItemPage",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite+JSON",
+        "sample": 0
+      }
+    },
+    {
+      "task_id": "items.list",
+      "case": "http",
+      "value_ms": 1.1006999993696809,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.5718417,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPageQuery",
+      "observed_output_type": "ItemPage",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite+JSON",
+        "sample": 1
+      }
+    },
+    {
+      "task_id": "items.list",
+      "case": "http",
+      "value_ms": 0.9163999930024147,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.5730588,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPageQuery",
+      "observed_output_type": "ItemPage",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite+JSON",
+        "sample": 2
+      }
+    },
+    {
+      "task_id": "items.list",
+      "case": "http",
+      "value_ms": 0.914699980057776,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.574156,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPageQuery",
+      "observed_output_type": "ItemPage",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite+JSON",
+        "sample": 3
+      }
+    },
+    {
+      "task_id": "items.list",
+      "case": "http",
+      "value_ms": 0.9169999975711107,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.575258,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPageQuery",
+      "observed_output_type": "ItemPage",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite+JSON",
+        "sample": 4
+      }
+    },
+    {
+      "task_id": "items.list",
+      "case": "http",
+      "value_ms": 0.8145000319927931,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.5762491,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPageQuery",
+      "observed_output_type": "ItemPage",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite+JSON",
+        "sample": 5
+      }
+    },
+    {
+      "task_id": "items.list",
+      "case": "http",
+      "value_ms": 0.8529999759048223,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.577274,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPageQuery",
+      "observed_output_type": "ItemPage",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite+JSON",
+        "sample": 6
+      }
+    },
+    {
+      "task_id": "items.list",
+      "case": "http",
+      "value_ms": 1.0212999768555164,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.578476,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPageQuery",
+      "observed_output_type": "ItemPage",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite+JSON",
+        "sample": 7
+      }
+    },
+    {
+      "task_id": "items.list",
+      "case": "http",
+      "value_ms": 0.9047000203281641,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.5795834,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPageQuery",
+      "observed_output_type": "ItemPage",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite+JSON",
+        "sample": 8
+      }
+    },
+    {
+      "task_id": "items.list",
+      "case": "http",
+      "value_ms": 0.8905000286176801,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.5806649,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPageQuery",
+      "observed_output_type": "ItemPage",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite+JSON",
+        "sample": 9
+      }
+    },
+    {
+      "task_id": "items.list",
+      "case": "http",
+      "value_ms": 0.8064999710768461,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.581695,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPageQuery",
+      "observed_output_type": "ItemPage",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite+JSON",
+        "sample": 10
+      }
+    },
+    {
+      "task_id": "items.list",
+      "case": "http",
+      "value_ms": 0.9018999990075827,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.582779,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPageQuery",
+      "observed_output_type": "ItemPage",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite+JSON",
+        "sample": 11
+      }
+    },
+    {
+      "task_id": "items.insert",
+      "case": "http",
+      "value_ms": 7.895799935795367,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.59088,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "NewItem",
+      "observed_output_type": "StoredItem",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite commit+JSON",
+        "sample": 0
+      }
+    },
+    {
+      "task_id": "items.insert",
+      "case": "http",
+      "value_ms": 9.327600011602044,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.6005352,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "NewItem",
+      "observed_output_type": "StoredItem",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite commit+JSON",
+        "sample": 1
+      }
+    },
+    {
+      "task_id": "items.insert",
+      "case": "http",
+      "value_ms": 8.090300019830465,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.6090252,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "NewItem",
+      "observed_output_type": "StoredItem",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite commit+JSON",
+        "sample": 2
+      }
+    },
+    {
+      "task_id": "items.insert",
+      "case": "http",
+      "value_ms": 8.077500038780272,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.6173134,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "NewItem",
+      "observed_output_type": "StoredItem",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite commit+JSON",
+        "sample": 3
+      }
+    },
+    {
+      "task_id": "items.insert",
+      "case": "http",
+      "value_ms": 8.296600077301264,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.6258407,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "NewItem",
+      "observed_output_type": "StoredItem",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite commit+JSON",
+        "sample": 4
+      }
+    },
+    {
+      "task_id": "items.insert",
+      "case": "http",
+      "value_ms": 7.936100009828806,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.6341422,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "NewItem",
+      "observed_output_type": "StoredItem",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite commit+JSON",
+        "sample": 5
+      }
+    },
+    {
+      "task_id": "items.insert",
+      "case": "http",
+      "value_ms": 9.22729994636029,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.6436062,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "NewItem",
+      "observed_output_type": "StoredItem",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite commit+JSON",
+        "sample": 6
+      }
+    },
+    {
+      "task_id": "items.insert",
+      "case": "http",
+      "value_ms": 8.219200070016086,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.652042,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "NewItem",
+      "observed_output_type": "StoredItem",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite commit+JSON",
+        "sample": 7
+      }
+    },
+    {
+      "task_id": "items.insert",
+      "case": "http",
+      "value_ms": 8.181799901649356,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.660533,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "NewItem",
+      "observed_output_type": "StoredItem",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite commit+JSON",
+        "sample": 8
+      }
+    },
+    {
+      "task_id": "items.insert",
+      "case": "http",
+      "value_ms": 8.266899967566133,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.6691916,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "NewItem",
+      "observed_output_type": "StoredItem",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite commit+JSON",
+        "sample": 9
+      }
+    },
+    {
+      "task_id": "items.delete",
+      "case": "http",
+      "value_ms": 8.201400050893426,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.6775894,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemId",
+      "observed_output_type": "DeletionResult",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite commit+JSON",
+        "sample": 0
+      }
+    },
+    {
+      "task_id": "items.delete",
+      "case": "http",
+      "value_ms": 9.23619989771396,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.687056,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemId",
+      "observed_output_type": "DeletionResult",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite commit+JSON",
+        "sample": 1
+      }
+    },
+    {
+      "task_id": "items.delete",
+      "case": "http",
+      "value_ms": 8.18750006146729,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.6954563,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemId",
+      "observed_output_type": "DeletionResult",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite commit+JSON",
+        "sample": 2
+      }
+    },
+    {
+      "task_id": "items.delete",
+      "case": "http",
+      "value_ms": 8.319100015796721,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.7040348,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemId",
+      "observed_output_type": "DeletionResult",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite commit+JSON",
+        "sample": 3
+      }
+    },
+    {
+      "task_id": "items.delete",
+      "case": "http",
+      "value_ms": 8.261300041340292,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.7125325,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemId",
+      "observed_output_type": "DeletionResult",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite commit+JSON",
+        "sample": 4
+      }
+    },
+    {
+      "task_id": "items.delete",
+      "case": "http",
+      "value_ms": 8.436899981461465,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.7212493,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemId",
+      "observed_output_type": "DeletionResult",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite commit+JSON",
+        "sample": 5
+      }
+    },
+    {
+      "task_id": "items.delete",
+      "case": "http",
+      "value_ms": 8.927699993364513,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.730395,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemId",
+      "observed_output_type": "DeletionResult",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite commit+JSON",
+        "sample": 6
+      }
+    },
+    {
+      "task_id": "items.delete",
+      "case": "http",
+      "value_ms": 8.513599983416498,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.739123,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemId",
+      "observed_output_type": "DeletionResult",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite commit+JSON",
+        "sample": 7
+      }
+    },
+    {
+      "task_id": "items.delete",
+      "case": "http",
+      "value_ms": 7.940600044094026,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.747376,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemId",
+      "observed_output_type": "DeletionResult",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite commit+JSON",
+        "sample": 8
+      }
+    },
+    {
+      "task_id": "items.delete",
+      "case": "http",
+      "value_ms": 8.138000033795834,
+      "worker_id": "http-server",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445452.755739,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemId",
+      "observed_output_type": "DeletionResult",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "HTTP+SQLite commit+JSON",
+        "sample": 9
+      }
+    },
+    {
+      "task_id": "ui.render",
+      "case": "visible",
+      "value_ms": 0.2999999523162842,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8163877,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPage",
+      "observed_output_type": "RenderedItemRows",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "real browser DOM",
+        "count": 3,
+        "direction": "asc",
+        "page": 1,
+        "sort": "title"
+      }
+    },
+    {
+      "task_id": "ui.render",
+      "case": "visible",
+      "value_ms": 0.0,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8167589,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPage",
+      "observed_output_type": "RenderedItemRows",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "real browser DOM",
+        "count": 3,
+        "direction": "desc",
+        "page": 1,
+        "sort": "title"
+      }
+    },
+    {
+      "task_id": "ui.render",
+      "case": "visible",
+      "value_ms": 0.20000004768371582,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.816953,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPage",
+      "observed_output_type": "RenderedItemRows",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "real browser DOM",
+        "count": 3,
+        "direction": "desc",
+        "page": 2,
+        "sort": "title"
+      }
+    },
+    {
+      "task_id": "ui.render",
+      "case": "visible",
+      "value_ms": 0.40000009536743164,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8170805,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPage",
+      "observed_output_type": "RenderedItemRows",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "real browser DOM",
+        "count": 3,
+        "direction": "desc",
+        "page": 1,
+        "sort": "title"
+      }
+    },
+    {
+      "task_id": "ui.render",
+      "case": "visible",
+      "value_ms": 0.19999992847442627,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8171659,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPage",
+      "observed_output_type": "RenderedItemRows",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "real browser DOM",
+        "count": 3,
+        "direction": "desc",
+        "page": 1,
+        "sort": "category"
+      }
+    },
+    {
+      "task_id": "ui.render",
+      "case": "visible",
+      "value_ms": 0.20000004768371582,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8172545,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPage",
+      "observed_output_type": "RenderedItemRows",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "real browser DOM",
+        "count": 3,
+        "direction": "asc",
+        "page": 1,
+        "sort": "category"
+      }
+    },
+    {
+      "task_id": "ui.render",
+      "case": "visible",
+      "value_ms": 0.0,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.817333,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPage",
+      "observed_output_type": "RenderedItemRows",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "real browser DOM",
+        "count": 3,
+        "direction": "asc",
+        "page": 1,
+        "sort": "created"
+      }
+    },
+    {
+      "task_id": "ui.render",
+      "case": "visible",
+      "value_ms": 0.0,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8174095,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPage",
+      "observed_output_type": "RenderedItemRows",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "real browser DOM",
+        "count": 3,
+        "direction": "desc",
+        "page": 1,
+        "sort": "created"
+      }
+    },
+    {
+      "task_id": "ui.render",
+      "case": "visible",
+      "value_ms": 0.0,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8174827,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPage",
+      "observed_output_type": "RenderedItemRows",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "real browser DOM",
+        "count": 3,
+        "direction": "desc",
+        "page": 1,
+        "sort": "title"
+      }
+    },
+    {
+      "task_id": "ui.feedback",
+      "case": "visible",
+      "value_ms": 0.10000002384185791,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8175585,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "UserAction",
+      "observed_output_type": "VisibleStatus",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "action": "insert",
+        "boundary": "real browser DOM"
+      }
+    },
+    {
+      "task_id": "ui.feedback",
+      "case": "visible",
+      "value_ms": 0.0,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.817651,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "UserAction",
+      "observed_output_type": "VisibleStatus",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "action": "insert-complete",
+        "boundary": "real browser DOM"
+      }
+    },
+    {
+      "task_id": "ui.render",
+      "case": "visible",
+      "value_ms": 0.09999990463256836,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.817735,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPage",
+      "observed_output_type": "RenderedItemRows",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "real browser DOM",
+        "count": 3,
+        "direction": "desc",
+        "page": 1,
+        "sort": "title"
+      }
+    },
+    {
+      "task_id": "ui.feedback",
+      "case": "visible",
+      "value_ms": 0.0,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8178105,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "UserAction",
+      "observed_output_type": "VisibleStatus",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "action": "delete",
+        "boundary": "real browser DOM"
+      }
+    },
+    {
+      "task_id": "ui.feedback",
+      "case": "visible",
+      "value_ms": 0.09999990463256836,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8180032,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "UserAction",
+      "observed_output_type": "VisibleStatus",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "action": "delete-complete",
+        "boundary": "real browser DOM"
+      }
+    },
+    {
+      "task_id": "ui.render",
+      "case": "visible",
+      "value_ms": 0.09999990463256836,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8181129,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPage",
+      "observed_output_type": "RenderedItemRows",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "real browser DOM",
+        "count": 3,
+        "direction": "desc",
+        "page": 1,
+        "sort": "title"
+      }
+    },
+    {
+      "task_id": "ui.feedback",
+      "case": "visible",
+      "value_ms": 0.0,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8182023,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "UserAction",
+      "observed_output_type": "VisibleStatus",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "action": "insert",
+        "boundary": "real browser DOM"
+      }
+    },
+    {
+      "task_id": "ui.feedback",
+      "case": "visible",
+      "value_ms": 0.0,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8182812,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "UserAction",
+      "observed_output_type": "VisibleStatus",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "action": "insert-complete",
+        "boundary": "real browser DOM"
+      }
+    },
+    {
+      "task_id": "ui.render",
+      "case": "visible",
+      "value_ms": 0.10000002384185791,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8183575,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPage",
+      "observed_output_type": "RenderedItemRows",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "real browser DOM",
+        "count": 3,
+        "direction": "desc",
+        "page": 1,
+        "sort": "title"
+      }
+    },
+    {
+      "task_id": "ui.feedback",
+      "case": "visible",
+      "value_ms": 0.10000002384185791,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8184516,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "UserAction",
+      "observed_output_type": "VisibleStatus",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "action": "delete",
+        "boundary": "real browser DOM"
+      }
+    },
+    {
+      "task_id": "ui.feedback",
+      "case": "visible",
+      "value_ms": 0.10000002384185791,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8185349,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "UserAction",
+      "observed_output_type": "VisibleStatus",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "action": "delete-complete",
+        "boundary": "real browser DOM"
+      }
+    },
+    {
+      "task_id": "ui.render",
+      "case": "visible",
+      "value_ms": 0.2999999523162842,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8186104,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPage",
+      "observed_output_type": "RenderedItemRows",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "real browser DOM",
+        "count": 3,
+        "direction": "desc",
+        "page": 1,
+        "sort": "title"
+      }
+    },
+    {
+      "task_id": "ui.feedback",
+      "case": "visible",
+      "value_ms": 0.0,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8186858,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "UserAction",
+      "observed_output_type": "VisibleStatus",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "action": "insert",
+        "boundary": "real browser DOM"
+      }
+    },
+    {
+      "task_id": "ui.feedback",
+      "case": "visible",
+      "value_ms": 0.0,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8187573,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "UserAction",
+      "observed_output_type": "VisibleStatus",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "action": "insert-complete",
+        "boundary": "real browser DOM"
+      }
+    },
+    {
+      "task_id": "ui.render",
+      "case": "visible",
+      "value_ms": 0.10000002384185791,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8188293,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPage",
+      "observed_output_type": "RenderedItemRows",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "real browser DOM",
+        "count": 3,
+        "direction": "desc",
+        "page": 1,
+        "sort": "title"
+      }
+    },
+    {
+      "task_id": "ui.feedback",
+      "case": "visible",
+      "value_ms": 0.0,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8189054,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "UserAction",
+      "observed_output_type": "VisibleStatus",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "action": "delete",
+        "boundary": "real browser DOM"
+      }
+    },
+    {
+      "task_id": "ui.feedback",
+      "case": "visible",
+      "value_ms": 0.0,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8189764,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "UserAction",
+      "observed_output_type": "VisibleStatus",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "action": "delete-complete",
+        "boundary": "real browser DOM"
+      }
+    },
+    {
+      "task_id": "ui.render",
+      "case": "visible",
+      "value_ms": 0.20000004768371582,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.819048,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPage",
+      "observed_output_type": "RenderedItemRows",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "real browser DOM",
+        "count": 3,
+        "direction": "desc",
+        "page": 1,
+        "sort": "title"
+      }
+    },
+    {
+      "task_id": "ui.feedback",
+      "case": "visible",
+      "value_ms": 0.0,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8191361,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "UserAction",
+      "observed_output_type": "VisibleStatus",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "action": "insert",
+        "boundary": "real browser DOM"
+      }
+    },
+    {
+      "task_id": "ui.feedback",
+      "case": "visible",
+      "value_ms": 0.0,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8192227,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "UserAction",
+      "observed_output_type": "VisibleStatus",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "action": "insert-complete",
+        "boundary": "real browser DOM"
+      }
+    },
+    {
+      "task_id": "ui.render",
+      "case": "visible",
+      "value_ms": 0.09999990463256836,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8192978,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPage",
+      "observed_output_type": "RenderedItemRows",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "real browser DOM",
+        "count": 3,
+        "direction": "desc",
+        "page": 1,
+        "sort": "title"
+      }
+    },
+    {
+      "task_id": "ui.feedback",
+      "case": "visible",
+      "value_ms": 0.09999990463256836,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8193717,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "UserAction",
+      "observed_output_type": "VisibleStatus",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "action": "delete",
+        "boundary": "real browser DOM"
+      }
+    },
+    {
+      "task_id": "ui.feedback",
+      "case": "visible",
+      "value_ms": 0.0,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8194497,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "UserAction",
+      "observed_output_type": "VisibleStatus",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "action": "delete-complete",
+        "boundary": "real browser DOM"
+      }
+    },
+    {
+      "task_id": "ui.render",
+      "case": "visible",
+      "value_ms": 0.10000002384185791,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8196425,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPage",
+      "observed_output_type": "RenderedItemRows",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "real browser DOM",
+        "count": 3,
+        "direction": "desc",
+        "page": 1,
+        "sort": "title"
+      }
+    },
+    {
+      "task_id": "ui.feedback",
+      "case": "visible",
+      "value_ms": 0.0,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8197513,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "UserAction",
+      "observed_output_type": "VisibleStatus",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "action": "insert",
+        "boundary": "real browser DOM"
+      }
+    },
+    {
+      "task_id": "ui.feedback",
+      "case": "visible",
+      "value_ms": 0.0,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8198347,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "UserAction",
+      "observed_output_type": "VisibleStatus",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "action": "insert-complete",
+        "boundary": "real browser DOM"
+      }
+    },
+    {
+      "task_id": "ui.render",
+      "case": "visible",
+      "value_ms": 0.0,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8199263,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPage",
+      "observed_output_type": "RenderedItemRows",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "real browser DOM",
+        "count": 3,
+        "direction": "desc",
+        "page": 1,
+        "sort": "title"
+      }
+    },
+    {
+      "task_id": "ui.feedback",
+      "case": "visible",
+      "value_ms": 0.0,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8200083,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "UserAction",
+      "observed_output_type": "VisibleStatus",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "action": "delete",
+        "boundary": "real browser DOM"
+      }
+    },
+    {
+      "task_id": "ui.feedback",
+      "case": "visible",
+      "value_ms": 0.0,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8200824,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "UserAction",
+      "observed_output_type": "VisibleStatus",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "action": "delete-complete",
+        "boundary": "real browser DOM"
+      }
+    },
+    {
+      "task_id": "ui.render",
+      "case": "visible",
+      "value_ms": 0.19999992847442627,
+      "worker_id": "browser",
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "succeeded": true,
+      "recorded_at": 1787445462.8201542,
+      "observed_worker_concurrency": 1,
+      "observed_input_type": "ItemPage",
+      "observed_output_type": "RenderedItemRows",
+      "resource_acquired": {},
+      "resource_consumed": {},
+      "resource_produced": {},
+      "resource_levels": {},
+      "metadata": {
+        "boundary": "real browser DOM",
+        "count": 3,
+        "direction": "desc",
+        "page": 1,
+        "sort": "title"
+      }
+    }
+  ],
+  "application_check_results": [
+    {
+      "schema": "dagcert-check-result/v2",
+      "checker": "example.database-ui.browse-projection/v1",
+      "passed": true,
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "contract_sha256": "5962419cfcbfdb2175522c6c825cb824dda73f705b6b53712b19ab0a1737dd0b",
+      "evidence_sha256": "adfa038083c116fb78008a9ba03a677b55837cc647ece2ad0b1246f93676f2bc",
+      "requirements_sha256": "f612140a6b7ec6f2caf3bc4d5e44ea2b3be709487aeb6691271220df97cb45a5",
+      "primitive_refs": [
+        "task:items.list",
+        "task:ui.render",
+        "timing:items.list/http",
+        "timing:ui.render/visible"
+      ],
+      "findings": [],
+      "facts": {
+        "claim": "every named database-to-DOM projection case matches",
+        "cases": {
+          "initial-title-ascending": {
+            "claim": "observed DOM rows exactly equal the application-defined projection",
+            "expected_count": 3,
+            "observed_count": 3,
+            "order_required": true,
+            "expected_sha256": "7b6588e7abea017b694ce45907ac6708dcf29862b3d285c0817344ed8b44a90c",
+            "observed_sha256": "7b6588e7abea017b694ce45907ac6708dcf29862b3d285c0817344ed8b44a90c",
+            "expected_order_sha256": "c1a9f25c1237d04f6fa73c0725e5e3cfdf9337680b549da6c08016dfad31aa3f",
+            "observed_order_sha256": "c1a9f25c1237d04f6fa73c0725e5e3cfdf9337680b549da6c08016dfad31aa3f"
+          },
+          "title-descending": {
+            "claim": "observed DOM rows exactly equal the application-defined projection",
+            "expected_count": 3,
+            "observed_count": 3,
+            "order_required": true,
+            "expected_sha256": "fb9026fcf755a0712a86091fe517fe0c6e3019dff52eafc9cab0e429beeec6ad",
+            "observed_sha256": "fb9026fcf755a0712a86091fe517fe0c6e3019dff52eafc9cab0e429beeec6ad",
+            "expected_order_sha256": "18305f44685af83b9795b4073ccf1deee28a612c0ea1e4cb1d310379e63355de",
+            "observed_order_sha256": "18305f44685af83b9795b4073ccf1deee28a612c0ea1e4cb1d310379e63355de"
+          },
+          "next-page": {
+            "claim": "observed DOM rows exactly equal the application-defined projection",
+            "expected_count": 3,
+            "observed_count": 3,
+            "order_required": true,
+            "expected_sha256": "9a6acc299dd7146ec159a194e0bb73145683ace745b55168fe70cd36f8ef4ac5",
+            "observed_sha256": "9a6acc299dd7146ec159a194e0bb73145683ace745b55168fe70cd36f8ef4ac5",
+            "expected_order_sha256": "19eef5ca5615ce5a1dfad1e1e9738c152b8dbaf8f24697934f8d0124902cc55c",
+            "observed_order_sha256": "19eef5ca5615ce5a1dfad1e1e9738c152b8dbaf8f24697934f8d0124902cc55c"
+          },
+          "previous-page": {
+            "claim": "observed DOM rows exactly equal the application-defined projection",
+            "expected_count": 3,
+            "observed_count": 3,
+            "order_required": true,
+            "expected_sha256": "fb9026fcf755a0712a86091fe517fe0c6e3019dff52eafc9cab0e429beeec6ad",
+            "observed_sha256": "fb9026fcf755a0712a86091fe517fe0c6e3019dff52eafc9cab0e429beeec6ad",
+            "expected_order_sha256": "18305f44685af83b9795b4073ccf1deee28a612c0ea1e4cb1d310379e63355de",
+            "observed_order_sha256": "18305f44685af83b9795b4073ccf1deee28a612c0ea1e4cb1d310379e63355de"
+          },
+          "category-desc": {
+            "claim": "observed DOM rows exactly equal the application-defined projection",
+            "expected_count": 3,
+            "observed_count": 3,
+            "order_required": true,
+            "expected_sha256": "9cac3622b39c4d9fdf690bf8a36486caae48914e409fcbeaae0d2eaa614eaccd",
+            "observed_sha256": "9cac3622b39c4d9fdf690bf8a36486caae48914e409fcbeaae0d2eaa614eaccd",
+            "expected_order_sha256": "669f8288891fea2558675c44f47551148d2579add244560d405a86828c80f73d",
+            "observed_order_sha256": "669f8288891fea2558675c44f47551148d2579add244560d405a86828c80f73d"
+          },
+          "category-asc": {
+            "claim": "observed DOM rows exactly equal the application-defined projection",
+            "expected_count": 3,
+            "observed_count": 3,
+            "order_required": true,
+            "expected_sha256": "72e728345caefe394fdbbe8551b47b6379bd52e3f542f45db767c87c1e149b70",
+            "observed_sha256": "72e728345caefe394fdbbe8551b47b6379bd52e3f542f45db767c87c1e149b70",
+            "expected_order_sha256": "e16514589b208076ce253f78dd6da10c6427d5ba6b727b6ec7f74deaef5a179b",
+            "observed_order_sha256": "e16514589b208076ce253f78dd6da10c6427d5ba6b727b6ec7f74deaef5a179b"
+          },
+          "created-asc": {
+            "claim": "observed DOM rows exactly equal the application-defined projection",
+            "expected_count": 3,
+            "observed_count": 3,
+            "order_required": true,
+            "expected_sha256": "7b6588e7abea017b694ce45907ac6708dcf29862b3d285c0817344ed8b44a90c",
+            "observed_sha256": "7b6588e7abea017b694ce45907ac6708dcf29862b3d285c0817344ed8b44a90c",
+            "expected_order_sha256": "c1a9f25c1237d04f6fa73c0725e5e3cfdf9337680b549da6c08016dfad31aa3f",
+            "observed_order_sha256": "c1a9f25c1237d04f6fa73c0725e5e3cfdf9337680b549da6c08016dfad31aa3f"
+          },
+          "created-desc": {
+            "claim": "observed DOM rows exactly equal the application-defined projection",
+            "expected_count": 3,
+            "observed_count": 3,
+            "order_required": true,
+            "expected_sha256": "fb9026fcf755a0712a86091fe517fe0c6e3019dff52eafc9cab0e429beeec6ad",
+            "observed_sha256": "fb9026fcf755a0712a86091fe517fe0c6e3019dff52eafc9cab0e429beeec6ad",
+            "expected_order_sha256": "18305f44685af83b9795b4073ccf1deee28a612c0ea1e4cb1d310379e63355de",
+            "observed_order_sha256": "18305f44685af83b9795b4073ccf1deee28a612c0ea1e4cb1d310379e63355de"
+          }
+        }
+      }
+    },
+    {
+      "schema": "dagcert-check-result/v2",
+      "checker": "example.database-ui.insertion-projection/v1",
+      "passed": true,
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "contract_sha256": "5962419cfcbfdb2175522c6c825cb824dda73f705b6b53712b19ab0a1737dd0b",
+      "evidence_sha256": "adfa038083c116fb78008a9ba03a677b55837cc647ece2ad0b1246f93676f2bc",
+      "requirements_sha256": "f612140a6b7ec6f2caf3bc4d5e44ea2b3be709487aeb6691271220df97cb45a5",
+      "primitive_refs": [
+        "task:items.insert",
+        "task:items.list",
+        "task:ui.feedback",
+        "task:ui.render"
+      ],
+      "findings": [],
+      "facts": {
+        "claim": "every named database-to-DOM projection case matches",
+        "cases": {
+          "insert-00": {
+            "claim": "observed DOM rows exactly equal the application-defined projection",
+            "expected_count": 3,
+            "observed_count": 3,
+            "order_required": true,
+            "expected_sha256": "7d293ab0056ae519ae0a5aaeaec387a57ee4d1d2f007a0ed1db041d72a6292d1",
+            "observed_sha256": "7d293ab0056ae519ae0a5aaeaec387a57ee4d1d2f007a0ed1db041d72a6292d1",
+            "expected_order_sha256": "74855cb4df365819f18605fc89bb1c64040109c642cfcdea52b62ac9c0535333",
+            "observed_order_sha256": "74855cb4df365819f18605fc89bb1c64040109c642cfcdea52b62ac9c0535333"
+          },
+          "insert-01": {
+            "claim": "observed DOM rows exactly equal the application-defined projection",
+            "expected_count": 3,
+            "observed_count": 3,
+            "order_required": true,
+            "expected_sha256": "9e221f1a63731a4d32b466f649564e81a21174a3a100a199d57a687b90f5f34d",
+            "observed_sha256": "9e221f1a63731a4d32b466f649564e81a21174a3a100a199d57a687b90f5f34d",
+            "expected_order_sha256": "63d004dfa9aabffd9fc73486013ecf977b4cc0d908ac292f8f8e8264ddf40ad7",
+            "observed_order_sha256": "63d004dfa9aabffd9fc73486013ecf977b4cc0d908ac292f8f8e8264ddf40ad7"
+          },
+          "insert-02": {
+            "claim": "observed DOM rows exactly equal the application-defined projection",
+            "expected_count": 3,
+            "observed_count": 3,
+            "order_required": true,
+            "expected_sha256": "99796acdb741088d6c99be87009dbbda934452d6f08e8b0ef6187aa8c27b0d68",
+            "observed_sha256": "99796acdb741088d6c99be87009dbbda934452d6f08e8b0ef6187aa8c27b0d68",
+            "expected_order_sha256": "d11c92e7e3c4a6d3e3fe4f604b558fd90c2aef3382dd1a836054e5c0c862a586",
+            "observed_order_sha256": "d11c92e7e3c4a6d3e3fe4f604b558fd90c2aef3382dd1a836054e5c0c862a586"
+          },
+          "insert-03": {
+            "claim": "observed DOM rows exactly equal the application-defined projection",
+            "expected_count": 3,
+            "observed_count": 3,
+            "order_required": true,
+            "expected_sha256": "7ff3ac08c824639c88c13f8c6f766a45d204b85c412d8cde8e8cdfbdabef334d",
+            "observed_sha256": "7ff3ac08c824639c88c13f8c6f766a45d204b85c412d8cde8e8cdfbdabef334d",
+            "expected_order_sha256": "92ddecc888c9fb252fe17433ffc5d52059882b14127e2c8adf90eceb6744963e",
+            "observed_order_sha256": "92ddecc888c9fb252fe17433ffc5d52059882b14127e2c8adf90eceb6744963e"
+          },
+          "insert-04": {
+            "claim": "observed DOM rows exactly equal the application-defined projection",
+            "expected_count": 3,
+            "observed_count": 3,
+            "order_required": true,
+            "expected_sha256": "201f736adcefda1dc628b2753e363519cceb73591c31c4ef5ed1c57fb03faff5",
+            "observed_sha256": "201f736adcefda1dc628b2753e363519cceb73591c31c4ef5ed1c57fb03faff5",
+            "expected_order_sha256": "17327c9bc5cd717e656c91c95a76fc6b36023c0b00f92ae2160bde299e9d9d87",
+            "observed_order_sha256": "17327c9bc5cd717e656c91c95a76fc6b36023c0b00f92ae2160bde299e9d9d87"
+          }
+        }
+      }
+    },
+    {
+      "schema": "dagcert-check-result/v2",
+      "checker": "example.database-ui.deletion-projection/v1",
+      "passed": true,
+      "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+      "contract_sha256": "5962419cfcbfdb2175522c6c825cb824dda73f705b6b53712b19ab0a1737dd0b",
+      "evidence_sha256": "adfa038083c116fb78008a9ba03a677b55837cc647ece2ad0b1246f93676f2bc",
+      "requirements_sha256": "f612140a6b7ec6f2caf3bc4d5e44ea2b3be709487aeb6691271220df97cb45a5",
+      "primitive_refs": [
+        "task:items.delete",
+        "task:items.list",
+        "task:ui.feedback",
+        "task:ui.render"
+      ],
+      "findings": [],
+      "facts": {
+        "claim": "every named database-to-DOM projection case matches",
+        "cases": {
+          "delete-00": {
+            "claim": "observed DOM rows exactly equal the application-defined projection",
+            "expected_count": 3,
+            "observed_count": 3,
+            "order_required": true,
+            "expected_sha256": "fb9026fcf755a0712a86091fe517fe0c6e3019dff52eafc9cab0e429beeec6ad",
+            "observed_sha256": "fb9026fcf755a0712a86091fe517fe0c6e3019dff52eafc9cab0e429beeec6ad",
+            "expected_order_sha256": "18305f44685af83b9795b4073ccf1deee28a612c0ea1e4cb1d310379e63355de",
+            "observed_order_sha256": "18305f44685af83b9795b4073ccf1deee28a612c0ea1e4cb1d310379e63355de"
+          },
+          "delete-01": {
+            "claim": "observed DOM rows exactly equal the application-defined projection",
+            "expected_count": 3,
+            "observed_count": 3,
+            "order_required": true,
+            "expected_sha256": "fb9026fcf755a0712a86091fe517fe0c6e3019dff52eafc9cab0e429beeec6ad",
+            "observed_sha256": "fb9026fcf755a0712a86091fe517fe0c6e3019dff52eafc9cab0e429beeec6ad",
+            "expected_order_sha256": "18305f44685af83b9795b4073ccf1deee28a612c0ea1e4cb1d310379e63355de",
+            "observed_order_sha256": "18305f44685af83b9795b4073ccf1deee28a612c0ea1e4cb1d310379e63355de"
+          },
+          "delete-02": {
+            "claim": "observed DOM rows exactly equal the application-defined projection",
+            "expected_count": 3,
+            "observed_count": 3,
+            "order_required": true,
+            "expected_sha256": "fb9026fcf755a0712a86091fe517fe0c6e3019dff52eafc9cab0e429beeec6ad",
+            "observed_sha256": "fb9026fcf755a0712a86091fe517fe0c6e3019dff52eafc9cab0e429beeec6ad",
+            "expected_order_sha256": "18305f44685af83b9795b4073ccf1deee28a612c0ea1e4cb1d310379e63355de",
+            "observed_order_sha256": "18305f44685af83b9795b4073ccf1deee28a612c0ea1e4cb1d310379e63355de"
+          },
+          "delete-03": {
+            "claim": "observed DOM rows exactly equal the application-defined projection",
+            "expected_count": 3,
+            "observed_count": 3,
+            "order_required": true,
+            "expected_sha256": "fb9026fcf755a0712a86091fe517fe0c6e3019dff52eafc9cab0e429beeec6ad",
+            "observed_sha256": "fb9026fcf755a0712a86091fe517fe0c6e3019dff52eafc9cab0e429beeec6ad",
+            "expected_order_sha256": "18305f44685af83b9795b4073ccf1deee28a612c0ea1e4cb1d310379e63355de",
+            "observed_order_sha256": "18305f44685af83b9795b4073ccf1deee28a612c0ea1e4cb1d310379e63355de"
+          },
+          "delete-04": {
+            "claim": "observed DOM rows exactly equal the application-defined projection",
+            "expected_count": 3,
+            "observed_count": 3,
+            "order_required": true,
+            "expected_sha256": "fb9026fcf755a0712a86091fe517fe0c6e3019dff52eafc9cab0e429beeec6ad",
+            "observed_sha256": "fb9026fcf755a0712a86091fe517fe0c6e3019dff52eafc9cab0e429beeec6ad",
+            "expected_order_sha256": "18305f44685af83b9795b4073ccf1deee28a612c0ea1e4cb1d310379e63355de",
+            "observed_order_sha256": "18305f44685af83b9795b4073ccf1deee28a612c0ea1e4cb1d310379e63355de"
+          }
+        }
+      }
+    }
+  ],
+  "contract": {
+    "workers": [
+      {
+        "id": "http-server",
+        "concurrency": 1,
+        "metadata": {}
+      },
+      {
+        "id": "browser",
+        "concurrency": 1,
+        "metadata": {}
+      }
+    ],
+    "tasks": [
+      {
+        "id": "items.list",
+        "worker": "http-server",
+        "input_type": "ItemPageQuery",
+        "output_type": "ItemPage",
+        "depends_on": [],
+        "resources": {},
+        "timings": {
+          "http": {
+            "metric": "duration",
+            "upper_ms": 50.0,
+            "lower_ms": null,
+            "evidence": "measured",
+            "minimum_samples": 10,
+            "policy": "max",
+            "percentile": null,
+            "safety_factor": 1.3
+          }
+        },
+        "metadata": {}
+      },
+      {
+        "id": "items.insert",
+        "worker": "http-server",
+        "input_type": "NewItem",
+        "output_type": "StoredItem",
+        "depends_on": [],
+        "resources": {},
+        "timings": {
+          "http": {
+            "metric": "duration",
+            "upper_ms": 50.0,
+            "lower_ms": null,
+            "evidence": "measured",
+            "minimum_samples": 10,
+            "policy": "max",
+            "percentile": null,
+            "safety_factor": 1.3
+          }
+        },
+        "metadata": {}
+      },
+      {
+        "id": "items.delete",
+        "worker": "http-server",
+        "input_type": "ItemId",
+        "output_type": "DeletionResult",
+        "depends_on": [],
+        "resources": {},
+        "timings": {
+          "http": {
+            "metric": "duration",
+            "upper_ms": 50.0,
+            "lower_ms": null,
+            "evidence": "measured",
+            "minimum_samples": 10,
+            "policy": "max",
+            "percentile": null,
+            "safety_factor": 1.3
+          }
+        },
+        "metadata": {}
+      },
+      {
+        "id": "ui.feedback",
+        "worker": "browser",
+        "input_type": "UserAction",
+        "output_type": "VisibleStatus",
+        "depends_on": [],
+        "resources": {},
+        "timings": {
+          "visible": {
+            "metric": "duration",
+            "upper_ms": 16.0,
+            "lower_ms": null,
+            "evidence": "measured",
+            "minimum_samples": 10,
+            "policy": "max",
+            "percentile": null,
+            "safety_factor": 1.3
+          }
+        },
+        "metadata": {}
+      },
+      {
+        "id": "ui.render",
+        "worker": "browser",
+        "input_type": "ItemPage",
+        "output_type": "RenderedItemRows",
+        "depends_on": [
+          "items.list"
+        ],
+        "resources": {},
+        "timings": {
+          "visible": {
+            "metric": "duration",
+            "upper_ms": 16.0,
+            "lower_ms": null,
+            "evidence": "measured",
+            "minimum_samples": 10,
+            "policy": "max",
+            "percentile": null,
+            "safety_factor": 1.3
+          }
+        },
+        "metadata": {}
+      }
+    ],
+    "resources": []
+  },
+  "english_requirements": {
+    "schema": "dagcert-english-requirements/v1",
+    "claims": [
+      {
+        "id": "browse-sort-and-pagination",
+        "statement": "For the exact certified source and exercised SQLite dataset, the real browser displays exactly the database rows selected for the current page in the same order for initial load, ascending and descending sorts, and next/previous pagination; the list HTTP task and browser render task also satisfy their declared measured deadlines for the sequential reference workload.",
+        "primitive_refs": [
+          "task:items.list",
+          "task:ui.render",
+          "timing:items.list/http",
+          "timing:ui.render/visible"
+        ],
+        "checker_refs": [
+          "example.database-ui.browse-projection/v1"
+        ],
+        "assumptions": [
+          "The guarantee is limited to the exercised SQLite dataset and sequential reference workload.",
+          "The UI timing measures browser DOM mutation, not compositor paint or total network-to-paint latency."
+        ]
+      },
+      {
+        "id": "browser-insertion",
+        "statement": "For the exact certified source and exercised SQLite dataset, submitting the real browser form provides the measured immediate DOM feedback, crosses the real HTTP and SQLite insertion path, and then displays the newly committed row in the exact sorted page projection; the insertion and feedback tasks satisfy their declared deadlines for the sequential reference workload.",
+        "primitive_refs": [
+          "task:items.insert",
+          "task:items.list",
+          "task:ui.feedback",
+          "task:ui.render",
+          "timing:items.insert/http",
+          "timing:ui.feedback/visible",
+          "timing:ui.render/visible"
+        ],
+        "checker_refs": [
+          "example.database-ui.insertion-projection/v1"
+        ],
+        "assumptions": [
+          "The guarantee is limited to successful operations in the exercised SQLite dataset and sequential reference workload."
+        ]
+      },
+      {
+        "id": "browser-deletion",
+        "statement": "For the exact certified source and exercised SQLite dataset, activating a real browser delete control provides the measured immediate DOM feedback, crosses the real HTTP and SQLite deletion path, and then removes that committed record from the exact sorted page projection; the deletion and feedback tasks satisfy their declared deadlines for the sequential reference workload.",
+        "primitive_refs": [
+          "task:items.delete",
+          "task:items.list",
+          "task:ui.feedback",
+          "task:ui.render",
+          "timing:items.delete/http",
+          "timing:ui.feedback/visible",
+          "timing:ui.render/visible"
+        ],
+        "checker_refs": [
+          "example.database-ui.deletion-projection/v1"
+        ],
+        "assumptions": [
+          "The guarantee is limited to successful operations in the exercised SQLite dataset and sequential reference workload."
+        ]
+      }
+    ],
+    "metadata": {
+      "purpose": "Mandatory plain-English promises for the certified database-to-UI reference application."
+    }
+  }
+}

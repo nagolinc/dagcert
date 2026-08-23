@@ -1,0 +1,101 @@
+{
+  "schema": "dagcert-contract/v2",
+  "workers": [
+    {"id": "interface", "concurrency": 1},
+    {"id": "ledger", "concurrency": 1},
+    {"id": "summarizer", "concurrency": 3},
+    {"id": "renderer", "concurrency": 2}
+  ],
+  "resources": [
+    {"id": "snapshot-work", "capacity": 10, "initial": 2, "unit": "snapshots"},
+    {"id": "summary-lag", "capacity": 3, "initial": 0, "unit": "generations"}
+  ],
+  "tasks": [
+    {
+      "id": "vote.preview",
+      "worker": "interface",
+      "input_type": "VoteDelta",
+      "output_type": "PreviewTotal",
+      "depends_on": [],
+      "resources": {},
+      "timings": {
+        "completion": {
+          "metric": "duration",
+          "upper_ms": 16,
+          "minimum_samples": 10,
+          "safety_factor": 1.3
+        }
+      }
+    },
+    {
+      "id": "vote.commit",
+      "worker": "ledger",
+      "input_type": "VoteDelta",
+      "output_type": "CommittedTotal",
+      "depends_on": ["vote.preview"],
+      "resources": {
+        "snapshot-work": {"produce": 1},
+        "summary-lag": {"produce": 1}
+      },
+      "timings": {
+        "completion": {
+          "metric": "duration",
+          "upper_ms": 50,
+          "minimum_samples": 10,
+          "safety_factor": 1.3
+        },
+        "cadence": {
+          "metric": "interval",
+          "lower_ms": 100,
+          "upper_ms": 200,
+          "evidence": "assumed",
+          "minimum_samples": 0
+        }
+      }
+    },
+    {
+      "id": "summary.advance",
+      "worker": "summarizer",
+      "input_type": "Generation",
+      "output_type": "SummaryGeneration",
+      "depends_on": ["vote.commit"],
+      "resources": {"summary-lag": {"consume": 1}},
+      "timings": {
+        "completion": {
+          "metric": "duration",
+          "upper_ms": 50,
+          "minimum_samples": 10
+        },
+        "service-envelope": {
+          "metric": "duration",
+          "lower_ms": 80,
+          "upper_ms": 200,
+          "evidence": "assumed",
+          "minimum_samples": 0
+        }
+      }
+    },
+    {
+      "id": "snapshot.render",
+      "worker": "renderer",
+      "input_type": "VoteTotal",
+      "output_type": "TextSnapshot",
+      "depends_on": ["vote.commit"],
+      "resources": {"snapshot-work": {"consume": 1}},
+      "timings": {
+        "completion": {
+          "metric": "duration",
+          "upper_ms": 50,
+          "minimum_samples": 10
+        },
+        "service-envelope": {
+          "metric": "duration",
+          "lower_ms": 500,
+          "upper_ms": 1000,
+          "evidence": "assumed",
+          "minimum_samples": 0
+        }
+      }
+    }
+  ]
+}

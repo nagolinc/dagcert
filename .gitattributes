@@ -1,0 +1,9 @@
+# Dagcert certificates hash exact source bytes. Never rewrite tracked bytes on
+# checkout; force textual diffs separately so source remains reviewable.
+* -text diff
+
+# Binary artifacts should not be rendered as text diffs.
+*.png -diff
+*.sqlite3 -diff
+*.whl -diff
+*.gz -diff

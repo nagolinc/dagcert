@@ -1,0 +1,48 @@
+{
+  "schema": "dagcert-check-result/v2",
+  "checker": "example.flow-guarantees/v1",
+  "passed": true,
+  "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
+  "contract_sha256": "640d1b3bbbb3702a6f2172b19e0c65b9bc665702d295d6310c7be64eab40689b",
+  "evidence_sha256": "73c813840a862e5c51950299216e0cf164b70618db730667f4083f9d554115b7",
+  "requirements_sha256": "f6a981cce5e5d0587462cf3aaab29b91cd48dbc0b6c762adebbaf90d93ba5576",
+  "primitive_refs": [
+    "resource:snapshot-work",
+    "resource:summary-lag",
+    "task:snapshot.render",
+    "task:summary.advance",
+    "task:vote.commit",
+    "timing:snapshot.render/service-envelope",
+    "timing:summary.advance/service-envelope",
+    "timing:vote.commit/cadence"
+  ],
+  "findings": [],
+  "facts": {
+    "conditional": true,
+    "assumptions": [
+      "timing:vote.commit/cadence (interval) is assumed > 100ms and < 200ms",
+      "timing:summary.advance/service-envelope (duration) is assumed > 80ms and < 200ms",
+      "timing:snapshot.render/service-envelope (duration) is assumed > 500ms and < 1000ms"
+    ],
+    "claims": [
+      "task:snapshot.render is not starved after warm-up",
+      "task:summary.advance remains at most 3 generations out of date",
+      "the declared DAG has no structurally blocked task"
+    ],
+    "supply": {
+      "task": "snapshot.render",
+      "minimum_supply_per_second": 5.0,
+      "maximum_consumption_per_second": 4.0,
+      "initial_work": 2.0,
+      "warm_start_required": 2.0,
+      "passed": true
+    },
+    "lag": {
+      "task": "summary.advance",
+      "maximum_generation_rate": 10.0,
+      "minimum_update_rate": 15.0,
+      "maximum_generations": 3,
+      "passed": true
+    }
+  }
+}

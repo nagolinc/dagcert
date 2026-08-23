@@ -1,0 +1,99 @@
+{
+  "schema": "dagcert-contract/v2",
+  "metadata": {
+    "application": "certified-database-ui",
+    "scope": "Sequential reference workload through real SQLite, HTTP, and browser boundaries"
+  },
+  "workers": [
+    {"id": "http-server", "concurrency": 1},
+    {"id": "browser", "concurrency": 1}
+  ],
+  "resources": [],
+  "tasks": [
+    {
+      "id": "items.list",
+      "worker": "http-server",
+      "input_type": "ItemPageQuery",
+      "output_type": "ItemPage",
+      "depends_on": [],
+      "resources": {},
+      "timings": {
+        "http": {
+          "metric": "duration",
+          "upper_ms": 50,
+          "minimum_samples": 10,
+          "policy": "max",
+          "safety_factor": 1.3
+        }
+      }
+    },
+    {
+      "id": "items.insert",
+      "worker": "http-server",
+      "input_type": "NewItem",
+      "output_type": "StoredItem",
+      "depends_on": [],
+      "resources": {},
+      "timings": {
+        "http": {
+          "metric": "duration",
+          "upper_ms": 50,
+          "minimum_samples": 10,
+          "policy": "max",
+          "safety_factor": 1.3
+        }
+      }
+    },
+    {
+      "id": "items.delete",
+      "worker": "http-server",
+      "input_type": "ItemId",
+      "output_type": "DeletionResult",
+      "depends_on": [],
+      "resources": {},
+      "timings": {
+        "http": {
+          "metric": "duration",
+          "upper_ms": 50,
+          "minimum_samples": 10,
+          "policy": "max",
+          "safety_factor": 1.3
+        }
+      }
+    },
+    {
+      "id": "ui.feedback",
+      "worker": "browser",
+      "input_type": "UserAction",
+      "output_type": "VisibleStatus",
+      "depends_on": [],
+      "resources": {},
+      "timings": {
+        "visible": {
+          "metric": "duration",
+          "upper_ms": 16,
+          "minimum_samples": 10,
+          "policy": "max",
+          "safety_factor": 1.3
+        }
+      }
+    },
+    {
+      "id": "ui.render",
+      "worker": "browser",
+      "input_type": "ItemPage",
+      "output_type": "RenderedItemRows",
+      "depends_on": ["items.list"],
+      "resources": {},
+      "timings": {
+        "visible": {
+          "metric": "duration",
+          "upper_ms": 16,
+          "minimum_samples": 10,
+          "policy": "max",
+          "safety_factor": 1.3
+        }
+      }
+    }
+  ]
+}

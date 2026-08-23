@@ -1,0 +1,30 @@
+# Python bytecode and test/tool caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest-local-*/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments and local package verification environments
+.venv/
+venv/
+env/
+*venv/
+.wheel-*/
+.wheel-run-*/
+
+# Build products and packaging metadata
+build/
+dist/
+*.egg-info/
+.dist-check*/
+
+# Runtime-only example state
+examples/certified_database_ui/artifacts/runtime.sqlite3
+
+# Superseded audit staging; canonical audited artifacts are kept below artifacts/independent-audit
+examples/certified_database_ui/artifacts/independent-audit-v*/
+examples/certified_vote/artifacts/audit-claims-v3-sealed/
+examples/certified_vote/artifacts/audit-result-v3-sealed.json
+examples/certified_vote/artifacts/independent-audit-v*/

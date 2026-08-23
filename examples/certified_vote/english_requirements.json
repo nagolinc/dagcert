@@ -1,0 +1,73 @@
+{
+  "schema": "dagcert-english-requirements/v1",
+  "claims": [
+    {
+      "id": "completion-and-structural-progress",
+      "statement": "Each declared task's exact in-process Python implementation has ten successful completion samples, and the declared task/resource graph has no structural blocked state under its explicit scheduling assumptions.",
+      "primitive_refs": [
+        "task:vote.preview",
+        "task:vote.commit",
+        "task:summary.advance",
+        "task:snapshot.render",
+        "timing:vote.preview/completion",
+        "timing:vote.commit/completion",
+        "timing:summary.advance/completion",
+        "timing:snapshot.render/completion"
+      ],
+      "checker_refs": [],
+      "assumptions": [
+        "Declared resource effects match runtime behavior, acquisition is atomic, and scheduling is fair."
+      ]
+    },
+    {
+      "id": "in-process-responsiveness",
+      "statement": "For the measured exact-source in-process workload, preview_vote_total completes in less than 16ms and commit_vote_total completes in less than 50ms; this claim makes no browser, network, or persistence promise.",
+      "primitive_refs": [
+        "timing:vote.preview/completion",
+        "timing:vote.commit/completion"
+      ],
+      "checker_refs": [],
+      "assumptions": []
+    },
+    {
+      "id": "snapshot-non-starvation",
+      "statement": "In the declared conditional flow model, assuming vote.commit recurs between 100ms and 200ms and snapshot.render occupies a renderer for between 500ms and 1000ms, two renderer workers have sufficient snapshot-work after warm-up from two initial units.",
+      "primitive_refs": [
+        "worker:renderer",
+        "task:vote.commit",
+        "task:snapshot.render",
+        "resource:snapshot-work",
+        "timing:vote.commit/cadence",
+        "timing:snapshot.render/service-envelope"
+      ],
+      "checker_refs": [
+        "example.flow-guarantees/v1"
+      ],
+      "assumptions": [
+        "vote.commit recurs between 100 ms and 200 ms.",
+        "snapshot.render service duration remains between 500 ms and 1000 ms."
+      ]
+    },
+    {
+      "id": "bounded-summary-lag",
+      "statement": "In the declared conditional flow model, assuming the stated vote.commit cadence and summary.advance service envelope, three summarizer workers provide enough modeled service capacity to keep summary-lag at or below its declared three-generation capacity.",
+      "primitive_refs": [
+        "worker:summarizer",
+        "task:vote.commit",
+        "task:summary.advance",
+        "resource:summary-lag",
+        "timing:vote.commit/cadence",
+        "timing:summary.advance/service-envelope"
+      ],
+      "checker_refs": [
+        "example.flow-guarantees/v1"
+      ],
+      "assumptions": [
+        "The declared vote.commit cadence and summary.advance service envelope hold."
+      ]
+    }
+  ],
+  "metadata": {
+    "purpose": "Mandatory plain-English promises for the certified vote reference application."
+  }
+}

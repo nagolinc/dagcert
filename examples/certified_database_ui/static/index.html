@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Certified item registry</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">Dagcert reference application</p>
+      <h1>Item registry</h1>
+      <p>SQLite records rendered through a real HTTP API and browser UI.</p>
+    </header>
+
+    <section class="panel" aria-labelledby="add-heading">
+      <h2 id="add-heading">Add an item</h2>
+      <form id="add-form">
+        <label>Title <input id="title" name="title" required autocomplete="off"></label>
+        <label>Category <input id="category" name="category" required autocomplete="off"></label>
+        <button type="submit">Add item</button>
+      </form>
+      <p id="action-status" role="status" aria-live="polite">Ready</p>
+    </section>
+
+    <section class="panel" aria-labelledby="items-heading">
+      <div class="toolbar">
+        <div>
+          <h2 id="items-heading">Database items</h2>
+          <p id="result-summary">Loading...</p>
+        </div>
+        <div class="sort-controls">
+          <label>Sort
+            <select id="sort-field">
+              <option value="title">Title</option>
+              <option value="category">Category</option>
+              <option value="created">Created</option>
+            </select>
+          </label>
+          <button id="sort-direction" type="button" data-direction="asc">Ascending</button>
+        </div>
+      </div>
+
+      <table>
+        <thead><tr><th>Title</th><th>Category</th><th>Action</th></tr></thead>
+        <tbody id="item-rows"></tbody>
+      </table>
+      <p id="empty-state" hidden>No items on this page.</p>
+
+      <nav class="pagination" aria-label="Item pages">
+        <button id="previous-page" type="button">Previous</button>
+        <span id="page-label">Page 1</span>
+        <button id="next-page" type="button">Next</button>
+      </nav>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

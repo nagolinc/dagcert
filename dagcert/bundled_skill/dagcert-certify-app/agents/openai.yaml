@@ -1,0 +1,4 @@
+interface:
+  display_name: "Certify App with dagcert"
+  short_description: "Certify behavior without degrading the product"
+  default_prompt: "Use $dagcert-certify-app to certify this application while preserving or improving its user experience."

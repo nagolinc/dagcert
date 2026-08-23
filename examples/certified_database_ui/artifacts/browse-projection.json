@@ -1,0 +1,101 @@
+{
+  "schema": "dagcert-check-result/v2",
+  "checker": "example.database-ui.browse-projection/v1",
+  "passed": true,
+  "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+  "contract_sha256": "5962419cfcbfdb2175522c6c825cb824dda73f705b6b53712b19ab0a1737dd0b",
+  "evidence_sha256": "adfa038083c116fb78008a9ba03a677b55837cc647ece2ad0b1246f93676f2bc",
+  "requirements_sha256": "f612140a6b7ec6f2caf3bc4d5e44ea2b3be709487aeb6691271220df97cb45a5",
+  "primitive_refs": [
+    "task:items.list",
+    "task:ui.render",
+    "timing:items.list/http",
+    "timing:ui.render/visible"
+  ],
+  "findings": [],
+  "facts": {
+    "claim": "every named database-to-DOM projection case matches",
+    "cases": {
+      "initial-title-ascending": {
+        "claim": "observed DOM rows exactly equal the application-defined projection",
+        "expected_count": 3,
+        "observed_count": 3,
+        "order_required": true,
+        "expected_sha256": "7b6588e7abea017b694ce45907ac6708dcf29862b3d285c0817344ed8b44a90c",
+        "observed_sha256": "7b6588e7abea017b694ce45907ac6708dcf29862b3d285c0817344ed8b44a90c",
+        "expected_order_sha256": "c1a9f25c1237d04f6fa73c0725e5e3cfdf9337680b549da6c08016dfad31aa3f",
+        "observed_order_sha256": "c1a9f25c1237d04f6fa73c0725e5e3cfdf9337680b549da6c08016dfad31aa3f"
+      },
+      "title-descending": {
+        "claim": "observed DOM rows exactly equal the application-defined projection",
+        "expected_count": 3,
+        "observed_count": 3,
+        "order_required": true,
+        "expected_sha256": "fb9026fcf755a0712a86091fe517fe0c6e3019dff52eafc9cab0e429beeec6ad",
+        "observed_sha256": "fb9026fcf755a0712a86091fe517fe0c6e3019dff52eafc9cab0e429beeec6ad",
+        "expected_order_sha256": "18305f44685af83b9795b4073ccf1deee28a612c0ea1e4cb1d310379e63355de",
+        "observed_order_sha256": "18305f44685af83b9795b4073ccf1deee28a612c0ea1e4cb1d310379e63355de"
+      },
+      "next-page": {
+        "claim": "observed DOM rows exactly equal the application-defined projection",
+        "expected_count": 3,
+        "observed_count": 3,
+        "order_required": true,
+        "expected_sha256": "9a6acc299dd7146ec159a194e0bb73145683ace745b55168fe70cd36f8ef4ac5",
+        "observed_sha256": "9a6acc299dd7146ec159a194e0bb73145683ace745b55168fe70cd36f8ef4ac5",
+        "expected_order_sha256": "19eef5ca5615ce5a1dfad1e1e9738c152b8dbaf8f24697934f8d0124902cc55c",
+        "observed_order_sha256": "19eef5ca5615ce5a1dfad1e1e9738c152b8dbaf8f24697934f8d0124902cc55c"
+      },
+      "previous-page": {
+        "claim": "observed DOM rows exactly equal the application-defined projection",
+        "expected_count": 3,
+        "observed_count": 3,
+        "order_required": true,
+        "expected_sha256": "fb9026fcf755a0712a86091fe517fe0c6e3019dff52eafc9cab0e429beeec6ad",
+        "observed_sha256": "fb9026fcf755a0712a86091fe517fe0c6e3019dff52eafc9cab0e429beeec6ad",
+        "expected_order_sha256": "18305f44685af83b9795b4073ccf1deee28a612c0ea1e4cb1d310379e63355de",
+        "observed_order_sha256": "18305f44685af83b9795b4073ccf1deee28a612c0ea1e4cb1d310379e63355de"
+      },
+      "category-desc": {
+        "claim": "observed DOM rows exactly equal the application-defined projection",
+        "expected_count": 3,
+        "observed_count": 3,
+        "order_required": true,
+        "expected_sha256": "9cac3622b39c4d9fdf690bf8a36486caae48914e409fcbeaae0d2eaa614eaccd",
+        "observed_sha256": "9cac3622b39c4d9fdf690bf8a36486caae48914e409fcbeaae0d2eaa614eaccd",
+        "expected_order_sha256": "669f8288891fea2558675c44f47551148d2579add244560d405a86828c80f73d",
+        "observed_order_sha256": "669f8288891fea2558675c44f47551148d2579add244560d405a86828c80f73d"
+      },
+      "category-asc": {
+        "claim": "observed DOM rows exactly equal the application-defined projection",
+        "expected_count": 3,
+        "observed_count": 3,
+        "order_required": true,
+        "expected_sha256": "72e728345caefe394fdbbe8551b47b6379bd52e3f542f45db767c87c1e149b70",
+        "observed_sha256": "72e728345caefe394fdbbe8551b47b6379bd52e3f542f45db767c87c1e149b70",
+        "expected_order_sha256": "e16514589b208076ce253f78dd6da10c6427d5ba6b727b6ec7f74deaef5a179b",
+        "observed_order_sha256": "e16514589b208076ce253f78dd6da10c6427d5ba6b727b6ec7f74deaef5a179b"
+      },
+      "created-asc": {
+        "claim": "observed DOM rows exactly equal the application-defined projection",
+        "expected_count": 3,
+        "observed_count": 3,
+        "order_required": true,
+        "expected_sha256": "7b6588e7abea017b694ce45907ac6708dcf29862b3d285c0817344ed8b44a90c",
+        "observed_sha256": "7b6588e7abea017b694ce45907ac6708dcf29862b3d285c0817344ed8b44a90c",
+        "expected_order_sha256": "c1a9f25c1237d04f6fa73c0725e5e3cfdf9337680b549da6c08016dfad31aa3f",
+        "observed_order_sha256": "c1a9f25c1237d04f6fa73c0725e5e3cfdf9337680b549da6c08016dfad31aa3f"
+      },
+      "created-desc": {
+        "claim": "observed DOM rows exactly equal the application-defined projection",
+        "expected_count": 3,
+        "observed_count": 3,
+        "order_required": true,
+        "expected_sha256": "fb9026fcf755a0712a86091fe517fe0c6e3019dff52eafc9cab0e429beeec6ad",
+        "observed_sha256": "fb9026fcf755a0712a86091fe517fe0c6e3019dff52eafc9cab0e429beeec6ad",
+        "expected_order_sha256": "18305f44685af83b9795b4073ccf1deee28a612c0ea1e4cb1d310379e63355de",
+        "observed_order_sha256": "18305f44685af83b9795b4073ccf1deee28a612c0ea1e4cb1d310379e63355de"
+      }
+    }
+  }
+}

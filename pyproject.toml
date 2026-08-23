@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dagcert"
+version = "0.6.0"
+description = "Plain-English certificates over workers, tasks, resources, and timings"
+readme = "readme.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{name = "dagcert contributors"}]
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/nagolinc/dagcert"
+Documentation = "https://github.com/nagolinc/dagcert#readme"
+
+[project.optional-dependencies]
+yaml = ["PyYAML>=6.0.2"]
+dev = ["pytest>=8.0", "mypy>=1.11"]
+viewer = ["selenium>=4.30"]
+
+[project.scripts]
+dagcert = "dagcert.cli:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["dagcert*", "examples*"]
+
+[tool.setuptools.package-data]
+dagcert = ["bundled_skill/**/*.md", "bundled_skill/**/*.yaml", "docs/*.md"]
+examples = [
+    "*.txt",
+    "*.js",
+    "*.mjs",
+    "certified_vote/*.json",
+    "certified_vote/*.md",
+    "certified_vote/artifacts/*.json",
+    "certified_vote/artifacts/*.jsonl",
+    "certified_vote/artifacts/independent-audit/**/*.json",
+    "certified_vote/artifacts/independent-audit/**/*.txt",
+    "certified_database_ui/*.json",
+    "certified_database_ui/*.md",
+    "certified_database_ui/.dagcertignore",
+    "certified_database_ui/static/*.html",
+    "certified_database_ui/static/*.css",
+    "certified_database_ui/static/*.js",
+    "certified_database_ui/artifacts/*.json",
+    "certified_database_ui/artifacts/*.jsonl",
+    "certified_database_ui/artifacts/*.png",
+    "certified_database_ui/artifacts/independent-audit/**/*.json",
+    "certified_database_ui/artifacts/independent-audit/**/*.txt",
+    "stats_viewer/*.html",
+    "stats_viewer/*.css",
+    "stats_viewer/*.js",
+    "stats_viewer/*.md",
+    "stats_viewer/screenshots/*.png",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["dagcert"]

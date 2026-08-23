@@ -1,0 +1,321 @@
+{
+  "schema": "dagcert-check-result/v2",
+  "checker": "optional.independent-semantic-audit/v3",
+  "passed": true,
+  "source_fingerprint": "578af1d54318db4738ab1166fe3fd09b03f86fd5b434903b8913014a08849718",
+  "contract_sha256": "5962419cfcbfdb2175522c6c825cb824dda73f705b6b53712b19ab0a1737dd0b",
+  "evidence_sha256": "adfa038083c116fb78008a9ba03a677b55837cc647ece2ad0b1246f93676f2bc",
+  "requirements_sha256": "f612140a6b7ec6f2caf3bc4d5e44ea2b3be709487aeb6691271220df97cb45a5",
+  "primitive_refs": [
+    "task:items.delete",
+    "task:items.insert",
+    "task:items.list",
+    "task:ui.feedback",
+    "task:ui.render",
+    "timing:items.delete/http",
+    "timing:items.insert/http",
+    "timing:items.list/http",
+    "timing:ui.feedback/visible",
+    "timing:ui.render/visible"
+  ],
+  "findings": [],
+  "facts": {
+    "worker_model": "gpt-5.6-luna",
+    "one_claim_per_packet": true,
+    "audits": [
+      {
+        "claim_index": 1,
+        "claim_id": "browse-sort-and-pagination",
+        "english": "For the exact certified source and exercised SQLite dataset, the real browser displays exactly the database rows selected for the current page in the same order for initial load, ascending and descending sorts, and next/previous pagination; the list HTTP task and browser render task also satisfy their declared measured deadlines for the sequential reference workload.",
+        "packet_sha256": "0bbd12900b6f59611b0901e8a930bafff7e81a5e38ea1db40d9d65e8ace6922c",
+        "passed": true,
+        "summary": "The claim is faithfully supported for the explicitly bounded certified source, exercised SQLite database, and sequential reference workload. The browse checker reports matching expected and observed DOM projections, including stable row-key and ordering hashes for initial, sorted, and next/previous-page cases. The HTTP evidence crosses the real ThreadingHTTPServer, SQLite query, and JSON response path, while browser evidence comes from Selenium against the real application. Recorded maxima remain below the declared 50 ms list deadline and 16 ms DOM-mutation deadline. The result does not establish compositor paint, end-to-end network-to-paint latency, concurrent behavior, or arbitrary datasets, but those limits are stated assumptions rather than hidden omissions.",
+        "claim_reasoning": "The implementation maps the promised path directly: app.py validates page and sort parameters, executes parameterized LIMIT/OFFSET SQLite queries with deterministic secondary id ordering, and returns the selected rows; static/app.js fetches that endpoint and renderRows replaces the real table body with the returned records. certify.py drives Selenium through initial load, direction changes, category and created sorting, next-page, and previous-page transitions, waiting for a load-version change before observing rows. The browse projection result contains nine passing cases with equal expected and observed counts and hashes, including all named pagination and sorting cases. The timing analysis reports 12 real list HTTP samples with a 12.44 ms maximum and 19 render samples with a 0.40 ms maximum, both under their declared limits after the stated safety factor. These facts entail the narrow claim under its exact-source, exercised-dataset, sequential-workload, and DOM-mutation assumptions.",
+        "rule0_assessment": "The supplied source does not introduce an arbitrary application queue, queue limit, rate limiter, retry, debounce, timeout, cancellation path, or fake fast path to satisfy this claim. The HTTP measurements are recorded around urllib requests to the live local server, and the browser checks use Selenium against the real served HTML and JavaScript; the SQL expected projection and DOM observation are compared by stable semantic keys and visible fields. The application remains a genuine SQLite-backed list implementation. The main Rule 0 limitation is scope rather than product degradation: only seven seeded rows and sequential interactions are exercised, and the browser timing intentionally stops at DOM mutation. That is expressly disclosed and prevents overclaiming paint or concurrency behavior.",
+        "reviewed_files": [
+          ".dagcertignore",
+          "__init__.py",
+          "app.py",
+          "certify.py",
+          "README.md",
+          "static/app.js",
+          "static/index.html",
+          "static/style.css"
+        ],
+        "strengths": [
+          {
+            "subject": "Real database and HTTP projection path",
+            "evidence": "app.py opens SQLite for each list request, executes SELECT id,title,category with validated sort columns, deterministic id tie-breaking, LIMIT and OFFSET, and serializes the result through ApplicationHandler._json; timing metadata identifies the boundary as HTTP+SQLite+JSON.",
+            "impact": "The evidence measures the promised backend operation rather than a timed stand-in, so the selected records and ordering are tied to actual database and HTTP behavior."
+          },
+          {
+            "subject": "Real browser rendering verification",
+            "evidence": "certify.py opens a Selenium browser, navigates to the served base URL, clicks the real sort and pagination controls, waits for data-load-version changes, and compares observed [data-item-row] elements and visible title/category fields against read-only SQL projections.",
+            "impact": "The browser portion of the claim is directly exercised across the actual UI state transitions, reducing the risk that a backend-only check masks a rendering defect."
+          },
+          {
+            "subject": "Exact ordering and membership checks",
+            "evidence": "The browse checker passes initial-title-ascending, title-descending, next-page, previous-page, category-asc/desc, and created-asc/desc cases, with equal expected and observed counts, content hashes, and order hashes for every case.",
+            "impact": "Both row membership and order are checked for the claim's named browse scenarios, including deterministic tie behavior."
+          },
+          {
+            "subject": "Deadline evidence meets declared thresholds",
+            "evidence": "Contract analysis reports 12 list HTTP samples with observed maximum 12.4358 ms and certified upper bound 16.1665 ms against 50 ms, plus 19 UI-render samples with observed maximum 0.4 ms and certified upper bound 0.52 ms against 16 ms.",
+            "impact": "The measured sequential reference workload has substantial margin under both declared deadlines."
+          }
+        ],
+        "weaknesses": [
+          {
+            "subject": "Concurrent or out-of-order browser loads",
+            "evidence": "static/app.js updates shared state and calls loadRows without aborting or sequencing overlapping fetches; a slower earlier request could render after a newer request if users interact rapidly. The audit assumption and evidence cover only sequential interactions.",
+            "impact": "Rapid real-user sorting or pagination could display stale rows even though the sequential claim passes; this is outside the certified promise but is a meaningful product correctness risk."
+          },
+          {
+            "subject": "Dataset and workload narrowness",
+            "evidence": "The certificate README and claim assumption limit the guarantee to the exercised SQLite dataset and sequential reference workload; the collected browse cases use page size three and a small seeded database.",
+            "impact": "The result says little about large tables, long titles, duplicate sort values at scale, empty or partial pages, database contention, or concurrent users."
+          },
+          {
+            "subject": "Timing metric is intentionally partial",
+            "evidence": "static/app.js records ui.render from before replaceChildren and DOM construction until the synchronous mutation completes, while the explicit assumption says the UI timing is DOM mutation rather than compositor paint or total network-to-paint latency.",
+            "impact": "A user may experience slower visual presentation than the measured 16 ms figure under rendering, layout, paint, network, or browser scheduling costs."
+          }
+        ],
+        "improvements": [
+          {
+            "priority": "high",
+            "subject": "Prevent stale asynchronous renders",
+            "recommendation": "Add request sequencing or AbortController cancellation so only the latest list request may update the table and load-version state.",
+            "rationale": "This preserves correct user-visible ordering during rapid sort and pagination actions without imposing an arbitrary queue or reducing normal application behavior."
+          },
+          {
+            "priority": "medium",
+            "subject": "Broaden projection coverage",
+            "recommendation": "Add realistic cases for empty pages, partial final pages, duplicate titles/categories, larger datasets, and boundary page values while keeping the same real HTTP and Selenium path.",
+            "rationale": "These cases would test the SQL tie-breaker, has_next/has_previous state, and rendering behavior where pagination bugs are more likely, improving confidence beyond the seven-row fixture."
+          },
+          {
+            "priority": "medium",
+            "subject": "Measure end-to-end visual latency separately",
+            "recommendation": "Retain the DOM-mutation metric but add an explicitly labeled browser paint or user-observable completion metric if a broader responsiveness promise is desired.",
+            "rationale": "This would align timing evidence with what users see while preserving the current narrow claim and avoiding conflation of DOM work with compositor or network latency."
+          }
+        ],
+        "test_fitting_risks": [
+          {
+            "subject": "Small fixed fixture",
+            "evidence": "collect initializes a reset database with seven SEED_ITEMS, uses page_size three, and the browse checker observes only three rows per case.",
+            "impact": "The implementation could still have scale, empty-page, or boundary defects that cannot appear in this fixed workload; the claim remains valid only because it explicitly limits the dataset."
+          },
+          {
+            "subject": "Timing instrumentation measures a very small synchronous region",
+            "evidence": "recordTiming wraps status text assignment or renderRows DOM construction, and recorded UI values are mostly 0.0 to 0.4 ms.",
+            "impact": "These values are not evidence for full request-to-visible-paint latency, although the prompt's explicit assumption correctly narrows the English promise."
+          }
+        ],
+        "evidence_gaps": [
+          {
+            "subject": "No stress or concurrency evidence",
+            "evidence": "All timing samples declare observed_worker_concurrency 1, and certify.py issues requests and browser actions sequentially.",
+            "impact": "The claim cannot be generalized to concurrent HTTP requests, simultaneous browser actions, SQLite locking, or scheduler contention."
+          },
+          {
+            "subject": "No compositor-paint or network-to-paint measurement",
+            "evidence": "The timing evidence boundary is real browser DOM and the claim explicitly assumes DOM mutation rather than compositor paint or total network-to-paint latency.",
+            "impact": "Visual smoothness and end-to-end responsiveness remain unverified beyond the stated DOM deadline."
+          }
+        ]
+      },
+      {
+        "claim_index": 2,
+        "claim_id": "browser-insertion",
+        "english": "For the exact certified source and exercised SQLite dataset, submitting the real browser form provides the measured immediate DOM feedback, crosses the real HTTP and SQLite insertion path, and then displays the newly committed row in the exact sorted page projection; the insertion and feedback tasks satisfy their declared deadlines for the sequential reference workload.",
+        "packet_sha256": "25dff0e3984bf9fb35af686b8331043a6ec47989aa0315657adf39e5f4c01782",
+        "passed": true,
+        "summary": "The browser-insertion claim is entailed for the explicitly scoped successful, sequential workload. The supplied source implements a real Selenium form submission, fetches the real POST /api/items endpoint, commits through SQLite, reloads the sorted page, and compares observed DOM rows with a SQLite-derived projection. Evidence contains five insertion projection cases with matching expected and observed hashes, ten real HTTP insertion timings below the 50 ms ceiling, and numerous browser feedback/render timings below 16 ms. The result is narrow rather than a general production guarantee.",
+        "claim_reasoning": "static/app.js calls showFeedback synchronously before the POST and again after a successful response, then awaits loadRows; loadRows crosses the real HTTP GET boundary and renderRows mutates the actual DOM. app.py's POST handler validates input, executes a parameterized SQLite INSERT inside a context-managed connection, returns the committed row, and list_items performs the sorted SQL projection. certify.py exercises the real browser form five times, waits for load-version changes, captures DOM rows, and compares them against read_sql_projection. insertion-projection.json reports matching expected and observed membership/order hashes for insert-00 through insert-04. timings.jsonl records ten items.insert HTTP+SQLite commit+JSON samples ranging from about 7.9 to 9.3 ms and browser feedback/render samples well under 16 ms, satisfying the declared sequential evidence.",
+        "rule0_assessment": "No source evidence shows an arbitrary queue, rate limit, timeout, retry, debounce, rejection policy, fake insertion path, or reduced application behavior added for certification. The POST and subsequent GET are genuine urllib/Selenium-to-ThreadingHTTPServer requests, and app.py performs real SQLite writes and reads. The harness does serialize its five insert cases and uses WebDriverWait guards, but the contract explicitly limits the promise to a sequential reference workload and the README states that waits do not alter application behavior. The main Rule 0 limitation is scope: timings do not establish behavior under concurrent saturation, slow storage, browser paint, or failures, so those must not be inferred from this certificate.",
+        "reviewed_files": [
+          ".dagcertignore",
+          "__init__.py",
+          "app.py",
+          "certify.py",
+          "README.md",
+          "static/app.js",
+          "static/index.html",
+          "static/style.css"
+        ],
+        "strengths": [
+          {
+            "subject": "Real insertion boundary",
+            "evidence": "static/app.js submits JSON with fetch('/api/items', {method:'POST'}); certify.py drives #add-form through Selenium; app.py's do_POST invokes insert_item, which executes a parameterized SQLite INSERT and returns the committed lastrowid.",
+            "impact": "The evidence measures the promised browser-to-HTTP-to-SQLite path rather than a mocked helper, giving users confidence that a successful form submission is persisted through the actual application boundary."
+          },
+          {
+            "subject": "Post-commit sorted projection",
+            "evidence": "After a successful POST, addItem awaits loadRows; loadRows performs the real GET with the current sort and direction, and renderRows rebuilds the table. certify.py derives expected_projection from SQLite ORDER BY and compares it with observed Selenium rows. All five insertion cases have identical expected and observed hashes and order hashes.",
+            "impact": "The newly stored item and the rest of the visible page are verified as the exact committed sorted projection, reducing stale or client-only display risk for the exercised workload."
+          },
+          {
+            "subject": "Timing coverage for declared tasks",
+            "evidence": "timings.jsonl includes ten items.insert samples with HTTP+SQLite commit+JSON metadata, plus more than the ten required ui.feedback and ui.render samples. Insertion values are approximately 7.9–9.3 ms against a 50 ms upper bound; DOM feedback/render values are approximately 0–0.4 ms against 16 ms.",
+            "impact": "The supplied measurements support the declared deadline claims for the narrow sequential reference run, with the required sample counts and observed task/type metadata."
+          }
+        ],
+        "weaknesses": [
+          {
+            "subject": "Failure-path coverage",
+            "evidence": "The claim is explicitly limited to successful operations, while the insertion checker cases and timing samples only cover successful POSTs. app.py and app.js contain error responses/status messages, but those paths are not exercised by this claim's evidence.",
+            "impact": "Users may receive useful failure feedback, but this certificate provides no deadline or projection assurance when validation fails, the server returns an error, or the network drops."
+          },
+          {
+            "subject": "Sequential-only timing scope",
+            "evidence": "The contract declares concurrency 1 for both http-server and browser, every timing sample records observed_worker_concurrency 1, and the English assumption limits the guarantee to the sequential reference workload.",
+            "impact": "Concurrent submissions, SQLite lock contention, and overlapping browser actions could behave differently; the certificate must not be read as a throughput or saturation guarantee."
+          },
+          {
+            "subject": "DOM timing interpretation",
+            "evidence": "recordTiming measures performance.now() around textContent/DOM mutation and labels the boundary real browser DOM; it does not measure compositor paint or full network-to-paint latency.",
+            "impact": "The claim supports immediate DOM feedback as instrumented, but a user-visible frame may occur later under a busy browser or rendering environment."
+          }
+        ],
+        "improvements": [
+          {
+            "priority": "medium",
+            "subject": "Failure and contention evidence",
+            "recommendation": "Add separate non-invalidating checks for invalid input, HTTP failure, network interruption, and concurrent or locked SQLite operations, while keeping the current successful sequential claim unchanged.",
+            "rationale": "This would expose user-facing failure behavior and operational limits without restricting the product or weakening the existing promise."
+          },
+          {
+            "priority": "low",
+            "subject": "Feedback timing semantics",
+            "recommendation": "If the product promise intends painted visibility rather than DOM mutation, add an explicit browser-frame or paint-oriented measurement and state that interpretation in the English assumption.",
+            "rationale": "The current instrumentation is appropriate for DOM feedback but cannot distinguish mutation completion from the next rendered frame."
+          }
+        ],
+        "test_fitting_risks": [
+          {
+            "subject": "Narrow synthetic insertion data",
+            "evidence": "certify.py inserts five predictable titles named 'Zulu browser 00' through 'Zulu browser 04' and deletes each immediately; the checker only receives those five projection cases.",
+            "impact": "This is adequate for the stated exercised dataset but leaves duplicate titles, unusual Unicode/lengths, page-boundary insertions, and larger datasets untested, so robustness beyond the certified workload is unknown."
+          },
+          {
+            "subject": "Harness serialization",
+            "evidence": "exercise_browser waits for each load-version increment before capturing the next case, and HTTP timing collection performs requests in a simple loop with observed concurrency 1.",
+            "impact": "The evidence is faithful to the declared sequential workload but would not detect race conditions caused by overlapping form submissions or stale responses."
+          }
+        ],
+        "evidence_gaps": [
+          {
+            "subject": "Paint and end-to-end latency",
+            "evidence": "Browser events record only the elapsed time from performance.now() to synchronous DOM updates; no compositor, frame, or total POST-to-row-visible measurement is supplied.",
+            "impact": "The evidence cannot establish a stronger claim about the time until pixels are painted or the full network-to-render interval."
+          },
+          {
+            "subject": "Dataset and deployment generalization",
+            "evidence": "The claim and README explicitly restrict certification to the exact source, exercised SQLite dataset, and sequential workload; projection evidence contains five insertion cases only.",
+            "impact": "Different database sizes, filesystem conditions, deployments, or concurrent users may exceed the measured deadlines or expose different pagination behavior."
+          }
+        ]
+      },
+      {
+        "claim_index": 3,
+        "claim_id": "browser-deletion",
+        "english": "For the exact certified source and exercised SQLite dataset, activating a real browser delete control provides the measured immediate DOM feedback, crosses the real HTTP and SQLite deletion path, and then removes that committed record from the exact sorted page projection; the deletion and feedback tasks satisfy their declared deadlines for the sequential reference workload.",
+        "packet_sha256": "f5a61c2155f85bdb7608d0baaaaaf019c88e81aec6f81ccf597023ffefe5ce06",
+        "passed": true,
+        "summary": "The browser-deletion claim is faithfully supported for the explicitly bounded source, SQLite dataset, successful operations, and sequential reference workload. The evidence exercises Selenium against the real delete button, fetches the real DELETE endpoint, commits through SQLite, reloads through the real list endpoint, and compares the resulting DOM rows with a read-only SQL projection. Ten measured delete HTTP samples, twenty feedback samples, nineteen render samples, and passing deletion projection cases all satisfy the declared deadlines. The result does not establish behavior under concurrency, failures, arbitrary datasets, or compositor paint latency.",
+        "claim_reasoning": "The implementation connects each promised boundary. static/app.js attaches a delete listener to every rendered row, sets pending feedback, sends DELETE /api/items/{id}, reports completion only after a successful response, and calls loadRows. app.py parses the identifier, executes parameterized DELETE FROM items WHERE id = ?, commits when the sqlite context exits, returns the acknowledged identifier, and list_items subsequently queries the same database with deterministic sorting and pagination. certify.py exercises five browser deletions, waits for a new DOM load version, and computes expected rows from SQL after each deletion. The deletion checker reports matching membership and order hashes for delete-00 through delete-04. The timing analysis reports ten delete HTTP samples with observed maximum 9.2362 ms against 50 ms, feedback maximum 0.1 ms against 16 ms, and render maximum 0.4 ms against 16 ms. These facts entail the narrow stated promise under its assumptions.",
+        "rule0_assessment": "No queue, queue limit, timeout, retry, debounce, rejection path, fake delete fast path, or mocked database operation is introduced to satisfy certification. The browser action crosses fetch and the actual HTTP server; the server executes a real parameterized SQLite DELETE and the following list request reads the committed database. The projection comparison uses Selenium-observed rows and an application SQL projection rather than a synthetic timing loop. A meaningful scope limitation remains: ThreadingHTTPServer permits concurrent handlers even though the evidence records observed concurrency one, and the harness only tests successful sequential operations on a small seeded dataset. Those limitations are consistent with the claim's explicit assumption and should not be converted into user-facing restrictions merely to simplify proof.",
+        "reviewed_files": [
+          ".dagcertignore",
+          "README.md",
+          "__init__.py",
+          "app.py",
+          "certify.py",
+          "static/app.js",
+          "static/index.html",
+          "static/style.css"
+        ],
+        "strengths": [
+          {
+            "subject": "Real deletion path",
+            "evidence": "app.js sends DELETE /api/items/${identifier}; app.py executes parameterized DELETE FROM items WHERE id = ? inside sqlite3.connect and returns the committed identifier after the context closes.",
+            "impact": "The evidence represents the actual browser-to-HTTP-to-SQLite operation promised, reducing the risk that certification measured a stand-in."
+          },
+          {
+            "subject": "Post-delete projection validation",
+            "evidence": "certify.py waits for data-load-version to advance after each delete, then captures Selenium DOM rows and computes expected_projection from the same SQLite database with deterministic ORDER BY and LIMIT/OFFSET; all five deletion cases have matching expected and observed hashes.",
+            "impact": "A deleted record's resulting sorted page membership and order are checked at the user-visible DOM boundary."
+          },
+          {
+            "subject": "Deadline evidence",
+            "evidence": "The supplied analysis reports 10 items.delete HTTP samples, 20 ui.feedback samples, and 19 ui.render samples; each certified upper bound remains below its declared 50 ms or 16 ms limit.",
+            "impact": "The sequential reference workload has sufficient measured samples for the named deletion and feedback/render timing obligations."
+          }
+        ],
+        "weaknesses": [
+          {
+            "subject": "Concurrency semantics",
+            "evidence": "ApplicationServer is a ThreadingHTTPServer, while the contract declares worker concurrency 1 and the timing samples only record observed_worker_concurrency 1 from sequential requests.",
+            "impact": "Concurrent deletes or list/delete races are not characterized; users under simultaneous activity could observe stale projections or SQLite contention outside the certified scope."
+          },
+          {
+            "subject": "Failure and retry behavior",
+            "evidence": "removeItem reports failure and clears the pending marker for non-OK responses or fetch exceptions, but the claim and browser exercise cover only successful deletions and do not test an unavailable server, malformed response, or competing deletion.",
+            "impact": "The certificate does not establish recovery, idempotency, or state consistency after partial failures."
+          },
+          {
+            "subject": "Visible timing interpretation",
+            "evidence": "recordTiming measures elapsed time around textContent/dataset changes and renderRows DOM construction; it does not measure compositor paint or end-to-end click-to-paint latency.",
+            "impact": "The 16 ms result is a DOM-mutation/render-script bound, not a guarantee of pixels being painted within 16 ms on every display or machine."
+          }
+        ],
+        "improvements": [
+          {
+            "priority": "high",
+            "subject": "Concurrent delete consistency",
+            "recommendation": "Add explicit concurrency tests for simultaneous deletes, delete-versus-list races, and repeated deletion of the same identifier, while documenting the intended serialization or snapshot semantics.",
+            "rationale": "The current sequential evidence is valid for its stated scope, but production users can generate overlapping requests; testing this would reveal stale-page or contention behavior without imposing an arbitrary queue limit."
+          },
+          {
+            "priority": "medium",
+            "subject": "Failure-path browser tests",
+            "recommendation": "Exercise non-OK DELETE responses, network interruption after server commit, and a missing record, then verify pending-row cleanup, user feedback, and subsequent reload state.",
+            "rationale": "The UI has distinct failure branches, but they are unverified; covering them would improve user trust and detect divergence between client state and committed SQLite state."
+          },
+          {
+            "priority": "low",
+            "subject": "Clarify timing boundary",
+            "recommendation": "Rename or document the visible timing metric as DOM-mutation latency, or add a separate paint-aware measurement if the product promise is intended to cover actual visual presentation.",
+            "rationale": "The current implementation and README support DOM timing, while the word visible can be read more broadly; explicit terminology prevents users from overinterpreting the 16 ms result."
+          }
+        ],
+        "test_fitting_risks": [
+          {
+            "subject": "Small synthetic workload",
+            "evidence": "The browser exercise deletes five newly inserted Zulu browser rows from a small seeded registry, and HTTP timing samples use short fixed payloads and page sizes of three.",
+            "impact": "The checks can miss performance or correctness problems caused by larger tables, long strings, unusual identifiers, or deletion of records on other pages."
+          },
+          {
+            "subject": "Harness-derived wait condition",
+            "evidence": "certify.py waits for body data-load-version increments, a counter set by renderRows, rather than independently waiting for the deleted row to disappear or for a database acknowledgment observed outside the app's own event logic.",
+            "impact": "A regression that increments the counter while rendering an incorrect page could be caught by projection hashes in these cases, but timing and state-transition coverage remain coupled to application instrumentation."
+          }
+        ],
+        "evidence_gaps": [
+          {
+            "subject": "Dataset and deployment breadth",
+            "evidence": "The packet explicitly limits the guarantee to the exercised SQLite dataset and sequential reference workload; only the supplied seeded and temporary timing/browser rows are exercised.",
+            "impact": "No evidence supports arbitrary production-sized datasets, persistent deployment conditions, multiple browser instances, or concurrent users."
+          },
+          {
+            "subject": "Committed-state independence",
+            "evidence": "The post-delete expected projection is read from SQLite and the endpoint returns the deleted identifier, but there is no independent transaction-log or second connection assertion specifically proving durability beyond normal sqlite context commit semantics.",
+            "impact": "The supplied source makes the commit path credible, yet durability under abrupt process or storage failure is outside the evidence."
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dagcert report</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#">Dagcert</a>
+      <nav>
+        <a class="active" href="#overview">Overview</a><a href="#graph">Graph</a
+        ><a href="#timings">Timings</a>
+      </nav>
+      <div class="status">
+        <span class="status-dot"></span
+        ><span id="header-status">certificate verified</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero" id="overview">
+        <div>
+          <p class="eyebrow">EXACT-SOURCE CERTIFICATE</p>
+          <h1><span id="hero-task-count">3</span> tasks, one readable story</h1>
+          <p class="lede">
+            See what runs, what it needs, how long it takes, and which
+            guarantees are conditional.
+          </p>
+        </div>
+        <label class="load-button"
+          >Load artifacts<input
+            id="artifact-files"
+            type="file"
+            accept=".json,.jsonl"
+            multiple
+          /></label>
+      </section>
+
+      <section class="summary-grid" id="summary"></section>
+
+      <section class="section" id="graph">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">WORK FLOW</p>
+            <h2>Task DAG</h2>
+          </div>
+          <p class="section-note">
+            Edges show declared dependencies. Resource flow is shown on each
+            task.
+          </p>
+        </div>
+        <div class="panel graph-panel">
+          <svg id="dag" role="img" aria-label="Task dependency graph"></svg>
+        </div>
+      </section>
+
+      <section class="section" id="timings">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">MEASURED BEHAVIOR</p>
+            <h2>Timing health</h2>
+          </div>
+          <div class="legend">
+            <span><i class="orange"></i>duration</span
+            ><span><i class="teal"></i>interval</span
+            ><span><i class="plum"></i>age / wait</span>
+          </div>
+        </div>
+        <div class="timing-layout">
+          <div class="panel">
+            <div class="panel-title">
+              <h3>Distributions by task</h3>
+              <span>bound vs limit</span>
+            </div>
+            <div id="histograms"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-title">
+              <h3>Throughput &amp; staleness</h3>
+              <span>relative to bounds</span>
+            </div>
+            <svg
+              id="trend"
+              role="img"
+              aria-label="Recent throughput and staleness observations"
+            ></svg>
+          </div>
+        </div>
+      </section>
+
+      <section class="section split-section">
+        <div>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">CAPACITY & FLOW</p>
+              <h2>Resources</h2>
+            </div>
+          </div>
+          <div id="resources" class="resource-grid"></div>
+        </div>
+        <div>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">WHAT IS CLAIMED</p>
+              <h2>Guarantees</h2>
+            </div>
+          </div>
+          <div id="guarantees" class="guarantee-stack"></div>
+        </div>
+      </section>
+
+      <footer>
+        <span id="fingerprint"></span
+        ><span>Optional viewer · not part of certificate semantics</span>
+      </footer>
+    </main>
+    <script src="sample-data.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
