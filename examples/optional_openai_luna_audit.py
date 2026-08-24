@@ -32,6 +32,9 @@ from dagcert import (
 from dagcert.certificate import canonical_json
 
 
+DEFAULT_MAX_AUDIT_PACKET_BYTES = 200_000
+
+
 RESPONSE_SCHEMA: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
@@ -118,16 +121,16 @@ def prepare_handoffs(
     context: CheckContext,
     *,
     output_directory: str | Path,
+    max_packet_bytes: int = DEFAULT_MAX_AUDIT_PACKET_BYTES,
 ) -> tuple[AuditHandoff, ...]:
     """Create one sealed directory and prompt for each independent claim audit."""
+    if isinstance(max_packet_bytes, bool) or not isinstance(max_packet_bytes, int) or max_packet_bytes < 1:
+        raise ValueError("max_packet_bytes must be a positive integer")
     output = Path(output_directory)
-    output.mkdir(parents=True, exist_ok=True)
     shared = _shared_packet(context)
-    handoffs: list[AuditHandoff] = []
+    prepared: list[tuple[int, dict[str, Any], bytes, str, str]] = []
     for index, claim_value in enumerate(context.requirements.claims, 1):
         claim = claim_value.to_mapping()
-        claim_directory = output / f"claim-{index:03d}"
-        claim_directory.mkdir(parents=True, exist_ok=True)
         packet = {
             "schema": "dagcert-semantic-audit-packet/v3",
             "claim_index": index,
@@ -136,13 +139,25 @@ def prepare_handoffs(
         }
         packet_bytes = canonical_json(packet)
         packet_digest = sha256(packet_bytes).hexdigest()
+        prompt = _worker_prompt(packet, packet_digest)
+        _enforce_handoff_size(index, "packet", len(packet_bytes), max_packet_bytes)
+        _enforce_handoff_size(index, "worker prompt", len(prompt.encode("utf-8")), max_packet_bytes)
+        prepared.append((index, packet, packet_bytes, packet_digest, prompt))
+
+    # Preflight every claim before creating anything. One oversized claim aborts
+    # the entire audit instead of leaving launchable partial handoffs behind.
+    output.mkdir(parents=True, exist_ok=True)
+    handoffs: list[AuditHandoff] = []
+    for index, _packet, packet_bytes, packet_digest, prompt in prepared:
+        claim_directory = output / f"claim-{index:03d}"
+        claim_directory.mkdir(parents=True, exist_ok=True)
         packet_path = claim_directory / "audit-packet.json"
         schema_path = claim_directory / "response-schema.json"
         prompt_path = claim_directory / "worker-prompt.txt"
         response_path = claim_directory / "worker-response.json"
         packet_path.write_bytes(packet_bytes + b"\n")
         schema_path.write_text(json.dumps(RESPONSE_SCHEMA, indent=2) + "\n", encoding="utf-8")
-        prompt_path.write_text(_worker_prompt(packet, packet_digest), encoding="utf-8")
+        prompt_path.write_text(prompt, encoding="utf-8")
         handoffs.append(AuditHandoff(
             index,
             claim_directory,
@@ -169,6 +184,19 @@ def prepare_handoffs(
     }
     (output / "audit-manifest.json").write_bytes(canonical_json(manifest) + b"\n")
     return tuple(handoffs)
+
+
+def _enforce_handoff_size(claim_index: int, artifact: str, size: int, limit: int) -> None:
+    if size <= limit:
+        return
+    raise ValueError(
+        f"claim {claim_index} audit {artifact} is {size:,} bytes; the limit is {limit:,} bytes. "
+        "Refusing to materialize or launch this audit. Oversized handoffs usually mean source, "
+        "evidence, checker output, or a proof/reachability enumeration was duplicated. Store the "
+        "large object once in a content-addressed artifact, keep timing samples to compact facts "
+        "and digests, and reference the shared object by SHA-256. Do not raise the limit merely "
+        "to obtain an audit."
+    )
 
 
 def _shared_packet(context: CheckContext) -> dict[str, Any]:
@@ -503,6 +531,12 @@ def main(argv: list[str] | None = None) -> int:
         command.add_argument("--check-result", action="append", default=[])
     prepare = commands.choices["prepare"]
     prepare.add_argument("--output-directory", required=True)
+    prepare.add_argument(
+        "--max-packet-bytes",
+        type=int,
+        default=DEFAULT_MAX_AUDIT_PACKET_BYTES,
+        help="refuse any per-claim packet or rendered prompt above this byte count (default: 200000)",
+    )
     accept = commands.choices["accept"]
     accept.add_argument("--handoff-directory", required=True)
     accept.add_argument("--output", required=True)
@@ -518,6 +552,7 @@ def main(argv: list[str] | None = None) -> int:
         handoffs = prepare_handoffs(
             context,
             output_directory=args.output_directory,
+            max_packet_bytes=args.max_packet_bytes,
         )
         print(json.dumps([
             {

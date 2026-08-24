@@ -3,7 +3,12 @@ import json
 
 import pytest
 
-from examples.optional_openai_luna_audit import accept_handoffs, build_context, prepare_handoffs
+from examples.optional_openai_luna_audit import (
+    DEFAULT_MAX_AUDIT_PACKET_BYTES,
+    accept_handoffs,
+    build_context,
+    prepare_handoffs,
+)
 
 
 LONG_ASSESSMENT = (
@@ -92,6 +97,18 @@ def test_each_claim_gets_a_separate_sealed_handoff_and_response(project):
     assert result.facts["one_claim_per_packet"] is True
     assert len(result.facts["audits"]) == 2
     assert json.loads(output.read_text(encoding="utf-8"))["checker"] == "optional.independent-semantic-audit/v3"
+
+
+def test_oversized_claim_packet_refuses_entire_audit_before_writing(project):
+    large_source = Path(project["root"]) / "repeated-proof-enumeration.py"
+    large_source.write_text("WITNESS = " + repr("x" * DEFAULT_MAX_AUDIT_PACKET_BYTES), encoding="utf-8")
+    context = _two_claim_context(project)
+    audit_root = Path(project["root"]) / "artifacts" / "oversized-audit"
+
+    with pytest.raises(ValueError, match=r"limit is 200,000 bytes.*Refusing.*content-addressed"):
+        prepare_handoffs(context, output_directory=audit_root)
+
+    assert not audit_root.exists()
 
 
 def test_response_cannot_be_reused_for_another_claim_packet(project):

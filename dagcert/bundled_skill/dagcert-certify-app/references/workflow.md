@@ -79,6 +79,12 @@ reviewable `examples/independent_audit_prompt.txt` template, and the packet embe
 manifest and source contents. For every directory, the active
 ChatGPT/Codex agent performs a separate tool call (shown as its argument object):
 
+`prepare` preflights every claim and refuses the entire audit if any packet or rendered prompt is
+larger than the 200,000-byte default. Do not launch a worker and do not increase the limit merely to
+silence that error. Remove repeated source/evidence/checker metadata, keep timing samples compact,
+and store large enumerations once in a content-addressed artifact referenced by SHA-256. Override
+`--max-packet-bytes` only for an explicit user-approved reason.
+
 ```text
 py -m examples.optional_openai_luna_audit prepare \
   --contract APP_ROOT/dag_contract.json \

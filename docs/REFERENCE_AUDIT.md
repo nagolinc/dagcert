@@ -5,6 +5,13 @@ strengths, weaknesses, improvements, test-fitting risks, evidence gaps, and inva
 Every claim is sealed into its own packet and assigned to a different fresh `gpt-5.6-luna`
 subagent.
 
+Preparation refuses the entire audit before writing handoffs when any individual sealed packet or
+rendered worker prompt exceeds 200,000 bytes. Treat that as an evidence-design failure, not a reason
+to launch a larger worker prompt: remove duplicated metadata, keep timing samples compact, store a
+large proof/reachability enumeration once in a content-addressed checker artifact, and reference it
+by SHA-256. Do not increase `--max-packet-bytes` merely to make the audit run; an agent needs an
+explicit user-approved reason to override the default.
+
 The four claims in `examples/certified_vote` pass that independent audit. They pass because their
 English wording matches their evidence precisely:
 

@@ -136,6 +136,10 @@ claim reasoning, reviewed files, real user-experience impact, strengths, weaknes
 evidence gaps, best-practice concerns, and signs that code was overfit to passing. The responses are
 digest-checked and accepted into an optional certificate-bound checker result.
 
+Preparation atomically refuses the entire audit if any per-claim packet or rendered prompt exceeds
+the 200,000-byte default. That is treated as duplicated or badly structured evidence to fix—not as
+a reason to send a multi-megabyte prompt or silently raise the limit.
+
 The audit is a tool the app-building agent runs only when the user asks for it. It is never an
 automatic build or release gate. See [the independent-audit workflow](docs/REFERENCE_AUDIT.md) and
 the [audit handoff implementation](examples/optional_openai_luna_audit.py).
