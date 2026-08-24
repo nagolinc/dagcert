@@ -1,7 +1,7 @@
 """Optional derived guarantees using only the four Dagcert primitives.
 
-This example deliberately adds no ComfyUI, queue, blocked-state, or model-lag
-primitive. It derives those statements from task resource flow, worker capacity,
+This example deliberately adds no queue, blocked-state, or model-lag primitive.
+It derives those statements from task resource flow, worker capacity,
 and measured or assumed timing bounds.
 """
 

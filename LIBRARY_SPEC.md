@@ -128,7 +128,7 @@ The primitives intentionally have flow semantics:
 
 Consequently analyzers can derive statements such as:
 
-- `comfy.render` has enough supplied work to avoid starvation after warm-up;
+- `image.render` has enough supplied work to avoid starvation after warm-up;
 - every declared task has a feasible worker/resource path and no structural blocked state;
 - `model.update` remains at most G generation units behind its producer.
 

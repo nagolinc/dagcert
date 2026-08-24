@@ -15,7 +15,7 @@ def test_four_primitives_express_supply_progress_and_generation_lag(tmp_path: Pa
         "workers": [
             {"id": "source", "concurrency": 1},
             {"id": "updater", "concurrency": 3},
-            {"id": "comfy", "concurrency": 2},
+            {"id": "renderer", "concurrency": 2},
         ],
         "resources": [
             {"id": "render-work", "capacity": 10, "initial": 2, "unit": "prompts"},
@@ -42,7 +42,7 @@ def test_four_primitives_express_supply_progress_and_generation_lag(tmp_path: Pa
                 }},
             },
             {
-                "id": "comfy.render", "worker": "comfy", "input_type": "Work", "output_type": "Image",
+                "id": "image.render", "worker": "renderer", "input_type": "Work", "output_type": "Image",
                 "depends_on": ["produce"], "resources": {"render-work": {"consume": 1}},
                 "timings": {"duration": {
                     "metric": "duration", "lower_ms": 500, "upper_ms": 1200, "minimum_samples": 3,
@@ -56,7 +56,7 @@ def test_four_primitives_express_supply_progress_and_generation_lag(tmp_path: Pa
         "claims": [{
             "id": "flow",
             "statement": "The declared flow is supplied and bounded.",
-            "primitive_refs": ["task:produce", "task:update", "task:comfy.render"],
+            "primitive_refs": ["task:produce", "task:update", "task:image.render"],
             "checker_refs": ["example.flow-guarantees/v1"],
             "assumptions": [],
         }],
@@ -70,16 +70,16 @@ def test_four_primitives_express_supply_progress_and_generation_lag(tmp_path: Pa
     for task, values in {
         "produce": (20, 22, 24),
         "update": (140, 145, 150),
-        "comfy.render": (700, 750, 800),
+        "image.render": (700, 750, 800),
     }.items():
-        worker = {"produce": "source", "update": "updater", "comfy.render": "comfy"}[task]
+        worker = {"produce": "source", "update": "updater", "image.render": "renderer"}[task]
         types = {
             "produce": ("Input", "Work"),
             "update": ("Generation", "Model"),
-            "comfy.render": ("Work", "Image"),
+            "image.render": ("Work", "Image"),
         }[task]
         produced = {"render-work": 1, "model-lag": 1} if task == "produce" else {}
-        consumed = {"model-lag": 1} if task == "update" else {"render-work": 1} if task == "comfy.render" else {}
+        consumed = {"model-lag": 1} if task == "update" else {"render-work": 1} if task == "image.render" else {}
         for value in values:
             recorder.append(TimingSample(
                 task_id=task, case="duration", value_ms=value, worker_id=worker,
@@ -96,7 +96,7 @@ def test_four_primitives_express_supply_progress_and_generation_lag(tmp_path: Pa
     )
     result = check_flow_guarantees(
         context,
-        supply=SupplyClaim("comfy.render", "duration", "produce", "cadence", "render-work"),
+        supply=SupplyClaim("image.render", "duration", "produce", "cadence", "render-work"),
         lag=LagClaim("produce", "cadence", "update", "duration", "model-lag", 3),
     )
     assert result.passed

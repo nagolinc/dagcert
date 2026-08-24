@@ -1,83 +1,253 @@
-# dag-certificate
+# DOES YOUR LLM ALSO STRUGGLE WITH QUEUE THEORY?
 
-`dagcert` issues exact-source certificates about four primitives: **workers, tasks, resources, and
-timings**. That is the complete application model.
+Your app compiles. The happy-path tests pass. Then real users discover that a worker can starve, a
+resource can never become available, work arrives faster than it completes, derived state becomes
+permanently stale, or an “async” action quietly blocks the UI.
 
-Tasks acquire, consume, and produce resources. Timings cover duration, arrival interval, waiting,
-and age; they may be measured or explicitly assumed. That is enough to express and derive claims
-such as supplied workers not being starved, declared tasks not being structurally blocked, and a
-model remaining at most G generations behind—without adding special queue, UI, HTTP, ComfyUI,
-blocked-state, staleness, or proof primitives.
+Dagcert helps an LLM prove that the exact application performs and keeps making progress. It turns
+plain-English product promises into a formal task/resource model, measures the real implementation,
+and produces a certificate bound to the exact source and evidence.
 
-Certification is observational by default. It is never permission to add a finite queue, timeout,
-rate limit, rejection, retry, debounce, cancellation, or serialization point merely to pass. A
-truthful failure is better than a certificate obtained by making the application worse.
+It is designed to catch a large class of failures involving:
 
-## Quick start
+- queues, arrival rates, throughput, and service capacity;
+- blocked states, impossible dependencies, and unavailable resources;
+- worker starvation and insufficient upstream work;
+- stale models, summaries, caches, and other derived state;
+- tasks that never actually execute or were never timed;
+- functions receiving or returning the wrong application type;
+- endpoints and user actions that miss responsiveness deadlines; and
+- application/database state that never appears correctly in the real UI.
+
+Dagcert does not claim to eliminate every bug or race condition. It produces narrow, inspectable
+guarantees for named source, measurements, assumptions, and application checks. Change any bound
+input and verification fails.
+
+## Quickstart: tell your LLM to certify the app
+
+Give the LLM building or maintaining your app this instruction:
+
+> **Certify this app with https://github.com/nagolinc/dagcert. Measure the real application, and do
+> not change product behavior merely to make the certificate pass.**
+
+That is the intended interface. The agent can install Dagcert, read its installed help, initialize
+the focused agent guide, inspect the complete examples, instrument the real runtime boundaries, and
+return both a certificate and an honest account of anything it could not prove.
+
+The equivalent manual start is:
 
 ```text
-python -m pip install -e .
+python -m pip install git+https://github.com/nagolinc/dagcert.git
+python -m dagcert help
 dagcert init path/to/app
-dagcert lint path/to/app/dag_contract.json --requirements path/to/app/english_requirements.json
-dagcert analyze path/to/app/dag_contract.json path/to/app/artifacts/timings.jsonl --requirements path/to/app/english_requirements.json --source-root path/to/app
-dagcert issue --contract path/to/app/dag_contract.json --evidence path/to/app/artifacts/timings.jsonl --requirements path/to/app/english_requirements.json --source-root path/to/app --output path/to/app/artifacts/certificate.json
-dagcert verify path/to/app/artifacts/certificate.json --contract path/to/app/dag_contract.json --evidence path/to/app/artifacts/timings.jsonl --requirements path/to/app/english_requirements.json --source-root path/to/app
 ```
 
-`dagcert init` also copies the bundled getting-started skill into the application when policy
-permits. (`pip install` alone must not modify an arbitrary working directory.) Start or reload the
-agent session so it discovers the new skill, then say:
+`dagcert init` copies the focused getting-started skill into the app when policy permits. Start or
+reload the agent session so it discovers the skill, then give it the instruction above. Installed
+`dagcert help` is the detailed source of truth; the skill is a short agent entry point into it.
 
-> Using dagcert, certify this app without changing product behavior merely to pass.
+Recognizable non-streaming HTTP work defaults to `<50ms`, and visible local UI feedback defaults to
+`<16ms`. You do not need to specify those deadlines unless the product has a deliberate, documented
+reason to use different ones.
 
-The skill already applies `<50ms` for recognizable non-streaming HTTP handling and `<16ms` for
-visible local UI feedback unless the product deliberately specifies another requirement.
-Run `python -m dagcert help` for the installed source-of-truth guides and example index.
+### Rule 0: certification must improve the user experience
 
-## What is verified
+Certification is observational by default. It is not permission to add arbitrary finite queues,
+timeouts, rate limits, rejection, automatic retry, debounce delays, cancellation, or serialization
+points merely to obtain a passing certificate. A truthful failure is better than a certificate
+obtained by breaking the app.
 
-For the exact source manifest, contract, and evidence named by a certificate, Dagcert verifies:
+## The core library and what it can certify
 
-- a mandatory plain-English requirements document with stable claim IDs, assumptions, and exact
-  references to the formal primitives and application checkers that support each promise;
+The formal application model contains only four primitives:
 
-- an acyclic task graph with valid worker/resource references;
-- feasible resource acquisitions and flows;
-- a duration timing for every declared task;
-- measured timing coverage and safety-adjusted lower/upper bounds;
-- explicit conditional assumptions for unmeasured external timing;
-- derived structural progress for the declared DAG;
-- exact bindings and passing status of every selected optional checker.
+- **workers** perform work and have declared concurrency;
+- **tasks** transform named input types into named output types and depend on other tasks;
+- **resources** have capacity and state that tasks acquire, consume, or produce; and
+- **timings** describe duration, arrival interval, waiting, or age, using measurements or explicit
+  assumptions.
 
-The requirements document is not a fifth application-model primitive. It is the mandatory,
-human-readable statement of what the certificate promises. Its full contents and SHA-256 digest
-are embedded in the certificate, and verification fails if even the wording changes.
+Those primitives are enough to express conditional statements such as:
 
-Every issuance also runs and embeds a mandatory deterministic English-to-formal translation
-audit. It rejects uncovered formal tasks or timings, unresolved references, missing required
-application checkers, and assumed timings that have no explicit English assumption. This proves
-mapping completeness and traceability. When the user requests the deeper independent semantic
-review, the Luna workflow audits whether each English statement is actually faithful to the exact
-implementation and evidence; it remains a user-invoked tool, not an automatic release gate.
+- every declared task has successful completion evidence;
+- every declared task has a feasible worker/resource path;
+- the declared graph has no structural blocked state;
+- task X receives enough work to avoid starvation after warm-up;
+- available workers provide enough service capacity for the arrival rate;
+- model X is never more than G generations out of date; and
+- a handler or visible action completes within its declared deadline.
 
-The generic checker boundary lets applications add new derivations without adding new primitives.
-See `examples/optional_flow_checker.py` for supply, blocked-state, and generation-lag guarantees.
+The core also provides a small checker protocol. Applications can prove domain-specific facts—such
+as “these database rows are exactly the rows visible in the DOM”—without adding database, browser,
+queue, or UI concepts to the core ontology.
 
-## Optional viewer and helpers
+### From a plain-English requirement to a formal certificate
 
-`examples/stats_viewer` is a presentation-only artifact viewer modeled on the useful hierarchy of
-the DSPPMG statistics page. It displays the DAG, resource flow, timing distributions, recent trends,
-guarantees, and assumptions. Selenium-reviewed desktop and mobile screenshots are included.
+The English requirements are the source of truth, not documentation added after the proof:
 
-Other optional examples provide a Mithril buffered-delta UI pattern, multi-page browser checking,
-and sealed independent-audit handoffs from the active ChatGPT session to one fresh
-`gpt-5.6-luna` subagent per claim. The browser helper includes an exact-projection check for the
-common claim that application/database rows appear correctly in the real DOM; see
-[`dagcert/docs/database-ui.md`](dagcert/docs/database-ui.md), or run
-`python -m dagcert help database-ui` after installation.
+```text
+english_requirements.json
+        |
+        | each claim names assumptions and formal/checker references
+        v
+dag_contract.json: workers + tasks + resources + timings
+        |
+        | deterministic analysis + measurements of the exact app
+        v
+timing evidence + optional application checker results
+        |
+        | exact source/content binding + translation audit
+        v
+certificate.json
+```
 
-That installed help topic points to `examples.certified_database_ui`, a complete SQLite, HTTP,
-JavaScript, and Selenium application with certified insertion, deletion, sorting, pagination,
-50 ms HTTP handling, 16 ms UI feedback/rendering, and one independent Luna audit per claim.
+1. `english_requirements.json` states every promised behavior in ordinary language. Each claim has
+   a stable ID, explicit assumptions, and exact references to the primitives or application
+   checkers intended to support it.
+2. `dag_contract.json` is the formal translation using the four primitives.
+3. Runtime evidence records real task executions, timings, worker identity, observed input/output
+   types, concurrency, resource effects, and failures. Optional checkers record additional facts.
+4. Deterministic analysis checks graph/resource feasibility, timing coverage and bounds, explicit
+   assumptions, and structural progress.
+5. Every issuance performs a mandatory deterministic translation audit. It rejects uncovered formal
+   tasks or timings, unresolved English references, absent required checkers, and assumed timings
+   without a matching English assumption.
+6. `certificate.json` embeds the complete English requirements, formal primitives, analysis, and
+   checker results, with cryptographic bindings to the exact source and evidence.
 
-See [LIBRARY_SPEC.md](LIBRARY_SPEC.md) for precise semantics and design decisions.
+The core modules are deliberately limited to contract loading, evidence recording, deterministic
+analysis, English/formal traceability, the checker boundary, and certificate issue/verification.
+Framework integrations, UI patterns, visualization, and domain-specific checks are optional
+supporting code rather than new primitives.
+
+### Independent semantic audit
+
+Deterministic translation auditing proves coverage and traceability. It cannot decide whether a
+formally valid claim faithfully captures what a person actually meant in English. When the user
+requests an independent audit, the app-building ChatGPT/Codex session runs the included audit tool.
+
+The tool generates one sealed handoff packet **per English claim**. Each packet contains that claim,
+the exact source, formal contract, evidence, deterministic analysis, assumptions, and checker
+results. The active session hands each packet to a different fresh `gpt-5.6-luna` worker using the
+user's OpenAI subscription—no API key or separate API billing.
+
+Each worker acts as a skeptical senior engineer, not a rubber stamp. Its structured response covers
+claim reasoning, reviewed files, real user-experience impact, strengths, weaknesses, improvements,
+evidence gaps, best-practice concerns, and signs that code was overfit to passing. The responses are
+digest-checked and accepted into an optional certificate-bound checker result.
+
+The audit is a tool the app-building agent runs only when the user asks for it. It is never an
+automatic build or release gate. See [the independent-audit workflow](docs/REFERENCE_AUDIT.md) and
+the [audit handoff implementation](examples/optional_openai_luna_audit.py).
+
+## Bonus features
+
+These are useful, reusable parts of the Dagcert repository, but they are not additional core
+primitives or mandatory product policies.
+
+### `/stats`: understand the certificate instead of reading JSON
+
+The optional [`/stats` viewer](examples/stats_viewer/README.md) turns contract, evidence, and
+certificate artifacts into a useful browser dashboard. It shows:
+
+- the task DAG and which worker performs each task;
+- resource production, consumption, acquisition, capacity, and current flow;
+- timing histograms for every measured task/case;
+- recent timing trends, throughput, and staleness/age signals;
+- which guarantees passed or failed;
+- which conclusions are conditional on assumptions; and
+- exact certificate/source identity.
+
+It is presentation-only: viewing statistics cannot change or weaken the certificate. The included
+static viewer can load artifacts directly in the browser and includes Selenium-reviewed desktop and
+mobile screenshots. Apps can serve the same assets at `/stats` or adapt the unminified HTML, CSS,
+and JavaScript to their existing server.
+
+### Fast frontend, slow and unreliable backend
+
+[`optional_mithril_buffered_delta.js`](examples/optional_mithril_buffered_delta.js) implements the
+important “frontend fast, backend slow” pattern for Mithril applications:
+
+- a click changes the visible optimistic value immediately;
+- rapid changes are buffered and submitted as one delta after an explicit debounce interval;
+- changes made while a request is in flight become the next delta;
+- an authoritative server response reconciles the displayed value; and
+- after failure, the optimistic delta remains visible, the error is exposed, and retry is an
+  explicit application decision rather than an invented infinite retry policy.
+
+Dagcert can certify the immediate UI task against the 16 ms default and the asynchronous server
+task separately. The helper deliberately chooses no queue limit, request timeout, rate limit,
+automatic retry, or rejection policy. Its executable tests are in
+[`optional_mithril_buffered_delta.test.mjs`](examples/optional_mithril_buffered_delta.test.mjs).
+
+### Reusable flow and browser checkers
+
+| Helper | What it provides |
+| --- | --- |
+| [`optional_flow_checker.py`](examples/optional_flow_checker.py) | Conditional supply/non-starvation, service-capacity, bounded-generation-lag, and blocked-state checks using only workers, tasks, resources, and timings. |
+| [`optional_browser_checker.py`](examples/optional_browser_checker.py) | Read-model/database to real Selenium DOM exact-projection checks, including semantic row keys, visible fields, ordering, pagination, and repeated cases. |
+| [`optional_openai_luna_audit.py`](examples/optional_openai_luna_audit.py) | The sealed one-claim-per-worker independent audit workflow described above. |
+
+These helpers demonstrate the extension boundary. An application remains responsible for choosing
+its actual query, selectors, workload, assumptions, and product behavior.
+
+## Complete examples and their example certifications
+
+The repository ships two complete, checked-in certificates. Both include mandatory plain-English
+requirements and a separately accepted independent audit for every English claim.
+
+### Certified vote and flow model
+
+[`examples/certified_vote`](examples/certified_vote/README.md) is a deliberately narrow in-process
+example showing how the core primitives express performance and conditional flow guarantees.
+
+Its checked-in certificate proves and independently audits:
+
+- ten successful measured executions for every declared task;
+- no structural blocked state under the stated scheduling/resource assumptions;
+- `<16ms` in-process vote preview and `<50ms` in-process commit;
+- enough modeled upstream work to prevent snapshot-render starvation after warm-up; and
+- enough modeled summarizer capacity to remain within three generations of lag.
+
+Inspect its [plain-English requirements](examples/certified_vote/english_requirements.json),
+[formal contract](examples/certified_vote/dag_contract.json),
+[certificate](examples/certified_vote/artifacts/certificate.json), and
+[independent audit result](examples/certified_vote/artifacts/independent-audit-result.json).
+
+This example deliberately makes no browser, HTTP, database, or production worker-pool promise. Its
+requirements and independent audit state those limitations plainly.
+
+### Certified database-to-UI application
+
+[`examples/certified_database_ui`](examples/certified_database_ui/README.md) is a real SQLite, HTTP,
+JavaScript, and Selenium application.
+
+Its checked-in certificate proves and independently audits:
+
+- exact database-to-DOM membership and ordering on initial load;
+- ascending and descending sorting;
+- next/previous pagination;
+- insertion through the browser, HTTP endpoint, SQLite commit, and final DOM;
+- deletion through the same real boundaries;
+- `<50ms` measured non-streaming HTTP work; and
+- `<16ms` immediate browser feedback and local rendering for the measured workload.
+
+Inspect its [plain-English requirements](examples/certified_database_ui/english_requirements.json),
+[formal contract](examples/certified_database_ui/dag_contract.json),
+[certificate](examples/certified_database_ui/artifacts/certificate.json), and
+[independent audit result](examples/certified_database_ui/artifacts/independent-audit-result.json).
+Run `python -m dagcert help database-ui` for the reusable certification workflow.
+
+## Manual CLI workflow
+
+Agents normally discover these commands through installed help. The underlying sequence is:
+
+```text
+dagcert lint APP/dag_contract.json --requirements APP/english_requirements.json
+dagcert analyze APP/dag_contract.json APP/artifacts/timings.jsonl --requirements APP/english_requirements.json --source-root APP
+dagcert issue --contract APP/dag_contract.json --evidence APP/artifacts/timings.jsonl --requirements APP/english_requirements.json --source-root APP --output APP/artifacts/certificate.json
+dagcert verify APP/artifacts/certificate.json --contract APP/dag_contract.json --evidence APP/artifacts/timings.jsonl --requirements APP/english_requirements.json --source-root APP
+```
+
+Repeat `--check-result PATH` during both issuance and verification for every selected application
+checker. See [LIBRARY_SPEC.md](LIBRARY_SPEC.md) for exact semantics and design decisions.
