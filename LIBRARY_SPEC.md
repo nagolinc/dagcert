@@ -59,13 +59,20 @@ The contract is not authoritative for task types. For Python, Dagcert parses the
 callable, requires exactly one explicit source-defined input class and an inline finite union of
 explicit source-defined outcome classes, rejects `Any` throughout that boundary, runs strict mypy
 over the real implementation body itself, and seals both
-the extraction and compiler result. Python operations use `@dagcert.operation`; its runtime guard
+the extraction and compiler result. Python operations use `@dagcert.runtime.operation`; its runtime guard
 adds `dagcert.runtime.UnhandledException` to every outcome union. The contract must cover that
 kernel-owned variant and cannot add, omit, or rename a source outcome.
 The kernel-owned exception variant cannot be assigned resource effects. Code that recovers or
 releases capacity must catch the failure and return an explicit source-defined recovery outcome.
 The v4 Python provider currently rejects async callables because a synchronous decorator cannot
 type exceptions and cancellation raised while awaiting them.
+
+Decorator names are provenance-checked. `operation` must resolve from `dagcert` or
+`dagcert.runtime`, and `dataclass` must resolve from the standard-library `dataclasses` module;
+local rebindings and source-tree modules that shadow either trusted module are rejected. At runtime,
+the operation guard recursively validates the actual input and returned dataclass fields against
+the resolved source annotations. A malformed value becomes `UnhandledException`, so an `Any` value
+originating in an external dependency cannot silently cross a certified task edge.
 
 Resource effects remain formal transitions, but any unconditional derived amount is the minimum
 effect across the complete source outcome union. Thus a success outcome producing one queue item
@@ -265,8 +272,9 @@ SHA-256 hashes it. It ignores common generated directories and `.dagcertignore` 
 selected checker artifacts inside the source root are automatically excluded to avoid
 self-reference.
 
-`dagcert-certificate/v6` records source identity, exclusions, contract/evidence/requirements
-digests, source signature extraction and strict compiler result, the complete normalized English
+`dagcert-certificate/v7` records source identity, exclusions, contract/evidence/requirements
+digests, source signature extraction and strict compiler result, the exact Dagcert source/runtime
+type-enforcement kernel descriptor and source-file manifest hash, the complete normalized English
 requirements, the mandatory translation audit, serialized
 primitives and compositions, deterministic primitive and claim analysis, selected checker results
 and hashes, issue time, and its own

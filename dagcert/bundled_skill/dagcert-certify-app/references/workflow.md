@@ -27,7 +27,7 @@ no authoritative `input_type` or `output_type` fields.
 The current Python provider certifies synchronous guarded callables only; async callables fail
 closed until Dagcert has an async boundary that types cancellation and awaited exceptions.
 
-Python operations use `@dagcert.operation`. The guarded callable adds
+Python operations use `@dagcert.runtime.operation`. The guarded callable adds
 `dagcert.runtime.UnhandledException` to the extracted outcome union, so escaped exceptions cannot
 silently become missing outputs. This kernel-owned outcome cannot carry resource effects; cleanup
 requires an explicit recovery outcome in production source. The contract's `outcomes` array must cover the extracted union
@@ -35,6 +35,11 @@ exactly and gives each variant its `acquire`, `consume`, and `produce` effects. 
 formula uses the minimum effect across all variants. Resources contain
 `capacity`, `initial`, and `unit`. Every task has a duration timing; other timing metrics may be
 `interval`, `wait`, or `age`. An `assumed` timing requires zero samples and makes results conditional.
+
+Dagcert resolves decorator provenance from imports and rejects locally defined lookalikes or local
+modules shadowing `dagcert`/`dataclasses`. At invocation time, the operation guard recursively
+validates the actual input and returned dataclass fields against the source annotations. Values
+originating as dependency `Any` therefore cannot cross the certified boundary with malformed fields.
 
 Each v4 dependency is `{"task": "UPSTREAM", "outcome_type": "Variant"}`. Dagcert verifies that the
 variant is in the upstream source return union and exactly equals the downstream source input type.
@@ -68,8 +73,9 @@ input and cannot be reconstructed from checker output.
 `dagcert lint` and issuance run the mandatory deterministic translation audit. All formal tasks and
 timings must be covered by the English claims; primitive references must resolve; assumed timings
 must have explicit English assumptions; and issuance requires every checker named by a claim.
-`dagcert-certificate/v6` embeds source type extraction, strict compiler result, that recomputable
-audit, and kernel claim analysis. The Luna workflow below is the optional,
+`dagcert-certificate/v7` embeds source type extraction, strict compiler result, the exact
+source/runtime type-enforcement descriptor plus its core-file manifest hash, that recomputable audit, and kernel claim
+analysis. The Luna workflow below is the optional,
 user-requested semantic audit and never replaces this always-on coverage check.
 
 ## Optional checker result

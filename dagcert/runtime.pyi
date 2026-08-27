@@ -4,6 +4,8 @@ from typing import Callable, ParamSpec, TypeVar
 P = ParamSpec("P")
 R = TypeVar("R")
 
+class OperationTypeViolation(TypeError): ...
+
 @dataclass(frozen=True, slots=True)
 class UnhandledException:
     exception_type: str

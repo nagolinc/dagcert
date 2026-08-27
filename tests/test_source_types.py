@@ -1,11 +1,22 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import dataclass
 import json
 
 import pytest
 
 from dagcert import CertificateError, ContractError, TimingSample, UnhandledException, analyze_contract, issue_certificate, load_contract, load_evidence, operation
+
+
+@dataclass(frozen=True)
+class RuntimeInput:
+    value: int
+
+
+@dataclass(frozen=True)
+class RuntimeOutcome:
+    value: int
 
 
 def _contract(project: dict[str, object]) -> dict[str, object]:
@@ -81,6 +92,37 @@ def test_bound_source_cannot_override_the_checker(project, old: str, new: str, m
         load_contract(project["contract"], source_root=project["root"])
 
 
+def test_local_operation_decorator_cannot_impersonate_dagcert(project):
+    source = Path(project["root"]) / "app.py"
+    text = source.read_text(encoding="utf-8").replace(
+        "from dagcert.runtime import operation",
+        "def operation(function):\n    return function",
+    )
+    source.write_text(text, encoding="utf-8")
+    with pytest.raises(ContractError, match="must use @dagcert.runtime.operation"):
+        load_contract(project["contract"], source_root=project["root"])
+
+
+def test_local_dataclass_decorator_cannot_create_fake_variants(project):
+    source = Path(project["root"]) / "app.py"
+    text = source.read_text(encoding="utf-8").replace(
+        "from dataclasses import dataclass",
+        "def dataclass(*args, **kwargs):\n"
+        "    def decorate(value):\n        return value\n"
+        "    return decorate",
+    )
+    source.write_text(text, encoding="utf-8")
+    with pytest.raises(ContractError, match="explicit dataclass variant"):
+        load_contract(project["contract"], source_root=project["root"])
+
+
+@pytest.mark.parametrize("module_name", ["dagcert.py", "dataclasses.py"])
+def test_source_tree_cannot_shadow_trusted_decorator_modules(project, module_name: str):
+    (Path(project["root"]) / module_name).write_text("# shadow\n", encoding="utf-8")
+    with pytest.raises(ContractError, match="is shadowed"):
+        load_contract(project["contract"], source_root=project["root"])
+
+
 def test_task_variant_fields_cannot_hide_any(project):
     source = Path(project["root"]) / "app.py"
     source.write_text(
@@ -130,6 +172,29 @@ def test_runtime_boundary_also_closes_base_exception_exits():
     assert result.exception_type == "KeyboardInterrupt"
 
 
+def test_runtime_boundary_rejects_malformed_fields_inside_declared_variant():
+    @operation
+    def malformed(request: RuntimeInput) -> RuntimeOutcome:
+        return RuntimeOutcome(request.value)
+
+    object.__setattr__(bad_input := RuntimeInput(1), "value", "wrong")
+    bad_input_result = malformed(bad_input)
+    assert isinstance(bad_input_result, UnhandledException)
+    assert bad_input_result.exception_type == "OperationTypeViolation"
+
+    original = RuntimeOutcome
+
+    @operation
+    def malformed_output(request: RuntimeInput) -> RuntimeOutcome:
+        result = original(request.value)
+        object.__setattr__(result, "value", "wrong")
+        return result
+
+    bad_output_result = malformed_output(RuntimeInput(1))
+    assert isinstance(bad_output_result, UnhandledException)
+    assert bad_output_result.exception_type == "OperationTypeViolation"
+
+
 def test_unhandled_exception_evidence_invalidates_analysis(project):
     samples = list(load_evidence(project["evidence"]))
     samples.append(TimingSample(
@@ -167,7 +232,7 @@ def test_unhandled_exception_cannot_be_given_fabricated_resource_effects(project
 def test_dependency_edges_must_connect_real_source_types(tmp_path: Path):
     (tmp_path / "app.py").write_text(
         "from dataclasses import dataclass\n"
-        "from dagcert import operation\n\n"
+        "from dagcert.runtime import operation\n\n"
         "@dataclass(frozen=True)\nclass Start:\n    value: int\n\n"
         "@dataclass(frozen=True)\nclass Produced:\n    value: int\n\n"
         "@dataclass(frozen=True)\nclass WrongInput:\n    value: int\n\n"
@@ -213,7 +278,7 @@ def test_dependency_edges_must_connect_real_source_types(tmp_path: Path):
 
 def test_compositions_must_be_real_typed_outcome_paths(tmp_path: Path):
     (tmp_path / "app.py").write_text(
-        "from dataclasses import dataclass\nfrom dagcert import operation\n\n"
+        "from dataclasses import dataclass\nfrom dagcert.runtime import operation\n\n"
         "@dataclass(frozen=True)\nclass Start:\n    value: int\n\n"
         "@dataclass(frozen=True)\nclass Produced:\n    value: int\n\n"
         "@dataclass(frozen=True)\nclass Finished:\n    value: int\n\n"

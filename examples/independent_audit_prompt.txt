@@ -27,6 +27,9 @@ Required review
    the named source symbol is the boundary the production worker actually
    invokes. Reject a typed adapter, wrapper, or certification-only function
    that the real execution path bypasses.
+   Confirm the production import resolves to Dagcert's real `operation` guard and that no local
+   module, rebinding, monkey patch, `__wrapped__` access, or alternate call path bypasses its runtime
+   input/outcome validation.
 3. Decide whether the evidence exercises the real user-visible or backend
    operation being promised. Check relevant concurrency, failure, blocking,
    and state-transition paths. A timed helper or stand-in is not evidence for

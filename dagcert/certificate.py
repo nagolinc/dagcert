@@ -16,7 +16,7 @@ from .contract import Contract, load_contract
 from .evidence import load_evidence
 from .formula import FormulaError, evaluate_formula
 from .requirements import EnglishRequirements, audit_translation, load_requirements
-from .source_types import SourceTypeError, check_python_sources
+from .source_types import SourceTypeError, check_python_sources, type_enforcement_descriptor
 
 
 class CertificateError(RuntimeError):
@@ -284,7 +284,7 @@ def issue_certificate(
         raise CertificateError("certificate refused: " + "; ".join(check_problems))
     claim_analysis = _claim_analysis(requirements, contract, analysis)
     document: dict[str, Any] = {
-        "schema": "dagcert-certificate/v6",
+        "schema": "dagcert-certificate/v7",
         "issued_at": time(),
         "source_manifest": manifest,
         "source_fingerprint": fingerprint,
@@ -296,6 +296,7 @@ def issue_certificate(
         "translation_audit": translation_audit.to_mapping(),
         "claim_analysis": claim_analysis,
         "source_typing": source_typing,
+        "type_enforcement": type_enforcement_descriptor(),
         "primitives": _serialized_primitives(contract, analysis.to_mapping()),
         "analysis": analysis.to_mapping(),
         "checks": [item.to_mapping() for item in checks],
@@ -327,8 +328,11 @@ def verify_certificate(
         return CertificateVerification(False, (f"certificate cannot be read: {exc}",))
     if not isinstance(raw, dict) or raw.get("schema") not in {
         "dagcert-certificate/v4", "dagcert-certificate/v5", "dagcert-certificate/v6",
+        "dagcert-certificate/v7",
     }:
-        return CertificateVerification(False, ("certificate schema must be dagcert-certificate/v4, v5, or v6",))
+        return CertificateVerification(False, (
+            "certificate schema must be dagcert-certificate/v4, v5, v6, or v7",
+        ))
     certificate_schema = raw["schema"]
     expected_fields = {
         "schema", "issued_at", "source_manifest", "source_fingerprint", "source_exclude",
@@ -336,10 +340,12 @@ def verify_certificate(
         "english_requirements", "translation_audit", "primitives", "analysis", "checks",
         "check_result_sha256", "certificate_sha256",
     }
-    if certificate_schema in {"dagcert-certificate/v5", "dagcert-certificate/v6"}:
+    if certificate_schema in {"dagcert-certificate/v5", "dagcert-certificate/v6", "dagcert-certificate/v7"}:
         expected_fields.add("claim_analysis")
-    if certificate_schema == "dagcert-certificate/v6":
+    if certificate_schema in {"dagcert-certificate/v6", "dagcert-certificate/v7"}:
         expected_fields.add("source_typing")
+    if certificate_schema == "dagcert-certificate/v7":
+        expected_fields.add("type_enforcement")
     if set(raw) != expected_fields:
         unexpected = sorted(set(raw) - expected_fields)
         missing = sorted(expected_fields - set(raw))
@@ -373,7 +379,7 @@ def verify_certificate(
         problems.append("English requirements digest mismatch")
     try:
         contract = load_contract(contract_path, source_root=root)
-        if certificate_schema == "dagcert-certificate/v6":
+        if certificate_schema in {"dagcert-certificate/v6", "dagcert-certificate/v7"}:
             try:
                 source_typing = check_python_sources(
                     root,
@@ -383,6 +389,11 @@ def verify_certificate(
                     problems.append("source type analysis no longer matches")
             except SourceTypeError as exc:
                 problems.append(f"current source type analysis failed: {exc}")
+        if (
+            certificate_schema == "dagcert-certificate/v7"
+            and raw.get("type_enforcement") != type_enforcement_descriptor()
+        ):
+            problems.append("source/runtime type enforcement kernel no longer matches")
         requirements = load_requirements(requirements_path)
         if raw.get("english_requirements") != requirements.to_mapping():
             problems.append("serialized English requirements no longer match")
@@ -405,9 +416,9 @@ def verify_certificate(
         problems.extend(translation_audit.findings)
         if raw.get("translation_audit") != translation_audit.to_mapping():
             problems.append("English-to-formal translation audit no longer matches")
-        if certificate_schema in {"dagcert-certificate/v5", "dagcert-certificate/v6"}:
+        if certificate_schema in {"dagcert-certificate/v5", "dagcert-certificate/v6", "dagcert-certificate/v7"}:
             expected_contract_schema = (
-                "dagcert-contract/v4" if certificate_schema == "dagcert-certificate/v6"
+                "dagcert-contract/v4" if certificate_schema in {"dagcert-certificate/v6", "dagcert-certificate/v7"}
                 else "dagcert-contract/v3"
             )
             if contract.schema != expected_contract_schema or requirements.schema != "dagcert-english-requirements/v2":

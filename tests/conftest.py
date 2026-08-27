@@ -21,7 +21,7 @@ def project(tmp_path: Path) -> dict[str, object]:
     root.mkdir()
     (root / "app.py").write_text(
         "from dataclasses import dataclass\n"
-        "from dagcert import operation\n\n"
+        "from dagcert.runtime import operation\n\n"
         "@dataclass(frozen=True)\n"
         "class WorkInput:\n"
         "    value: int\n\n"

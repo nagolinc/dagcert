@@ -78,7 +78,7 @@ Those primitives are enough to express conditional statements such as:
 - model X is never more than G generations out of date; and
 - a handler or visible action completes within its declared deadline.
 
-New v6 issuance separates real `operation` tasks from `instrumentation` and supports finite,
+New v7 issuance separates real `operation` tasks from `instrumentation` and supports finite,
 source-typed multi-operation paths. Every v4 composition step names the source outcome traversed,
 and consecutive steps must match a real typed dependency edge. A composition has no stopwatch of its own: Dagcert computes its
 bound from exact leaf duration cases. Claims are either `observed` (retained executions only) or
@@ -89,6 +89,11 @@ For Python, each v4 task points to the production source file and symbol. Dagcer
 one-input annotation and closed return union, rejects `Any` throughout those boundary variants,
 runs strict mypy over the real implementation body itself, and adds a guarded
 `UnhandledException` outcome. The JSON contract cannot invent `input_type` or `output_type` labels.
+Decorator provenance is resolved from imports: a same-named local decorator or a shadowing local
+`dagcert`/`dataclasses` module is rejected. The runtime guard recursively checks actual input and
+outcome dataclass fields against those annotations before a value can cross a task edge.
+The v7 certificate seals a manifest hash of the checker, guard, outcome analyzer, and typing stubs,
+so verification also detects a changed type-enforcement kernel rather than trusting a version label.
 Every dependency names an upstream outcome that must exactly match the downstream callable's source
 input, and resource derivations use the minimum effect across every outcome. The kernel-owned
 exception outcome must have no resource effects; recovery and cleanup require an explicit source-
@@ -224,7 +229,7 @@ review material but are not proof for changed requirements.
 [`examples/certified_vote`](examples/certified_vote/README.md) is a deliberately narrow in-process
 example showing how the core primitives express performance and conditional flow guarantees.
 
-Its checked-in v6 certificate establishes:
+Its checked-in v7 certificate establishes:
 
 - ten successful measured executions for every declared task;
 - no structural blocked state under the stated scheduling/resource assumptions;

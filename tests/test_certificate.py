@@ -88,7 +88,12 @@ def test_certificate_embeds_and_digest_binds_plain_english_requirements(project)
     assert document["translation_audit"]["passed"] is True
     assert document["translation_audit"]["covered_tasks"] == ["task:work"]
     assert document["translation_audit"]["covered_timings"] == ["timing:work/normal"]
-    assert document["schema"] == "dagcert-certificate/v6"
+    assert document["schema"] == "dagcert-certificate/v7"
+    assert document["type_enforcement"]["runtime_guard"] == "recursive-input-outcome-validation/v1"
+    assert set(document["type_enforcement"]["kernel_manifest"]) >= {
+        "analysis.py", "certificate.py", "contract.py", "runtime.py", "source_types.py",
+    }
+    assert len(document["type_enforcement"]["kernel_sha256"]) == 64
     assert document["source_typing"]["checker"] == "mypy"
     assert document["source_typing"]["mode"] == "strict"
     assert document["source_typing"]["signatures"][0]["input_type"] == "WorkInput"
@@ -114,6 +119,27 @@ def test_certificate_embeds_and_digest_binds_plain_english_requirements(project)
     )
     assert not result.valid
     assert "English requirements digest mismatch" in result.problems
+
+
+def test_certificate_binds_the_type_enforcement_kernel(project):
+    root = Path(project["root"])
+    certificate = root / "artifacts" / "certificate.json"
+    issue_certificate(
+        project["contract"], project["evidence"], certificate,
+        requirements_path=project["requirements"], source_root=root,
+    )
+    raw = json.loads(certificate.read_text(encoding="utf-8"))
+    raw["type_enforcement"]["runtime_guard"] = "weaker-guard/v0"
+    raw.pop("certificate_sha256")
+    raw["certificate_sha256"] = sha256(canonical_json(raw)).hexdigest()
+    certificate.write_bytes(canonical_json(raw) + b"\n")
+
+    result = verify_certificate(
+        certificate, contract_path=project["contract"], evidence_path=project["evidence"],
+        requirements_path=project["requirements"], source_root=root,
+    )
+    assert not result.valid
+    assert "source/runtime type enforcement kernel no longer matches" in result.problems
 
 
 def test_issue_rejects_unknown_primitive_in_english_claim(project):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from dagcert import operation
+from dagcert.runtime import operation
 
 
 @dataclass(frozen=True, slots=True)

@@ -24,6 +24,11 @@ declares finite source-outcome paths over those primitives.
   type and closed return union, runs the language type checker itself, and adds the guarded
   `UnhandledException` outcome. Contract JSON cannot declare or override task types or assign
   resource effects to the kernel-owned exception outcome.
+- Dagcert verifies the provenance of `operation` and `dataclass`; local lookalike decorators and
+  source-tree modules shadowing `dagcert` or `dataclasses` fail. The operation guard recursively
+  validates actual input and outcome fields before they cross a task edge.
+- A v7 certificate seals the exact type-enforcement core-file manifest, not only a claimed Dagcert
+  version or compiler result.
 - `instrumentation` tasks may record aggregate observations but cannot participate in a derived
   composition.
 - A v4 composition names the source outcome at every step, and adjacent steps must be a real typed
@@ -38,7 +43,7 @@ names.
 
 Write the production operation boundary in its strongly typed form before modeling it. For Python,
 use an explicit input class, explicit named outcome classes, an inline closed return union, and
-`@dagcert.operation`. Every v4 dependency names an upstream outcome type and must feed a downstream
+`@dagcert.runtime.operation`. Every v4 dependency names an upstream outcome type and must feed a downstream
 callable that accepts that exact source type. Model effects for every source outcome, including the
 kernel-owned exception outcome. Never create a typed certification wrapper that production bypasses.
 

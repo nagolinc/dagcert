@@ -9,6 +9,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 import ast
+import dataclasses as dataclasses_module
+from hashlib import sha256
+import json
 import os
 import re
 import sys
@@ -16,6 +19,34 @@ import sys
 
 class SourceTypeError(ValueError):
     pass
+
+
+def type_enforcement_descriptor() -> dict[str, object]:
+    """Return the exact source/runtime type kernel sealed into new certificates."""
+    from ._version import VERSION
+
+    package = Path(__file__).resolve().parent
+    kernel_files = (
+        "_version.py", "__init__.py", "__init__.pyi", "analysis.py", "certificate.py", "contract.py",
+        "evidence.py", "runtime.py", "runtime.pyi", "source_types.py",
+    )
+    manifest = {
+        name: sha256((package / name).read_bytes()).hexdigest()
+        for name in kernel_files
+    }
+    manifest_bytes = json.dumps(
+        manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")
+    return {
+        "provider": "dagcert.python/v2",
+        "dagcert_version": VERSION,
+        "static_analysis": "source-ast+strict-mypy/v1",
+        "decorator_provenance": "trusted-imports-and-shadow-rejection/v1",
+        "runtime_guard": "recursive-input-outcome-validation/v1",
+        "exception_outcome": "dagcert.runtime.UnhandledException/v1",
+        "kernel_manifest": manifest,
+        "kernel_sha256": sha256(manifest_bytes).hexdigest(),
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +136,7 @@ def read_python_signature(
         raise SourceTypeError(f"implementation path escapes source root: {relative_path}") from exc
     if not path.is_file():
         raise SourceTypeError(f"implementation source does not exist: {relative_path}")
+    _reject_trusted_module_shadowing(root, path)
     try:
         source_text = path.read_text(encoding="utf-8")
         tree = ast.parse(source_text, filename=str(path), type_comments=True)
@@ -122,6 +154,7 @@ def read_python_signature(
     class_nodes = {
         item.name: item for item in tree.body if isinstance(item, ast.ClassDef)
     }
+    operation_decorators, dataclass_decorators = _trusted_decorators(tree)
     local_classes = set(class_nodes)
     arguments = (*function.args.posonlyargs, *function.args.args, *function.args.kwonlyargs)
     if function.args.vararg is not None or function.args.kwarg is not None:
@@ -148,7 +181,7 @@ def read_python_signature(
     for variant_name in variant_names:
         _validate_variant_class(
             class_nodes[variant_name], f"operation {symbol} type {variant_name}",
-            class_nodes, set(),
+            class_nodes, set(), dataclass_decorators,
         )
     if len(outcomes) != len(set(outcomes)):
         raise SourceTypeError(f"operation {symbol} return union contains duplicate variants")
@@ -156,11 +189,11 @@ def read_python_signature(
         raise SourceTypeError(
             f"operation {symbol} return union must use explicit named outcomes, not None/object"
         )
-    if _has_operation_decorator(function.decorator_list):
+    if _has_operation_decorator(function.decorator_list, operation_decorators):
         outcomes = (*outcomes, "dagcert.runtime.UnhandledException")
     else:
         raise SourceTypeError(
-            f"operation {symbol} must use @dagcert.operation so escaped exceptions are typed"
+            f"operation {symbol} must use @dagcert.runtime.operation so escaped exceptions are typed"
         )
     return SourceSignature(
         "python", Path(relative_path).as_posix(), symbol, input_type,
@@ -229,6 +262,7 @@ def _require_local_variant(node: ast.expr, class_names: set[str], label: str) ->
 
 def _validate_variant_class(
     node: ast.ClassDef, label: str, class_nodes: dict[str, ast.ClassDef], seen: set[str],
+    dataclass_decorators: set[str],
 ) -> None:
     if node.name in seen:
         return
@@ -237,7 +271,7 @@ def _validate_variant_class(
         raise SourceTypeError(f"{label} must not inherit from an open or external base type")
     if not any(
         _qualified_name(decorator.func if isinstance(decorator, ast.Call) else decorator)
-        in {"dataclass", "dataclasses.dataclass"}
+        in dataclass_decorators
         for decorator in node.decorator_list
     ):
         raise SourceTypeError(f"{label} must be an explicit dataclass variant")
@@ -248,18 +282,70 @@ def _validate_variant_class(
                 if isinstance(child, ast.Name) and child.id in class_nodes:
                     _validate_variant_class(
                         class_nodes[child.id], f"{label} nested type {child.id}",
-                        class_nodes, seen,
+                        class_nodes, seen, dataclass_decorators,
                     )
         elif isinstance(statement, ast.Assign):
             raise SourceTypeError(f"{label} contains an untyped class field")
 
 
-def _has_operation_decorator(decorators: list[ast.expr]) -> bool:
+def _has_operation_decorator(decorators: list[ast.expr], trusted: set[str]) -> bool:
     for decorator in decorators:
         target = decorator.func if isinstance(decorator, ast.Call) else decorator
-        if _qualified_name(target) in {"operation", "dagcert.operation"}:
+        if _qualified_name(target) in trusted:
             return True
     return False
+
+
+def _trusted_decorators(tree: ast.Module) -> tuple[set[str], set[str]]:
+    """Resolve only decorators imported from the actual owning modules.
+
+    Name spelling is not provenance. A local function called ``operation`` or ``dataclass`` must
+    not be able to impersonate the runtime guard or a closed record type.
+    """
+
+    operation_imports: list[tuple[str, str]] = []
+    dataclass_imports: list[tuple[str, str]] = []
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                binding = alias.asname or alias.name.split(".", 1)[0]
+                qualified = alias.asname or alias.name
+                if alias.name == "dagcert":
+                    operation_imports.append((f"{qualified}.operation", binding))
+                elif alias.name == "dagcert.runtime":
+                    operation_imports.append((f"{qualified}.operation", binding))
+                elif alias.name == "dataclasses":
+                    dataclass_imports.append((f"{qualified}.dataclass", binding))
+        elif isinstance(node, ast.ImportFrom):
+            if node.module in {"dagcert", "dagcert.runtime"}:
+                for alias in node.names:
+                    if alias.name == "operation":
+                        binding = alias.asname or alias.name
+                        operation_imports.append((binding, binding))
+            elif node.module == "dataclasses":
+                for alias in node.names:
+                    if alias.name == "dataclass":
+                        binding = alias.asname or alias.name
+                        dataclass_imports.append((binding, binding))
+
+    rebound = _top_level_rebindings(tree)
+    operations = {name for name, binding in operation_imports if binding not in rebound}
+    dataclasses = {name for name, binding in dataclass_imports if binding not in rebound}
+    return operations, dataclasses
+
+
+def _top_level_rebindings(tree: ast.Module) -> set[str]:
+    rebound: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            rebound.add(node.name)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                rebound.update(
+                    child.id for child in ast.walk(target) if isinstance(child, ast.Name)
+                )
+    return rebound
 
 
 def _qualified_name(node: ast.expr) -> str | None:
@@ -296,4 +382,42 @@ def _reject_type_escape_hatches(tree: ast.Module, source: str, path: str) -> Non
         }:
             raise SourceTypeError(
                 f"bound implementation {path} uses typing.cast; certified task types must be inferred"
+            )
+
+
+def _reject_trusted_module_shadowing(root: Path, implementation: Path) -> None:
+    actual_dagcert = Path(__file__).resolve().parent
+    actual_dataclasses = Path(dataclasses_module.__file__).resolve()
+    directories: list[Path] = []
+    current = implementation.parent
+    while True:
+        directories.append(current)
+        if current == root:
+            break
+        if root not in current.parents:
+            break
+        current = current.parent
+    for directory in directories:
+        dagcert_file = directory / "dagcert.py"
+        dagcert_package = directory / "dagcert" / "__init__.py"
+        if dagcert_file.is_file():
+            raise SourceTypeError(
+                f"trusted decorator module dagcert is shadowed by {dagcert_file.relative_to(root)}"
+            )
+        if dagcert_package.is_file() and dagcert_package.parent.resolve() != actual_dagcert:
+            raise SourceTypeError(
+                "trusted decorator module dagcert is shadowed by "
+                f"{dagcert_package.parent.relative_to(root)}"
+            )
+        dataclasses_file = directory / "dataclasses.py"
+        if dataclasses_file.is_file() and dataclasses_file.resolve() != actual_dataclasses:
+            raise SourceTypeError(
+                "trusted decorator module dataclasses is shadowed by "
+                f"{dataclasses_file.relative_to(root)}"
+            )
+        dataclasses_package = directory / "dataclasses" / "__init__.py"
+        if dataclasses_package.is_file():
+            raise SourceTypeError(
+                "trusted decorator module dataclasses is shadowed by "
+                f"{dataclasses_package.parent.relative_to(root)}"
             )

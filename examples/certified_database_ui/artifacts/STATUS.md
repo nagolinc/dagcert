@@ -1,9 +1,9 @@
 # Certification status
 
 The current source-typed v4 model was collected once after its implementation and documentation
-changed. That run passed the unchanged bounds and produced verified v6 certificate
-`d3bc2b9e801b6f4b431819b2a359adf94d8b41560b6e350e58a7e451930a7ffd`, bound to source fingerprint
-`832044b60c53929b0766b99122e10cd69b6f21e5465fc7150497a7ff3f861c37`.
+changed. That run passed the unchanged bounds and produced verified v7 certificate
+`202355d78fc6130d9da508140d656c26570c221c44c3a0e654d9a25fe3a0ac0e`, bound to source fingerprint
+`ab52fec94cb41f24c6447a09a5d23fdef8a1fda9bf40c2f45b4b5eec637c8cfe`.
 
 Its production SQLite operations are compiler-checked source bindings. Browser timings are typed
 instrumentation and the browser/HTTP/SQLite promise remains observed through the real projection

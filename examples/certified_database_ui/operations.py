@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import sqlite3
 
-from dagcert import operation
+from dagcert.runtime import operation
 
 
 SORT_COLUMNS = {"title": "title", "category": "category", "created": "id"}

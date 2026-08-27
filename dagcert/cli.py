@@ -67,7 +67,7 @@ REQUIREMENTS_TEMPLATE = """{
 
 APP_TEMPLATE = """from dataclasses import dataclass
 
-from dagcert import operation
+from dagcert.runtime import operation
 
 
 @dataclass(frozen=True)
