@@ -11,9 +11,24 @@ import argparse
 import json
 import sqlite3
 
+from dagcert import UnhandledException
+
+from .operations import (
+    ItemDeleteInput,
+    ItemDeleted,
+    ItemInsertInput,
+    ItemInsertInvalid,
+    ItemStored,
+    ItemsListInput,
+    ItemsListInvalid,
+    ItemsListed,
+    delete_item_task,
+    insert_item_task,
+    list_items_task,
+)
+
 
 STATIC_DIRECTORY = Path(__file__).with_name("static")
-SORT_COLUMNS = {"title": "title", "category": "category", "created": "id"}
 SEED_ITEMS = (
     ("Atlas", "reference"),
     ("Beacon", "active"),
@@ -52,62 +67,38 @@ def initialize_database(path: str | Path, *, reset: bool = False) -> None:
 
 
 def list_items(
-    path: str | Path,
-    *,
-    page: int,
-    page_size: int,
-    sort: str,
-    direction: str,
+    path: str | Path, *, page: int, page_size: int, sort: str, direction: str,
 ) -> dict[str, Any]:
-    if page < 1 or page_size < 1:
-        raise ValueError("page and page_size must be positive")
-    if sort not in SORT_COLUMNS or direction not in {"asc", "desc"}:
-        raise ValueError("unsupported sort or direction")
-    order_column = SORT_COLUMNS[sort]
-    order_direction = direction.upper()
-    offset = (page - 1) * page_size
-    with sqlite3.connect(path) as connection:
-        connection.row_factory = sqlite3.Row
-        total = int(connection.execute("SELECT COUNT(*) FROM items").fetchone()[0])
-        rows = connection.execute(
-            f"""
-            SELECT id, title, category
-            FROM items
-            ORDER BY {order_column} {order_direction}, id {order_direction}
-            LIMIT ? OFFSET ?
-            """,
-            (page_size, offset),
-        ).fetchall()
+    result = list_items_task(ItemsListInput(Path(path), page, page_size, sort, direction))
+    if isinstance(result, ItemsListInvalid):
+        raise ValueError(result.reason)
+    if isinstance(result, UnhandledException):
+        raise RuntimeError(f"list operation failed: {result.exception_type}: {result.message}")
     return {
-        "items": [dict(row) for row in rows],
-        "page": page,
-        "page_size": page_size,
-        "total": total,
-        "has_previous": page > 1,
-        "has_next": offset + len(rows) < total,
-        "sort": sort,
-        "direction": direction,
+        "items": [
+            {"id": item.id, "title": item.title, "category": item.category}
+            for item in result.items
+        ],
+        "page": result.page, "page_size": result.page_size, "total": result.total,
+        "has_previous": result.has_previous, "has_next": result.has_next,
+        "sort": result.sort, "direction": result.direction,
     }
 
 
 def insert_item(path: str | Path, *, title: str, category: str) -> dict[str, Any]:
-    normalized_title = title.strip()
-    normalized_category = category.strip()
-    if not normalized_title or not normalized_category:
-        raise ValueError("title and category are required")
-    with sqlite3.connect(path) as connection:
-        cursor = connection.execute(
-            "INSERT INTO items (title, category) VALUES (?, ?)",
-            (normalized_title, normalized_category),
-        )
-        identifier = int(cursor.lastrowid)
-    return {"id": identifier, "title": normalized_title, "category": normalized_category}
+    result = insert_item_task(ItemInsertInput(Path(path), title, category))
+    if isinstance(result, ItemInsertInvalid):
+        raise ValueError(result.reason)
+    if isinstance(result, UnhandledException):
+        raise RuntimeError(f"insert operation failed: {result.exception_type}: {result.message}")
+    return {"id": result.id, "title": result.title, "category": result.category}
 
 
 def delete_item(path: str | Path, identifier: int) -> bool:
-    with sqlite3.connect(path) as connection:
-        cursor = connection.execute("DELETE FROM items WHERE id = ?", (identifier,))
-    return cursor.rowcount == 1
+    result = delete_item_task(ItemDeleteInput(Path(path), identifier))
+    if isinstance(result, UnhandledException):
+        raise RuntimeError(f"delete operation failed: {result.exception_type}: {result.message}")
+    return result.found
 
 
 class ApplicationServer(ThreadingHTTPServer):

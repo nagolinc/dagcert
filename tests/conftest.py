@@ -19,15 +19,33 @@ from dagcert import (
 def project(tmp_path: Path) -> dict[str, object]:
     root = tmp_path / "app"
     root.mkdir()
-    (root / "app.py").write_text("def work(value: int) -> int:\n    return value + 1\n", encoding="utf-8")
+    (root / "app.py").write_text(
+        "from dataclasses import dataclass\n"
+        "from dagcert import operation\n\n"
+        "@dataclass(frozen=True)\n"
+        "class WorkInput:\n"
+        "    value: int\n\n"
+        "@dataclass(frozen=True)\n"
+        "class WorkCompleted:\n"
+        "    value: int\n\n"
+        "@operation\n"
+        "def work(request: WorkInput) -> WorkCompleted:\n"
+        "    return WorkCompleted(request.value + 1)\n",
+        encoding="utf-8",
+    )
     contract = root / "dag_contract.json"
     contract.write_text(json.dumps({
-        "schema": "dagcert-contract/v3",
+        "schema": "dagcert-contract/v4",
         "workers": [{"id": "worker", "concurrency": 2}],
         "resources": [{"id": "state", "capacity": 1, "initial": 0}],
         "tasks": [{
-            "id": "work", "role": "operation", "worker": "worker", "input_type": "int", "output_type": "int",
-            "depends_on": [], "resources": {"state": {"acquire": 1}},
+            "id": "work", "role": "operation", "worker": "worker",
+            "implementation": {"language": "python", "path": "app.py", "symbol": "work"},
+            "outcomes": [
+                {"type": "WorkCompleted", "resources": {"state": {"acquire": 1}}, "metadata": {}},
+                {"type": "dagcert.runtime.UnhandledException", "resources": {}, "metadata": {}},
+            ],
+            "depends_on": [],
             "timings": {"normal": {
                 "metric": "duration", "upper_ms": 10, "minimum_samples": 3,
                 "policy": "max", "safety_factor": 1.3,
@@ -59,7 +77,7 @@ def project(tmp_path: Path) -> dict[str, object]:
         recorder.append(TimingSample(
             task_id="work", case="normal", value_ms=duration, worker_id="worker",
             source_fingerprint=fingerprint, observed_worker_concurrency=2,
-            observed_input_type="int", observed_output_type="int",
+            outcome_type="WorkCompleted",
             resource_acquired={"state": 1},
         ))
     return {

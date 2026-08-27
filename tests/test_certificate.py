@@ -88,7 +88,13 @@ def test_certificate_embeds_and_digest_binds_plain_english_requirements(project)
     assert document["translation_audit"]["passed"] is True
     assert document["translation_audit"]["covered_tasks"] == ["task:work"]
     assert document["translation_audit"]["covered_timings"] == ["timing:work/normal"]
-    assert document["schema"] == "dagcert-certificate/v5"
+    assert document["schema"] == "dagcert-certificate/v6"
+    assert document["source_typing"]["checker"] == "mypy"
+    assert document["source_typing"]["mode"] == "strict"
+    assert document["source_typing"]["signatures"][0]["input_type"] == "WorkInput"
+    assert document["source_typing"]["signatures"][0]["outcome_types"] == [
+        "WorkCompleted", "dagcert.runtime.UnhandledException",
+    ]
     assert document["claim_analysis"] == [{
         "claim_id": "work-completes",
         "basis": "observed",

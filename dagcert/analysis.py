@@ -97,8 +97,11 @@ def analyze_contract(
                 "failed-task-attempt", f"{sample.task_id}/{sample.case}",
                 "retained timing evidence contains a failed task attempt",
             ))
-        if timing is not None and timing.metric == "duration" and sample.succeeded:
-            _check_execution_observation(task, sample, contract, findings)
+        if timing is not None and timing.metric == "duration":
+            if contract.schema == "dagcert-contract/v4":
+                _check_typed_outcome_observation(task, sample, contract, findings)
+            elif sample.succeeded:
+                _check_execution_observation(task, sample, contract, findings)
 
     for task in contract.tasks:
         for case, requirement in task.timings.items():
@@ -110,7 +113,12 @@ def analyze_contract(
                 continue
             usable = [
                 sample for sample in evidence
-                if sample.task_id == task.id and sample.case == case and sample.succeeded
+                if sample.task_id == task.id and sample.case == case
+                and (contract.schema == "dagcert-contract/v4" or sample.succeeded)
+                and (
+                    contract.schema != "dagcert-contract/v4"
+                    or sample.outcome_type in task.outcome_by_type
+                )
                 and sample.worker_id == task.worker and sample.source_fingerprint == source_fingerprint
             ]
             if len(usable) < requirement.minimum_samples:
@@ -152,8 +160,8 @@ def analyze_contract(
 
     passed = not findings
     progress_assumptions = (
-        "declared resource effects match runtime acquisition and flow",
-        "reachable producer task types may recur until a resource reaches usable capacity",
+        "outcome-specific resource effects match runtime acquisition and flow",
+        "reachable producer tasks may recur; only effects common to every source outcome count as guaranteed supply",
         "resource acquisition is atomic and scheduling is fair",
         *assumptions,
     )
@@ -254,6 +262,76 @@ def _check_execution_observation(
             ))
 
 
+def _check_typed_outcome_observation(
+    task: Task, sample: TimingSample, contract: Contract, findings: list[Finding],
+) -> None:
+    """Validate an event against the outcome union extracted from application source."""
+    if sample.observed_input_type is not None or sample.observed_output_type is not None:
+        findings.append(Finding(
+            "evidence-cannot-declare-types", task.id,
+            "v4 evidence must record outcome_type only; task types come from bound source",
+        ))
+    if sample.outcome_type is None:
+        findings.append(Finding(
+            "missing-outcome-type", task.id,
+            "v4 timing evidence must identify the actual runtime outcome variant",
+        ))
+        return
+    outcome = task.outcome_by_type.get(sample.outcome_type)
+    if outcome is None:
+        findings.append(Finding(
+            "undeclared-outcome", task.id,
+            f"runtime produced {sample.outcome_type!r}, outside the source-declared return union",
+        ))
+        return
+    if sample.outcome_type == "dagcert.runtime.UnhandledException":
+        findings.append(Finding(
+            "unhandled-operation-exception", task.id,
+            "an exception escaped the source-typed operation boundary",
+        ))
+    observed_by_kind = {
+        "acquire": sample.resource_acquired,
+        "consume": sample.resource_consumed,
+        "produce": sample.resource_produced,
+    }
+    for resource_id, effect in outcome.resources.items():
+        for kind, observed in observed_by_kind.items():
+            declared = getattr(effect, kind)
+            actual = observed.get(resource_id)
+            if declared > 0 and actual is None:
+                findings.append(Finding(
+                    "missing-resource-effect-observation",
+                    f"{task.id}/{sample.outcome_type}/{resource_id}",
+                    f"missing observed {kind} amount",
+                ))
+            elif actual is not None:
+                invalid = actual > declared if kind == "acquire" else actual != declared
+                if invalid:
+                    findings.append(Finding(
+                        "resource-effect-mismatch",
+                        f"{task.id}/{sample.outcome_type}/{resource_id}",
+                        f"declared {kind} {declared:g}, observed {actual:g}",
+                    ))
+    declared_resources = set(outcome.resources)
+    for kind, observed in observed_by_kind.items():
+        for resource_id, actual in observed.items():
+            if resource_id not in declared_resources or getattr(outcome.resources[resource_id], kind) == 0:
+                findings.append(Finding(
+                    "undeclared-resource-effect",
+                    f"{task.id}/{sample.outcome_type}/{resource_id}",
+                    f"observed {kind} {actual:g}",
+                ))
+    for resource_id, level in sample.resource_levels.items():
+        resource = contract.resource_by_id.get(resource_id)
+        if resource is None:
+            findings.append(Finding("unknown-resource-level", task.id, resource_id))
+        elif level > resource.capacity:
+            findings.append(Finding(
+                "resource-capacity-exceeded", resource_id,
+                f"capacity {resource.capacity:g}, observed level {level:g}",
+            ))
+
+
 def _structurally_blocked_tasks(contract: Contract) -> dict[str, str]:
     """Find task types with no dependency/resource path to a first execution.
 
@@ -282,8 +360,8 @@ def _structurally_blocked_tasks(contract: Contract) -> dict[str, str]:
             reachable.add(task_id)
             producible.update(
                 resource_id
-                for resource_id, effect in task.resources.items()
-                if effect.produce > 0
+                for resource_id in task.resources
+                if task.guaranteed_effect(resource_id, "produce") > 0
             )
             remaining.pop(task_id)
             changed = True

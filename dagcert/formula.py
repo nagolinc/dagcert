@@ -69,6 +69,13 @@ def formula_references(formula: Mapping[str, Any]) -> tuple[str, ...]:
                     "worker_concurrency", "resource_capacity", "resource_initial",
                 } and isinstance(operand, str):
                     references.add(operand)
+                elif operator in {"task_guaranteed_produce", "task_guaranteed_consume"}:
+                    task_ref, resource_ref = _effect_pair(operand, f"formula.{operator}")
+                    references.update({task_ref, resource_ref})
+                    kind = "produce" if operator.endswith("produce") else "consume"
+                    references.add(
+                        f"guarantee:{task_ref.split(':', 1)[1]}/{kind}/{resource_ref.split(':', 1)[1]}"
+                    )
                 else:
                     visit(operand)
         elif isinstance(value, list):
@@ -88,6 +95,32 @@ def _validate_dag_surface(references: set[str], contract: Contract) -> None:
         reference for reference in references
         if reference.startswith("worker:") or reference.startswith("resource:")
     }
+    if contract.schema == "dagcert-contract/v4":
+        resource_ids = {
+            reference.split(":", 1)[1]
+            for reference in references if reference.startswith("resource:")
+        }
+        guarantees = {
+            reference.split(":", 1)[1]
+            for reference in references if reference.startswith("guarantee:")
+        }
+        required_guarantees: set[str] = set()
+        for task_id in timing_tasks:
+            task = contract.task_by_id.get(task_id)
+            if task is None:
+                continue
+            for resource_id in resource_ids & set(task.resources):
+                effect = task.resources[resource_id]
+                if effect.produce > 0:
+                    required_guarantees.add(f"{task_id}/produce/{resource_id}")
+                if effect.consume > 0:
+                    required_guarantees.add(f"{task_id}/consume/{resource_id}")
+        missing_guarantees = required_guarantees - guarantees
+        if resource_ids and (not guarantees or missing_guarantees):
+            raise FormulaError(
+                "v4 resource derivations must use task_guaranteed_produce/consume for every "
+                f"referenced task effect; missing {sorted(missing_guarantees)}"
+            )
     if len(timing_tasks) < 2 or not supporting_state:
         raise FormulaError(
             "derived formula must use a declared composition or bounds from at least two "
@@ -212,6 +245,17 @@ def _number(value: Any, state: _EvaluationState, label: str) -> float:
         if resource is None:
             raise FormulaError(f"{label} cites unknown resource {reference!r}")
         return resource.capacity if operator == "resource_capacity" else resource.initial
+    if operator in {"task_guaranteed_produce", "task_guaranteed_consume"}:
+        task_ref, resource_ref = _effect_pair(operand, f"{label}.{operator}")
+        task_id = task_ref.split(":", 1)[1]
+        resource_id = resource_ref.split(":", 1)[1]
+        task = state.contract.task_by_id.get(task_id)
+        if task is None:
+            raise FormulaError(f"{label} cites unknown task {task_id!r}")
+        if resource_id not in state.contract.resource_by_id:
+            raise FormulaError(f"{label} cites unknown resource {resource_id!r}")
+        kind = "produce" if operator.endswith("produce") else "consume"
+        return task.guaranteed_effect(resource_id, kind)
     raise FormulaError(f"{label} uses unsupported numeric operator {operator!r}")
 
 
@@ -241,3 +285,12 @@ def _reference(value: Any, prefix: str, label: str) -> str:
     if not isinstance(value, str) or not value.startswith(prefix + ":") or not value[len(prefix) + 1:]:
         raise FormulaError(f"{label} must be a {prefix}: reference")
     return value[len(prefix) + 1:]
+
+
+def _effect_pair(value: Any, label: str) -> tuple[str, str]:
+    task_value, resource_value = _pair(value, label)
+    if not isinstance(task_value, str) or not task_value.startswith("task:"):
+        raise FormulaError(f"{label}[0] must be a task: reference")
+    if not isinstance(resource_value, str) or not resource_value.startswith("resource:"):
+        raise FormulaError(f"{label}[1] must be a resource: reference")
+    return task_value, resource_value

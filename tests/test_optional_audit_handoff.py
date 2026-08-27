@@ -84,9 +84,12 @@ def test_each_claim_gets_a_separate_sealed_handoff_and_response(project):
         assert "RULE 0" in prompt
         assert "DAG and proof integrity" in prompt
         assert "synthetic observer, monitor, pipeline, batch, summary" in prompt
+        assert "closed return union come from the bound source symbol" in prompt
+        assert "typed adapter, wrapper, or certification-only function" in prompt
+        assert "failure or `UnhandledException` branch" in prompt
         assert "claim" in packet and "claims" not in packet
         assert packet["schema"] == "dagcert-semantic-audit-packet/v3"
-        assert packet["source_files"]["app.py"]["content"].startswith("def work")
+        assert "def work(request: WorkInput) -> WorkCompleted" in packet["source_files"]["app.py"]["content"]
         assert packet["analysis"]["passed"] is True
         assert len(packet["timing_evidence"]) == 3
         handoff.response_path.write_text(

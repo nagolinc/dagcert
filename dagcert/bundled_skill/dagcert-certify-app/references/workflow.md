@@ -16,12 +16,29 @@ Repeat `--exclude PATTERN` identically when project-specific source exclusions a
 
 ## Contract
 
-The hardened `dagcert-contract/v3` JSON or YAML object contains `workers`, `tasks`, `resources`,
-task-local `timings`, finite `compositions`, and metadata. A task's `input_type` and `output_type` are stable
-application type identifiers; Dagcert records them but does not import or execute application code.
-Task resource effects contain `acquire`, `consume`, and `produce` amounts. Resources contain
+The hardened `dagcert-contract/v4` JSON or YAML object contains `workers`, `tasks`, `resources`,
+task-local `timings`, finite typed-path `compositions`, and metadata. Each composition step names
+the source outcome it traverses, and adjacent steps must match a real typed dependency edge.
+Each task has an `implementation` binding
+with `language`, source-root-relative `path`, and `symbol`. For Python, Dagcert parses that exact
+callable, requires one explicit source-defined input class and an inline closed union of explicit
+source-defined outcome classes, runs strict mypy itself, and seals the result. The contract contains
+no authoritative `input_type` or `output_type` fields.
+The current Python provider certifies synchronous guarded callables only; async callables fail
+closed until Dagcert has an async boundary that types cancellation and awaited exceptions.
+
+Python operations use `@dagcert.operation`. The guarded callable adds
+`dagcert.runtime.UnhandledException` to the extracted outcome union, so escaped exceptions cannot
+silently become missing outputs. This kernel-owned outcome cannot carry resource effects; cleanup
+requires an explicit recovery outcome in production source. The contract's `outcomes` array must cover the extracted union
+exactly and gives each variant its `acquire`, `consume`, and `produce` effects. A derived resource
+formula uses the minimum effect across all variants. Resources contain
 `capacity`, `initial`, and `unit`. Every task has a duration timing; other timing metrics may be
 `interval`, `wait`, or `age`. An `assumed` timing requires zero samples and makes results conditional.
+
+Each v4 dependency is `{"task": "UPSTREAM", "outcome_type": "Variant"}`. Dagcert verifies that the
+variant is in the upstream source return union and exactly equals the downstream source input type.
+This makes dependency arrows typed dataflow rather than documentation.
 
 Every task is either an `operation` or `instrumentation`. A composition contains at least two
 connected operation tasks and names the exact duration case and finite execution count for each.
@@ -30,12 +47,13 @@ the certified leaf bounds; a composition never declares its own measured timing.
 
 ## Timing evidence
 
-Evidence is JSON Lines. Each line contains `task_id`, `case`, `value_ms`, `worker_id`,
-`source_fingerprint`, `succeeded`, and `recorded_at`. It may also contain
-`observed_worker_concurrency`, `observed_input_type`, `observed_output_type`,
+Evidence is JSON Lines. Each v4 line contains `task_id`, `case`, `value_ms`, `worker_id`,
+`source_fingerprint`, `recorded_at`, and the actual runtime `outcome_type`. It may also contain
+`observed_worker_concurrency`,
 `resource_acquired`, `resource_consumed`, `resource_produced`, `resource_levels`, and `metadata`.
-Successful duration samples must report matching types and every declared resource effect. Any
-retained failed attempt makes analysis fail; it cannot be discarded in favor of a later passing retry.
+Evidence cannot declare task input/output types. Every duration sample is checked against its exact
+source outcome's effects. An undeclared outcome, legacy evidence type label, or retained
+`UnhandledException` makes analysis fail; it cannot be discarded in favor of a later passing retry.
 
 ## Mandatory English requirements
 
@@ -50,7 +68,8 @@ input and cannot be reconstructed from checker output.
 `dagcert lint` and issuance run the mandatory deterministic translation audit. All formal tasks and
 timings must be covered by the English claims; primitive references must resolve; assumed timings
 must have explicit English assumptions; and issuance requires every checker named by a claim.
-`dagcert-certificate/v5` embeds that recomputable audit and kernel claim analysis. The Luna workflow below is the optional,
+`dagcert-certificate/v6` embeds source type extraction, strict compiler result, that recomputable
+audit, and kernel claim analysis. The Luna workflow below is the optional,
 user-requested semantic audit and never replaces this always-on coverage check.
 
 ## Optional checker result
@@ -138,7 +157,9 @@ does not erase weaknesses and does not certify the application as a whole.
 The worker must reconstruct the execution DAG from source and compare it with the contract. It
 fails synthetic observer/summary stopwatches presented as derivations, missing queues or
 reservations, omitted failure transitions, average-rate substitutions for burst bounds, and proof
-models that do not resemble the actual application graph.
+models that do not resemble the actual application graph. It also verifies that every implementation
+binding is the production worker boundary, that dependency edges follow real source types, and that
+failure/exception outcomes and their effects were not omitted or falsely assigned success production.
 
 ## Handoff
 

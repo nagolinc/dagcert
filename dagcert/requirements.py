@@ -96,6 +96,12 @@ def audit_translation(
         f"timing:{task.id}/{case}" for task in contract.tasks for case in task.timings
     )
     valid_primitives.update(f"composition:{item.id}" for item in contract.compositions)
+    valid_primitives.update(
+        f"guarantee:{task.id}/{kind}/{resource.id}"
+        for task in contract.tasks
+        for kind in ("produce", "consume")
+        for resource in contract.resources
+    )
     required_tasks = {f"task:{item.id}" for item in contract.tasks}
     required_timings = {
         f"timing:{task.id}/{case}" for task in contract.tasks for case in task.timings

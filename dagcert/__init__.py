@@ -20,10 +20,12 @@ from .checks import (
     write_check_result,
 )
 from .contract import (
-    Composition, CompositionStep, Contract, ContractError, Resource, ResourceEffect,
-    Task, Timing, Worker, load_contract,
+    Composition, CompositionStep, Contract, ContractError, Implementation, Resource, ResourceEffect,
+    Task, TaskOutcome, Timing, TypedDependency, Worker, load_contract,
 )
 from .evidence import EvidenceError, EvidenceRecorder, TimingSample, load_evidence
+from .runtime import UnhandledException, operation, outcome_type
+from .source_types import SourceSignature, SourceTypeError
 from .requirements import (
     EnglishClaim,
     EnglishRequirements,
@@ -36,13 +38,13 @@ from .requirements import (
 __all__ = [
     "AnalysisReport", "CertificateError", "CertificateVerification", "CheckContext",
     "CheckFinding", "Checker", "CheckResult", "Composition", "CompositionStep",
-    "Contract", "ContractError",
+    "Contract", "ContractError", "Implementation",
     "EnglishClaim", "EnglishRequirements", "EvidenceError", "EvidenceRecorder", "Finding",
     "RequirementsError", "Resource", "ResourceEffect",
-    "StructuralProgress", "Task", "Timing", "TimingResult", "TimingSample", "TranslationAudit",
-    "Worker", "analyze_contract", "audit_translation", "issue_certificate",
+    "StructuralProgress", "Task", "TaskOutcome", "Timing", "TimingResult", "TimingSample", "TranslationAudit", "TypedDependency",
+    "SourceSignature", "SourceTypeError", "UnhandledException", "Worker", "analyze_contract", "audit_translation", "issue_certificate",
     "load_check_result", "load_contract", "load_evidence", "load_requirements", "run_checker", "sha256_file",
-    "source_fingerprint", "source_manifest", "verify_certificate", "write_check_result",
+    "operation", "outcome_type", "source_fingerprint", "source_manifest", "verify_certificate", "write_check_result",
 ]
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"

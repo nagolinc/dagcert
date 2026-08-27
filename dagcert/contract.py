@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 import json
 
+from .source_types import SourceSignature, SourceTypeError, read_python_signature
+
 
 class ContractError(ValueError):
     pass
@@ -49,6 +51,26 @@ class ResourceEffect:
 
 
 @dataclass(frozen=True, slots=True)
+class Implementation:
+    language: str
+    path: str
+    symbol: str
+
+
+@dataclass(frozen=True, slots=True)
+class TaskOutcome:
+    type: str
+    resources: Mapping[str, ResourceEffect] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class TypedDependency:
+    task: str
+    outcome_type: str
+
+
+@dataclass(frozen=True, slots=True)
 class Task:
     id: str
     worker: str
@@ -59,6 +81,24 @@ class Task:
     timings: Mapping[str, Timing] = field(default_factory=dict)
     metadata: Mapping[str, Any] = field(default_factory=dict)
     role: str = "operation"
+    implementation: Implementation | None = None
+    outcomes: tuple[TaskOutcome, ...] = ()
+    source_signature: SourceSignature | None = None
+    typed_dependencies: tuple[TypedDependency, ...] = ()
+
+    @property
+    def outcome_by_type(self) -> Mapping[str, TaskOutcome]:
+        return {item.type: item for item in self.outcomes}
+
+    def guaranteed_effect(self, resource_id: str, kind: str) -> float:
+        """Return the minimum effect across the complete source-declared outcome union."""
+        if not self.outcomes:
+            effect = self.resources.get(resource_id, ResourceEffect())
+            return float(getattr(effect, kind))
+        return min(
+            float(getattr(outcome.resources.get(resource_id, ResourceEffect()), kind))
+            for outcome in self.outcomes
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +106,7 @@ class CompositionStep:
     task: str
     timing: str
     count: int = 1
+    outcome_type: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,15 +208,20 @@ def _load(path: Path) -> Mapping[str, Any]:
     return _object(value, "contract")
 
 
-def load_contract(path: str | Path) -> Contract:
-    raw = _load(Path(path))
+def load_contract(path: str | Path, *, source_root: str | Path | None = None) -> Contract:
+    contract_path = Path(path)
+    raw = _load(contract_path)
     schema = raw.get("schema")
-    if schema not in {"dagcert-contract/v2", "dagcert-contract/v3"}:
-        raise ContractError("contract schema must be dagcert-contract/v2 or dagcert-contract/v3")
-    if schema == "dagcert-contract/v3" and set(raw) != {
+    if schema not in {"dagcert-contract/v2", "dagcert-contract/v3", "dagcert-contract/v4"}:
+        raise ContractError("contract schema must be dagcert-contract/v2, v3, or v4")
+    if schema in {"dagcert-contract/v3", "dagcert-contract/v4"} and set(raw) != {
         "schema", "workers", "resources", "tasks", "compositions", "metadata",
     }:
-        raise ContractError("v3 contract must contain exactly schema, workers, resources, tasks, compositions, and metadata")
+        raise ContractError(
+            f"{schema.rsplit('/', 1)[-1]} contract must contain exactly schema, workers, resources, "
+            "tasks, compositions, and metadata"
+        )
+    implementation_root = Path(source_root).resolve() if source_root is not None else contract_path.resolve().parent
 
     workers: list[Worker] = []
     for value in _array(raw.get("workers", ()), "workers"):
@@ -202,21 +248,30 @@ def load_contract(path: str | Path) -> Contract:
     tasks: list[Task] = []
     for value in _array(raw.get("tasks", ()), "tasks"):
         row = _object(value, "task")
-        v3_task_fields = {
+        legacy_task_fields = {
             "id", "role", "worker", "input_type", "output_type", "depends_on",
             "resources", "timings",
         }
-        unexpected_task_fields = set(row) - (v3_task_fields | {"metadata"})
+        v4_task_fields = {
+            "id", "role", "worker", "implementation", "outcomes", "depends_on", "timings",
+        }
+        allowed_task_fields = v4_task_fields if schema == "dagcert-contract/v4" else legacy_task_fields
+        unexpected_task_fields = set(row) - (allowed_task_fields | {"metadata"})
         if schema == "dagcert-contract/v3" and unexpected_task_fields:
             raise ContractError(
                 f"v3 task contains unexpected fields {sorted(unexpected_task_fields)}"
             )
+        if schema == "dagcert-contract/v4" and (unexpected_task_fields or set(row) - {"metadata"} != v4_task_fields):
+            missing = sorted(v4_task_fields - set(row))
+            raise ContractError(
+                f"v4 task fields mismatch: unexpected={sorted(unexpected_task_fields)}, missing={missing}"
+            )
         task_id = _identifier(row.get("id"), "task.id")
         role = _identifier(
-            row.get("role") if schema == "dagcert-contract/v3" else row.get("role", "operation"),
+            row.get("role") if schema in {"dagcert-contract/v3", "dagcert-contract/v4"} else row.get("role", "operation"),
             f"task {task_id}.role",
         )
-        if schema == "dagcert-contract/v3" and role not in {"operation", "instrumentation"}:
+        if schema in {"dagcert-contract/v3", "dagcert-contract/v4"} and role not in {"operation", "instrumentation"}:
             raise ContractError(f"task {task_id}.role must be operation or instrumentation")
         timing_rows = _object(row.get("timings", {}), f"task {task_id}.timings")
         timings: dict[str, Timing] = {}
@@ -267,34 +322,134 @@ def load_contract(path: str | Path) -> Contract:
                 metric, upper_ms, lower_ms, evidence_kind, minimum_samples,
                 policy, percentile, safety_factor,
             )
-        resource_use: dict[str, ResourceEffect] = {}
-        for identifier, effect_value in _object(row.get("resources", {}), f"task {task_id}.resources").items():
-            resource_id = _identifier(identifier, f"task {task_id}.resource ID")
-            effect = _object(effect_value, f"task {task_id}.resources.{resource_id}")
-            parsed = ResourceEffect(
-                acquire=_nonnegative(effect.get("acquire", 0), "resource effect acquire"),
-                consume=_nonnegative(effect.get("consume", 0), "resource effect consume"),
-                produce=_nonnegative(effect.get("produce", 0), "resource effect produce"),
+        def parse_effects(value: Any, label: str) -> dict[str, ResourceEffect]:
+            resource_use: dict[str, ResourceEffect] = {}
+            for identifier, effect_value in _object(value, label).items():
+                resource_id = _identifier(identifier, f"{label} resource ID")
+                effect = _object(effect_value, f"{label}.{resource_id}")
+                parsed = ResourceEffect(
+                    acquire=_nonnegative(effect.get("acquire", 0), "resource effect acquire"),
+                    consume=_nonnegative(effect.get("consume", 0), "resource effect consume"),
+                    produce=_nonnegative(effect.get("produce", 0), "resource effect produce"),
+                )
+                if set(effect) - {"acquire", "consume", "produce"}:
+                    raise ContractError(f"{label}.{resource_id} contains unexpected fields")
+                if parsed == ResourceEffect():
+                    raise ContractError(f"{label}.{resource_id} must have a positive effect")
+                resource_use[resource_id] = parsed
+            return resource_use
+
+        implementation: Implementation | None = None
+        outcomes: tuple[TaskOutcome, ...] = ()
+        source_signature: SourceSignature | None = None
+        if schema == "dagcert-contract/v4":
+            binding = _object(row.get("implementation"), f"task {task_id}.implementation")
+            if set(binding) != {"language", "path", "symbol"}:
+                raise ContractError(
+                    f"task {task_id}.implementation must contain exactly language, path, and symbol"
+                )
+            implementation = Implementation(
+                _identifier(binding.get("language"), f"task {task_id}.implementation.language"),
+                _identifier(binding.get("path"), f"task {task_id}.implementation.path"),
+                _identifier(binding.get("symbol"), f"task {task_id}.implementation.symbol"),
             )
-            if parsed == ResourceEffect():
-                raise ContractError(f"task {task_id}.resources.{resource_id} must have a positive effect")
-            resource_use[resource_id] = parsed
-        dependencies = tuple(
-            _identifier(item, f"task {task_id}.dependency")
-            for item in _array(row.get("depends_on", ()), f"task {task_id}.depends_on")
-        )
+            if implementation.language != "python":
+                raise ContractError(
+                    f"task {task_id} uses unsupported source type provider {implementation.language!r}"
+                )
+            try:
+                source_signature = read_python_signature(
+                    implementation_root, implementation.path, implementation.symbol,
+                )
+            except SourceTypeError as exc:
+                raise ContractError(f"task {task_id} source type error: {exc}") from exc
+            outcome_rows = _array(row.get("outcomes"), f"task {task_id}.outcomes")
+            parsed_outcomes: list[TaskOutcome] = []
+            for outcome_value in outcome_rows:
+                outcome = _object(outcome_value, f"task {task_id}.outcome")
+                if set(outcome) != {"type", "resources", "metadata"}:
+                    raise ContractError(
+                        f"task {task_id} outcome must contain exactly type, resources, and metadata"
+                    )
+                parsed_outcomes.append(TaskOutcome(
+                    _identifier(outcome.get("type"), f"task {task_id}.outcome.type"),
+                    parse_effects(outcome.get("resources"), f"task {task_id}.outcome.resources"),
+                    dict(_object(outcome.get("metadata"), f"task {task_id}.outcome.metadata")),
+                ))
+            declared_types = tuple(item.type for item in parsed_outcomes)
+            if len(declared_types) != len(set(declared_types)):
+                raise ContractError(f"task {task_id} outcome types must be unique")
+            if set(declared_types) != set(source_signature.outcome_types):
+                raise ContractError(
+                    f"task {task_id} outcomes do not exactly match source return union: "
+                    f"source={list(source_signature.outcome_types)}, contract={list(declared_types)}"
+                )
+            unhandled = next(
+                item for item in parsed_outcomes
+                if item.type == "dagcert.runtime.UnhandledException"
+            )
+            if unhandled.resources:
+                raise ContractError(
+                    f"task {task_id} cannot assign resource effects to the kernel-owned "
+                    "UnhandledException outcome; catch and return an explicit typed recovery "
+                    "outcome after performing cleanup"
+                )
+            outcomes = tuple(parsed_outcomes)
+            input_type = source_signature.input_type
+            output_type = " | ".join(source_signature.outcome_types)
+            resource_ids = {identifier for outcome in outcomes for identifier in outcome.resources}
+            resource_use = {
+                identifier: ResourceEffect(
+                    acquire=max(outcome.resources.get(identifier, ResourceEffect()).acquire for outcome in outcomes),
+                    consume=max(outcome.resources.get(identifier, ResourceEffect()).consume for outcome in outcomes),
+                    produce=max(outcome.resources.get(identifier, ResourceEffect()).produce for outcome in outcomes),
+                )
+                for identifier in resource_ids
+            }
+        else:
+            resource_use = parse_effects(row.get("resources", {}), f"task {task_id}.resources")
+            input_type = _identifier(row.get("input_type"), f"task {task_id}.input_type")
+            output_type = _identifier(row.get("output_type"), f"task {task_id}.output_type")
+        typed_dependencies: tuple[TypedDependency, ...] = ()
+        dependency_values = _array(row.get("depends_on", ()), f"task {task_id}.depends_on")
+        if schema == "dagcert-contract/v4":
+            parsed_dependencies: list[TypedDependency] = []
+            for dependency_value in dependency_values:
+                dependency = _object(dependency_value, f"task {task_id}.dependency")
+                if set(dependency) != {"task", "outcome_type"}:
+                    raise ContractError(
+                        f"task {task_id} typed dependency must contain exactly task and outcome_type"
+                    )
+                parsed_dependencies.append(TypedDependency(
+                    _identifier(dependency.get("task"), f"task {task_id}.dependency.task"),
+                    _identifier(
+                        dependency.get("outcome_type"),
+                        f"task {task_id}.dependency.outcome_type",
+                    ),
+                ))
+            typed_dependencies = tuple(parsed_dependencies)
+            dependencies = tuple(item.task for item in typed_dependencies)
+        else:
+            dependencies = tuple(
+                _identifier(item, f"task {task_id}.dependency")
+                for item in dependency_values
+            )
         if len(dependencies) != len(set(dependencies)):
             raise ContractError(f"task {task_id}.depends_on must not contain duplicates")
         tasks.append(Task(
             task_id,
             _identifier(row.get("worker"), f"task {task_id}.worker"),
-            _identifier(row.get("input_type"), f"task {task_id}.input_type"),
-            _identifier(row.get("output_type"), f"task {task_id}.output_type"),
+            input_type,
+            output_type,
             dependencies,
             resource_use,
             timings,
             dict(_object(row.get("metadata", {}), f"task {task_id}.metadata")),
             role,
+            implementation,
+            outcomes,
+            source_signature,
+            typed_dependencies,
         ))
 
     compositions: list[Composition] = []
@@ -306,8 +461,16 @@ def load_contract(path: str | Path) -> Contract:
         steps: list[CompositionStep] = []
         for step_value in _array(row.get("steps"), f"composition {composition_id}.steps"):
             step = _object(step_value, f"composition {composition_id}.step")
-            if set(step) != {"task", "timing", "count"}:
-                raise ContractError("composition step must contain exactly task, timing, and count")
+            required_step_fields = (
+                {"task", "timing", "count", "outcome_type"}
+                if schema == "dagcert-contract/v4"
+                else {"task", "timing", "count"}
+            )
+            if set(step) != required_step_fields:
+                suffix = ", and outcome_type" if schema == "dagcert-contract/v4" else ""
+                raise ContractError(
+                    "composition step must contain exactly task, timing, count" + suffix
+                )
             count = _positive(step.get("count"), "composition step count")
             if not count.is_integer():
                 raise ContractError("composition step count must be an integer")
@@ -315,6 +478,10 @@ def load_contract(path: str | Path) -> Contract:
                 _identifier(step.get("task"), f"composition {composition_id}.step.task"),
                 _identifier(step.get("timing"), f"composition {composition_id}.step.timing"),
                 int(count),
+                _identifier(
+                    step.get("outcome_type"),
+                    f"composition {composition_id}.step.outcome_type",
+                ) if schema == "dagcert-contract/v4" else None,
             ))
         task_refs = tuple(step.task for step in steps)
         if len(set(task_refs)) < 2:
@@ -364,6 +531,21 @@ def _validate(contract: Contract) -> None:
             raise ContractError(f"task {task.id} has unknown dependencies {sorted(missing_dependencies)}")
         if task.id in task.depends_on:
             raise ContractError(f"task {task.id} depends on itself")
+        if contract.schema == "dagcert-contract/v4":
+            for dependency in task.typed_dependencies:
+                upstream = tasks.get(dependency.task)
+                if upstream is None:
+                    continue
+                if dependency.outcome_type not in upstream.outcome_by_type:
+                    raise ContractError(
+                        f"task {task.id} dependency cites {dependency.task} outcome "
+                        f"{dependency.outcome_type!r}, which is not in the upstream source union"
+                    )
+                if dependency.outcome_type != task.input_type:
+                    raise ContractError(
+                        f"task {task.id} source input {task.input_type!r} does not accept typed edge "
+                        f"{dependency.task}/{dependency.outcome_type}"
+                    )
         for resource_id, effect in task.resources.items():
             if resource_id not in resources:
                 raise ContractError(f"task {task.id} references unknown resource {resource_id}")
@@ -390,7 +572,8 @@ def _validate(contract: Contract) -> None:
                 f"composition {composition.id} cannot use instrumentation tasks {instrumentation}"
             )
         for step in composition.steps:
-            timing = tasks[step.task].timings.get(step.timing)
+            task = tasks[step.task]
+            timing = task.timings.get(step.timing)
             if timing is None:
                 raise ContractError(
                     f"composition {composition.id} cites unknown timing {step.task}/{step.timing}"
@@ -399,6 +582,29 @@ def _validate(contract: Contract) -> None:
                 raise ContractError(
                     f"composition {composition.id} step {step.task}/{step.timing} must be a duration"
                 )
+            if contract.schema == "dagcert-contract/v4":
+                if step.outcome_type not in task.outcome_by_type:
+                    raise ContractError(
+                        f"composition {composition.id} step {step.task} cites outcome "
+                        f"{step.outcome_type!r} outside the task's source union"
+                    )
+                if step.count > 1 and step.outcome_type != task.input_type:
+                    raise ContractError(
+                        f"composition {composition.id} repeats {step.task}, but outcome "
+                        f"{step.outcome_type!r} is not the task input {task.input_type!r}"
+                    )
+        if contract.schema == "dagcert-contract/v4":
+            for upstream_step, downstream_step in zip(
+                composition.steps, composition.steps[1:], strict=False,
+            ):
+                downstream = tasks[downstream_step.task]
+                typed_edge = TypedDependency(upstream_step.task, str(upstream_step.outcome_type))
+                if typed_edge not in downstream.typed_dependencies:
+                    raise ContractError(
+                        f"composition {composition.id} is not a real typed path: "
+                        f"{upstream_step.task}/{upstream_step.outcome_type} does not feed "
+                        f"{downstream_step.task}/{downstream.input_type}"
+                    )
         selected = set(composition.task_refs)
         connected = {composition.task_refs[0]}
         changed = True

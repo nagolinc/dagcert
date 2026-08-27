@@ -16,10 +16,11 @@ from .checks import load_check_result
 from .contract import ContractError, load_contract
 from .evidence import EvidenceError, load_evidence
 from .requirements import RequirementsError, audit_translation, load_requirements
+from .source_types import check_python_sources
 
 
 CONTRACT_TEMPLATE = """{
-  "schema": "dagcert-contract/v3",
+  "schema": "dagcert-contract/v4",
   "workers": [
     {"id": "app", "concurrency": 1}
   ],
@@ -31,10 +32,12 @@ CONTRACT_TEMPLATE = """{
       "id": "replace_me",
       "role": "operation",
       "worker": "app",
-      "input_type": "builtins:dict",
-      "output_type": "builtins:dict",
+      "implementation": {"language": "python", "path": "app.py", "symbol": "replace_me"},
+      "outcomes": [
+        {"type": "ReplaceMeCompleted", "resources": {"replace_me": {"acquire": 1}}, "metadata": {}},
+        {"type": "dagcert.runtime.UnhandledException", "resources": {}, "metadata": {}}
+      ],
       "depends_on": [],
-      "resources": {"replace_me": {"acquire": 1}},
       "timings": {
         "replace_me": {"metric": "duration", "upper_ms": 1000, "minimum_samples": 10, "policy": "max", "safety_factor": 1.30}
       }
@@ -60,6 +63,26 @@ REQUIREMENTS_TEMPLATE = """{
   ],
   "metadata": {}
 }
+"""
+
+APP_TEMPLATE = """from dataclasses import dataclass
+
+from dagcert import operation
+
+
+@dataclass(frozen=True)
+class ReplaceMeInput:
+    value: str
+
+
+@dataclass(frozen=True)
+class ReplaceMeCompleted:
+    value: str
+
+
+@operation
+def replace_me(request: ReplaceMeInput) -> ReplaceMeCompleted:
+    return ReplaceMeCompleted(request.value)
 """
 
 HELP_TOPICS = {
@@ -140,18 +163,26 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "lint":
             contract = load_contract(args.contract)
             requirements = load_requirements(args.requirements)
-            if contract.schema != "dagcert-contract/v3":
-                raise ContractError("new certificate issuance requires dagcert-contract/v3")
+            if contract.schema != "dagcert-contract/v4":
+                raise ContractError("new certificate issuance requires dagcert-contract/v4")
             if requirements.schema != "dagcert-english-requirements/v2":
                 raise RequirementsError(
                     "new certificate issuance requires dagcert-english-requirements/v2"
                 )
+            source_typing = check_python_sources(
+                Path(args.contract).resolve().parent,
+                (task.source_signature for task in contract.tasks if task.source_signature is not None),
+            )
             translation_audit = audit_translation(requirements, contract)
             if not translation_audit.passed:
                 raise RequirementsError("; ".join(translation_audit.findings))
             print(f"valid: {len(contract.workers)} workers, {len(contract.tasks)} tasks, {len(contract.resources)} resources, {sum(len(item.timings) for item in contract.tasks)} timings")
             print(f"human-readable requirements: {len(requirements.claims)} claims")
             print("English-to-formal coverage audit: passed")
+            print(
+                f"source typing: {source_typing['checker']} {source_typing['version']} "
+                f"{source_typing['mode']} passed"
+            )
             return 0
         if args.command == "fingerprint":
             print(source_fingerprint(args.source_root, exclude=args.exclude))
@@ -162,7 +193,10 @@ def main(argv: list[str] | None = None) -> int:
                 args.source_root, [args.contract, args.evidence, args.requirements]
             ) + list(args.exclude)
             fingerprint = source_fingerprint(args.source_root, exclude=exclusions)
-            report = analyze_contract(load_contract(args.contract), load_evidence(args.evidence), source_fingerprint=fingerprint)
+            report = analyze_contract(
+                load_contract(args.contract, source_root=args.source_root),
+                load_evidence(args.evidence), source_fingerprint=fingerprint,
+            )
             encoded = json.dumps(report.to_mapping(), indent=2)
             if args.output:
                 output = Path(args.output); output.parent.mkdir(parents=True, exist_ok=True); output.write_text(encoded + "\n", encoding="utf-8")
@@ -230,12 +264,16 @@ def _init(args: Namespace) -> int:
     root.mkdir(parents=True, exist_ok=True)
     contract = root / "dag_contract.json"
     requirements = root / "english_requirements.json"
+    application = root / "app.py"
     if contract.exists():
         load_contract(contract)
         print(f"existing contract retained: {contract}")
     else:
         contract.write_text(CONTRACT_TEMPLATE, encoding="utf-8", newline="\n")
         print(f"created {contract}")
+    if not application.exists():
+        application.write_text(APP_TEMPLATE, encoding="utf-8", newline="\n")
+        print(f"created {application}")
     if requirements.exists():
         load_requirements(requirements)
         print(f"existing English requirements retained: {requirements}")

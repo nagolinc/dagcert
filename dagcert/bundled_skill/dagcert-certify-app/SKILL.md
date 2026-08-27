@@ -17,13 +17,17 @@ resource caps, fake fast paths, or altered behavior merely to pass. Report a tru
 ## Model the actual execution DAG
 
 Dagcert's primitives remain workers, tasks, resources, and timings. A hardened contract also
-declares finite compositions over those primitives.
+declares finite source-outcome paths over those primitives.
 
 - `operation` tasks are real executable leaf boundaries and may have measured timings.
+- In a v4 contract, an operation binds a real source file and symbol. Dagcert extracts its one-input
+  type and closed return union, runs the language type checker itself, and adds the guarded
+  `UnhandledException` outcome. Contract JSON cannot declare or override task types or assign
+  resource effects to the kernel-owned exception outcome.
 - `instrumentation` tasks may record aggregate observations but cannot participate in a derived
   composition.
-- A composition names at least two connected operation tasks, exact duration cases, and finite
-  execution counts. Dagcert computes its conservative bound from those leaves; it never accepts a
+- A v4 composition names the source outcome at every step, and adjacent steps must be a real typed
+  dependency edge. Dagcert computes its conservative bound from those leaves; it never accepts a
   direct aggregate stopwatch as the derivation.
 
 Reconstruct the execution graph from source before writing the contract. Represent independently
@@ -31,6 +35,12 @@ scheduled stages, actual worker pools, queues, reservations, resource transfers,
 success transitions, and failure-release transitions that affect a requested guarantee. Do not
 collapse them into a pipeline observer or surround one catch-all measurement with meaningless task
 names.
+
+Write the production operation boundary in its strongly typed form before modeling it. For Python,
+use an explicit input class, explicit named outcome classes, an inline closed return union, and
+`@dagcert.operation`. Every v4 dependency names an upstream outcome type and must feed a downstream
+callable that accepts that exact source type. Model effects for every source outcome, including the
+kernel-owned exception outcome. Never create a typed certification wrapper that production bypasses.
 
 ## Claim boundary
 
@@ -54,6 +64,8 @@ composed latency with a summary task whose measured output is the desired conclu
 3. Trace source paths and build the smallest faithful worker/task/resource DAG. Do not mirror every
    function, but do not omit state or scheduling boundaries material to a claim.
 4. Declare real workers, operation tasks, instrumentation, resources, and finite compositions.
+   Bind each task to the source symbol actually called by its production worker; do not write
+   `input_type` or `output_type` labels in the contract.
 5. Put external premises in `assumed` leaf timings. Do not infer worst-case gaps from averages or a
    few favorable samples.
 6. Record every exact-source attempt, including failures. Exercise representative and adversarial
@@ -66,7 +78,7 @@ composed latency with a summary task whose measured output is the desired conclu
 10. Report `CERTIFIED` only for the exact verified source and the exact observed/derived scope.
     Otherwise report `NOT CERTIFIED` and preserve the failures.
 
-Never fabricate samples, types, capacities, transitions, formulas, checker results, or a passing
+Never fabricate samples, capacities, transitions, formulas, checker results, or a passing
 outcome. Certification does not imply general production readiness.
 
 ## Optional semantic audit

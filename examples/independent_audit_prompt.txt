@@ -23,6 +23,10 @@ Required review
 2. Trace the actual implementation paths relevant to this claim. Compare them
    with the declared workers, tasks, resources, types, dependencies, and
    timings.
+   For every operation, start at its v4 implementation binding and verify that
+   the named source symbol is the boundary the production worker actually
+   invokes. Reject a typed adapter, wrapper, or certification-only function
+   that the real execution path bypasses.
 3. Decide whether the evidence exercises the real user-visible or backend
    operation being promised. Check relevant concurrency, failure, blocking,
    and state-transition paths. A timed helper or stand-in is not evidence for
@@ -65,6 +69,23 @@ only after work completes; ignoring release behavior on failure; replacing
 burst/gap behavior with average rates; omitting worker contention; or declaring
 dependencies that are documentation rather than runtime ordering. Merely
 having multiple task names is not adequate decomposition.
+
+Treat source typing and outcome totality as part of the DAG, not as cosmetic
+metadata. Confirm that each task's input and closed return union come from the bound source symbol,
+that each dependency edge names a real upstream outcome
+accepted by the downstream source input, and that every outcome has the real
+resource effects. Trace timeout, cancellation, exception, rejection, malformed
+response, and dependency-failure exits. Reject a model that types a worker as
+`Input -> Output` when the code can instead raise, drop the item, return no
+value, or enqueue a different type. Also reject an effects table that assigns
+success production to a failure or `UnhandledException` branch when the code
+does not perform that transition.
+
+Do not accept strict type-check output by itself as proof that the modeled
+symbol is the production boundary. Conversely, do not accept hand-authored
+evidence type names as source typing. The certificate must contain Dagcert's
+source extraction and compiler result, and the source/call graph must show
+that production uses the bound callable.
 
 For every derived claim, explain the chain from leaf bounds and state
 transitions to the conclusion. Confirm that the conclusion is recomputed from

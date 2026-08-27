@@ -12,8 +12,8 @@ behavioral regression merely to make a claim pass.
 
 ## 2. Contract schema
 
-New issuance uses `dagcert-contract/v3`. The loader retains v2 support for verification of existing
-certificates. JSON is built in; YAML is available with PyYAML.
+New issuance uses `dagcert-contract/v4`. The loader retains v2/v3 support for verification of
+existing certificates. JSON is built in; YAML is available with PyYAML.
 
 ### Worker
 
@@ -38,9 +38,10 @@ resource kinds.
 
 - `id`: unique nonempty string.
 - `worker`: declared worker ID.
-- `input_type`, `output_type`: stable application type identifiers.
-- `depends_on`: task IDs that must precede this task; the graph must be acyclic.
-- `resources`: resource ID to a ResourceEffect.
+- `implementation`: language, source-root-relative path, and symbol for the real operation callable.
+- `depends_on`: typed edges naming an upstream task and one exact upstream outcome type; the graph
+  must be acyclic and the outcome must equal the downstream source input type.
+- `outcomes`: the complete source return union, with a ResourceEffect mapping for every variant.
 - `timings`: nonempty timing-case mapping containing at least one `duration` metric.
 - `metadata`: optional opaque object.
 
@@ -54,13 +55,27 @@ At least one effect must be positive. No individual acquisition, consumption, or
 exceed resource capacity. A completed producer therefore makes work available to a downstream
 consumer without adding a queue or framework primitive.
 
-Dagcert records type identifiers but does not import application code. Instrumentation is
-responsible for mapping actual work to the declared task, worker, and resource effects truthfully.
+The contract is not authoritative for task types. For Python, Dagcert parses the bound source
+callable, requires exactly one explicit source-defined input class and an inline finite union of
+explicit source-defined outcome classes, rejects `Any` throughout that boundary, runs strict mypy
+over the real implementation body itself, and seals both
+the extraction and compiler result. Python operations use `@dagcert.operation`; its runtime guard
+adds `dagcert.runtime.UnhandledException` to every outcome union. The contract must cover that
+kernel-owned variant and cannot add, omit, or rename a source outcome.
+The kernel-owned exception variant cannot be assigned resource effects. Code that recovers or
+releases capacity must catch the failure and return an explicit source-defined recovery outcome.
+The v4 Python provider currently rejects async callables because a synchronous decorator cannot
+type exceptions and cancellation raised while awaiting them.
+
+Resource effects remain formal transitions, but any unconditional derived amount is the minimum
+effect across the complete source outcome union. Thus a success outcome producing one queue item
+and a failure/exception outcome producing none has guaranteed production zero.
 
 ### Composition
 
-A composition is a finite DAG workload over at least two connected `operation` tasks. Each step
-names an exact task duration case and a positive integer execution count. Instrumentation tasks are
+A v4 composition is a finite, typed outcome path over at least two `operation` tasks. Each step
+names an exact task duration case, source outcome, and positive integer execution count; adjacent
+steps must match an actual typed dependency edge. Instrumentation tasks are
 forbidden. Compositions have no directly measured timing: the kernel conservatively sums their
 certified leaf upper bounds. This prevents a monolithic pipeline stopwatch from substituting for a
 derivation over the actual task graph.
@@ -133,7 +148,8 @@ It consumes the same mandatory requirements file and cannot substitute different
 
 The claim algebra is deliberately closed and small. Numeric expressions support finite literals,
 certified timing upper/lower bounds, worker concurrency, resource capacity/initial state,
-composition upper bounds, addition, multiplication, division, and maximum. Boolean expressions
+minimum all-outcome task production/consumption, composition upper bounds, addition,
+multiplication, division, and maximum. Boolean expressions
 support comparison, conjunction, disjunction, negation, and implication. Unknown operators fail.
 
 A derived formula must use either `composition_upper_ms` or timing bounds from at least two tasks
@@ -170,24 +186,24 @@ Timing evidence is JSON Lines. Each record contains:
 - `task_id`, timing `case`, and `worker_id`;
 - nonnegative generic `value_ms`;
 - exact `source_fingerprint`;
-- boolean `succeeded` and numeric `recorded_at`;
-- observed input/output type identifiers for successful duration samples;
+- numeric `recorded_at` and the actual runtime `outcome_type`;
 - optional observed worker concurrency;
 - observed acquired, consumed, and produced resource amounts for declared task effects;
 - optional resource levels and opaque metadata.
 
-`value_ms` may measure duration, interval, wait, or age according to its declared timing. Only
-successful records with the correct task, case, worker, and source count. Invalid records still
+`value_ms` may measure duration, interval, wait, or age according to its declared timing. V4 records
+with the correct task, case, worker, source, and source-declared outcome count. Invalid records still
 produce findings. Assumed timings require no fabricated samples and are copied into the analysis as
 conditions.
 
-Identifiers and observed type names are validated as nonempty strings; booleans and numeric strings
-are not silently coerced into timing/resource numbers. `succeeded` must be a real boolean, observed
+Identifiers and outcome names are validated as nonempty strings; booleans and numeric strings
+are not silently coerced into timing/resource numbers. Observed
 concurrency a positive integer, and every numeric value finite and nonnegative.
 
-For every successful duration sample, input/output types must exactly match the task declaration.
-Declared acquisition must be observed within its maximum; declared consumption and production must
-be observed exactly. Undeclared effects, missing effects, and resource levels above capacity fail.
+Evidence cannot state or override source input/output types. For every duration sample, the runtime
+outcome must be in the extracted source union and its outcome-specific effects must match. Legacy
+type labels, undeclared outcomes, retained `UnhandledException`, undeclared/missing effects, and
+resource levels above capacity fail.
 
 Evidence collection remains application-owned. Unit/integration tests, benchmarks, browser
 automation, production traces, and hardware probes differ too much for one collector to be honest
@@ -249,8 +265,9 @@ SHA-256 hashes it. It ignores common generated directories and `.dagcertignore` 
 selected checker artifacts inside the source root are automatically excluded to avoid
 self-reference.
 
-`dagcert-certificate/v5` records source identity, exclusions, contract/evidence/requirements
-digests, the complete normalized English requirements, the mandatory translation audit, serialized
+`dagcert-certificate/v6` records source identity, exclusions, contract/evidence/requirements
+digests, source signature extraction and strict compiler result, the complete normalized English
+requirements, the mandatory translation audit, serialized
 primitives and compositions, deterministic primitive and claim analysis, selected checker results
 and hashes, issue time, and its own
 canonical digest. Verification recomputes all of them and fails closed on any mismatch.

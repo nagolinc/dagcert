@@ -61,8 +61,8 @@ def check_flow_guarantees(
     producer = tasks[supply.producer_task]
     consumer = tasks[supply.consumer_task]
     work = resources[supply.work_resource]
-    produced = producer.resources[supply.work_resource].produce
-    consumed = consumer.resources[supply.work_resource].consume
+    produced = producer.guaranteed_effect(supply.work_resource, "produce")
+    consumed = consumer.guaranteed_effect(supply.work_resource, "consume")
     arrival = timing_results[(producer.id, supply.producer_interval_case)]
     service = timing_results[(consumer.id, supply.consumer_duration_case)]
     if arrival.certified_upper_ms is None or service.certified_lower_ms is None:
@@ -116,12 +116,12 @@ def check_flow_guarantees(
         ))
     else:
         maximum_generation_rate = (
-            lag_producer.resources[lag.lag_resource].produce
+            lag_producer.guaranteed_effect(lag.lag_resource, "produce")
             * 1000
             / generation_interval.certified_lower_ms
         )
         minimum_update_rate = (
-            updater.resources[lag.lag_resource].consume
+            updater.guaranteed_effect(lag.lag_resource, "consume")
             * context.contract.worker_by_id[updater.worker].concurrency
             * 1000
             / update_duration.certified_upper_ms

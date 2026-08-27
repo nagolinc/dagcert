@@ -19,6 +19,7 @@ from dagcert import (
     load_contract,
     load_evidence,
     load_requirements,
+    outcome_type,
     run_checker,
     sha256_file,
     source_fingerprint,
@@ -35,6 +36,12 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select, WebDriverWait
 
 from .app import create_server, initialize_database
+from .browser_observations import (
+    BrowserFeedbackInput,
+    BrowserRenderInput,
+    observe_feedback,
+    observe_render,
+)
 
 
 PROJECTION_RESULTS = (
@@ -158,8 +165,7 @@ def record_http_evidence(
             source_fingerprint=fingerprint,
             recorded_at=time(),
             observed_worker_concurrency=1,
-            observed_input_type="ItemPageQuery",
-            observed_output_type="ItemPage",
+            outcome_type="ItemsListed",
             metadata={"boundary": "HTTP+SQLite+JSON", "sample": index},
         ))
 
@@ -180,8 +186,7 @@ def record_http_evidence(
             source_fingerprint=fingerprint,
             recorded_at=time(),
             observed_worker_concurrency=1,
-            observed_input_type="NewItem",
-            observed_output_type="StoredItem",
+            outcome_type="ItemStored",
             metadata={"boundary": "HTTP+SQLite commit+JSON", "sample": index},
         ))
 
@@ -201,8 +206,7 @@ def record_http_evidence(
             source_fingerprint=fingerprint,
             recorded_at=time(),
             observed_worker_concurrency=1,
-            observed_input_type="ItemId",
-            observed_output_type="DeletionResult",
+            outcome_type="ItemDeleted",
             metadata={"boundary": "HTTP+SQLite commit+JSON", "sample": index},
         ))
 
@@ -316,16 +320,17 @@ def record_browser_evidence(
     fingerprint: str,
     events: tuple[dict[str, Any], ...],
 ) -> None:
-    types = {
-        "ui.feedback": ("UserAction", "VisibleStatus"),
-        "ui.render": ("ItemPage", "RenderedItemRows"),
+    observers = {
+        "ui.feedback": lambda value, metadata: observe_feedback(BrowserFeedbackInput(value, metadata)),
+        "ui.render": lambda value, metadata: observe_render(BrowserRenderInput(value, metadata)),
     }
-    counts = {task: 0 for task in types}
+    counts = {task: 0 for task in observers}
     for event in events:
         task = str(event.get("task"))
-        if task not in types:
+        if task not in observers:
             continue
-        input_type, output_type = types[task]
+        metadata = {"boundary": "real browser DOM", **dict(event.get("metadata", {}))}
+        observed = observers[task](float(event["value_ms"]), metadata)
         recorder.append(TimingSample(
             task_id=task,
             case=str(event["case"]),
@@ -334,9 +339,8 @@ def record_browser_evidence(
             source_fingerprint=fingerprint,
             recorded_at=time(),
             observed_worker_concurrency=1,
-            observed_input_type=input_type,
-            observed_output_type=output_type,
-            metadata={"boundary": "real browser DOM", **dict(event.get("metadata", {}))},
+            outcome_type=outcome_type(observed),
+            metadata=metadata,
         ))
         counts[task] += 1
     deficient = {task: count for task, count in counts.items() if count < 10}

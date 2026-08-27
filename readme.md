@@ -62,7 +62,8 @@ obtained by breaking the app.
 The formal application model contains only four primitives:
 
 - **workers** perform work and have declared concurrency;
-- **tasks** transform named input types into named output types and depend on other tasks;
+- **tasks** bind real source callables whose compiler-checked input and closed outcome-union types
+  form typed dependency edges;
 - **resources** have capacity and state that tasks acquire, consume, or produce; and
 - **timings** describe duration, arrival interval, waiting, or age, using measurements or explicit
   assumptions.
@@ -77,11 +78,21 @@ Those primitives are enough to express conditional statements such as:
 - model X is never more than G generations out of date; and
 - a handler or visible action completes within its declared deadline.
 
-New issuance separates real `operation` tasks from `instrumentation` and supports finite
-multi-operation compositions. A composition has no stopwatch of its own: Dagcert computes its
+New v6 issuance separates real `operation` tasks from `instrumentation` and supports finite,
+source-typed multi-operation paths. Every v4 composition step names the source outcome traversed,
+and consecutive steps must match a real typed dependency edge. A composition has no stopwatch of its own: Dagcert computes its
 bound from exact leaf duration cases. Claims are either `observed` (retained executions only) or
 `derived` (a fixed-algebra formula evaluated by the kernel). Derived claims cannot delegate proof
 to an arbitrary checker boolean.
+
+For Python, each v4 task points to the production source file and symbol. Dagcert reads the real
+one-input annotation and closed return union, rejects `Any` throughout those boundary variants,
+runs strict mypy over the real implementation body itself, and adds a guarded
+`UnhandledException` outcome. The JSON contract cannot invent `input_type` or `output_type` labels.
+Every dependency names an upstream outcome that must exactly match the downstream callable's source
+input, and resource derivations use the minimum effect across every outcome. The kernel-owned
+exception outcome must have no resource effects; recovery and cleanup require an explicit source-
+typed outcome returned by production code.
 
 The core also provides a small checker protocol. Applications can record case-bounded semantic
 facts—such as database rows matching the visible DOM—without adding database, browser, queue, or UI
@@ -112,15 +123,16 @@ certificate.json
    a stable ID, observed/derived basis, explicit assumptions, and exact references. A derived claim
    also has a kernel formula and cannot cite a checker as proof.
 2. `dag_contract.json` is the formal translation using the four primitives.
-3. Runtime evidence records real task executions, timings, worker identity, observed input/output
-   types, concurrency, resource effects, and failures. Optional checkers record additional facts.
+3. Runtime evidence records real task executions, timings, worker identity, actual runtime outcome
+   variants, concurrency, resource effects, and failures. Source types never come from evidence.
 4. Deterministic analysis checks graph/resource feasibility, timing coverage and bounds, retained
    failures, explicit assumptions, structural progress, and derived formulas.
 5. Every issuance performs a mandatory deterministic translation audit. It rejects uncovered formal
    tasks or timings, unresolved English references, absent required checkers, and assumed timings
    without a matching English assumption.
-6. `certificate.json` embeds the complete English requirements, formal primitives and compositions,
-   primitive and claim analysis, and checker results, with bindings to exact source and evidence.
+6. `certificate.json` embeds the complete English requirements, source type extraction and compiler
+   result, formal primitives and compositions, primitive and claim analysis, and checker results,
+   with bindings to exact source and evidence.
 
 The core modules are deliberately limited to contract loading, evidence recording, deterministic
 analysis, English/formal traceability, the checker boundary, and certificate issue/verification.
@@ -212,18 +224,20 @@ review material but are not proof for changed requirements.
 [`examples/certified_vote`](examples/certified_vote/README.md) is a deliberately narrow in-process
 example showing how the core primitives express performance and conditional flow guarantees.
 
-Its checked-in v5 certificate establishes:
+Its checked-in v6 certificate establishes:
 
 - ten successful measured executions for every declared task;
 - no structural blocked state under the stated scheduling/resource assumptions;
 - `<16ms` in-process vote preview and `<50ms` in-process commit;
-- enough modeled upstream work to prevent snapshot-render starvation after warm-up; and
-- enough modeled summarizer capacity to remain within three generations of lag.
+- compiler-checked, source-owned task boundaries; and
+- dependency edges whose upstream outcome types match the downstream source input types.
 
 Inspect its [plain-English requirements](examples/certified_vote/english_requirements.json),
 [formal contract](examples/certified_vote/dag_contract.json), and
-[certificate](examples/certified_vote/artifacts/certificate.json). The flow checker is retained as
-supplementary diagnostic evidence; the derived claims are recomputed by the kernel formulas.
+[certificate](examples/certified_vote/artifacts/certificate.json). The former unconditional flow
+claims were removed during v4 migration because the mandatory `UnhandledException` outcome makes
+their guaranteed production zero; retaining them would reproduce the omitted-failure error this
+release is designed to reject.
 
 This example deliberately makes no browser, HTTP, database, or production worker-pool promise. Its
 requirements state those limitations plainly.

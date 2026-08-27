@@ -15,6 +15,12 @@ The ordinary non-streaming HTTP deadlines are 50 ms. Immediate browser DOM feedb
 rendering use the 16 ms defaults. The browser checks compare application-owned read-only SQL
 projections with Selenium observations using stable semantic row keys and visible fields.
 
+The SQLite list/insert/delete operations are real v4 Python task boundaries used by the production
+HTTP handlers. Dagcert extracts their named input and outcome classes and runs strict mypy. Browser
+DOM timings are explicitly modeled as typed instrumentation; the certificate does not pretend that
+Python type-checks the JavaScript implementation. The real Selenium/HTTP/SQLite projection checker
+supports those observed browser claims.
+
 ## Attempt certification
 
 From the Dagcert repository root, collect fresh evidence through real HTTP and Selenium boundaries:
@@ -58,10 +64,12 @@ py -m examples.optional_openai_luna_audit accept \
   --output examples/certified_database_ui/artifacts/independent-audit-result.json
 ```
 
-Finally issue and immediately verify a certificate that requires the projection checks and the
-accepted independent audit:
+Finally issue and immediately verify a certificate that requires the projection checks. Attach the
+accepted independent audit only when that optional audit was freshly requested and completed:
 
 ```text
+py -m examples.certified_database_ui.certify issue
+
 py -m examples.certified_database_ui.certify issue \
   --audit-result artifacts/independent-audit-result.json
 ```

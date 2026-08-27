@@ -16,6 +16,7 @@ from .contract import Contract, load_contract
 from .evidence import load_evidence
 from .formula import FormulaError, evaluate_formula
 from .requirements import EnglishRequirements, audit_translation, load_requirements
+from .source_types import SourceTypeError, check_python_sources
 
 
 class CertificateError(RuntimeError):
@@ -120,12 +121,24 @@ def _primitive_refs(contract: Contract) -> set[str]:
     refs.update(f"resource:{item.id}" for item in contract.resources)
     refs.update(f"timing:{task.id}/{case}" for task in contract.tasks for case in task.timings)
     refs.update(f"composition:{item.id}" for item in contract.compositions)
+    refs.update(
+        f"guarantee:{task.id}/{kind}/{resource.id}"
+        for task in contract.tasks
+        for kind in ("produce", "consume")
+        for resource in contract.resources
+    )
     return refs
 
 
 def _serialized_primitives(contract: Contract, analysis_mapping: dict[str, Any]) -> dict[str, Any]:
     """Return the exact JSON shape stored in a certificate (tuples become arrays)."""
     tasks = [asdict(item) for item in contract.tasks]
+    if contract.schema in {"dagcert-contract/v2", "dagcert-contract/v3"}:
+        for task in tasks:
+            task.pop("implementation", None)
+            task.pop("outcomes", None)
+            task.pop("source_signature", None)
+            task.pop("typed_dependencies", None)
     if contract.schema == "dagcert-contract/v2":
         for task in tasks:
             task.pop("role", None)
@@ -135,8 +148,13 @@ def _serialized_primitives(contract: Contract, analysis_mapping: dict[str, Any])
         "resources": [asdict(item) for item in contract.resources],
         "timings": analysis_mapping["timings"],
     }
-    if contract.schema == "dagcert-contract/v3":
-        value["compositions"] = [asdict(item) for item in contract.compositions]
+    if contract.schema in {"dagcert-contract/v3", "dagcert-contract/v4"}:
+        compositions = [asdict(item) for item in contract.compositions]
+        if contract.schema != "dagcert-contract/v4":
+            for composition in compositions:
+                for step in composition["steps"]:
+                    step.pop("outcome_type", None)
+        value["compositions"] = compositions
     return cast(dict[str, Any], json.loads(canonical_json(value)))
 
 
@@ -228,16 +246,23 @@ def issue_certificate(
             pass
     manifest = source_manifest(root, exclude=exclusions)
     fingerprint = sha256(canonical_json(manifest)).hexdigest()
-    contract = load_contract(contract_path)
+    contract = load_contract(contract_path, source_root=root)
     requirements = load_requirements(requirements_path)
-    if contract.schema != "dagcert-contract/v3":
+    if contract.schema != "dagcert-contract/v4":
         raise CertificateError(
-            "new certificate issuance requires dagcert-contract/v3 with explicit compositions"
+            "new certificate issuance requires dagcert-contract/v4 with source-owned task types"
         )
     if requirements.schema != "dagcert-english-requirements/v2":
         raise CertificateError(
             "new certificate issuance requires dagcert-english-requirements/v2 with claim bases"
         )
+    try:
+        source_typing = check_python_sources(
+            root,
+            (task.source_signature for task in contract.tasks if task.source_signature is not None),
+        )
+    except SourceTypeError as exc:
+        raise CertificateError(f"certificate refused: {exc}") from exc
     evidence = load_evidence(evidence_path)
     analysis = analyze_contract(contract, evidence, source_fingerprint=fingerprint)
     if not analysis.passed:
@@ -259,7 +284,7 @@ def issue_certificate(
         raise CertificateError("certificate refused: " + "; ".join(check_problems))
     claim_analysis = _claim_analysis(requirements, contract, analysis)
     document: dict[str, Any] = {
-        "schema": "dagcert-certificate/v5",
+        "schema": "dagcert-certificate/v6",
         "issued_at": time(),
         "source_manifest": manifest,
         "source_fingerprint": fingerprint,
@@ -270,6 +295,7 @@ def issue_certificate(
         "english_requirements": requirements.to_mapping(),
         "translation_audit": translation_audit.to_mapping(),
         "claim_analysis": claim_analysis,
+        "source_typing": source_typing,
         "primitives": _serialized_primitives(contract, analysis.to_mapping()),
         "analysis": analysis.to_mapping(),
         "checks": [item.to_mapping() for item in checks],
@@ -300,9 +326,9 @@ def verify_certificate(
     except (OSError, json.JSONDecodeError) as exc:
         return CertificateVerification(False, (f"certificate cannot be read: {exc}",))
     if not isinstance(raw, dict) or raw.get("schema") not in {
-        "dagcert-certificate/v4", "dagcert-certificate/v5",
+        "dagcert-certificate/v4", "dagcert-certificate/v5", "dagcert-certificate/v6",
     }:
-        return CertificateVerification(False, ("certificate schema must be dagcert-certificate/v4 or v5",))
+        return CertificateVerification(False, ("certificate schema must be dagcert-certificate/v4, v5, or v6",))
     certificate_schema = raw["schema"]
     expected_fields = {
         "schema", "issued_at", "source_manifest", "source_fingerprint", "source_exclude",
@@ -310,8 +336,10 @@ def verify_certificate(
         "english_requirements", "translation_audit", "primitives", "analysis", "checks",
         "check_result_sha256", "certificate_sha256",
     }
-    if certificate_schema == "dagcert-certificate/v5":
+    if certificate_schema in {"dagcert-certificate/v5", "dagcert-certificate/v6"}:
         expected_fields.add("claim_analysis")
+    if certificate_schema == "dagcert-certificate/v6":
+        expected_fields.add("source_typing")
     if set(raw) != expected_fields:
         unexpected = sorted(set(raw) - expected_fields)
         missing = sorted(expected_fields - set(raw))
@@ -344,7 +372,17 @@ def verify_certificate(
     if raw.get("requirements_sha256") != requirements_hash:
         problems.append("English requirements digest mismatch")
     try:
-        contract = load_contract(contract_path)
+        contract = load_contract(contract_path, source_root=root)
+        if certificate_schema == "dagcert-certificate/v6":
+            try:
+                source_typing = check_python_sources(
+                    root,
+                    (task.source_signature for task in contract.tasks if task.source_signature is not None),
+                )
+                if raw.get("source_typing") != source_typing:
+                    problems.append("source type analysis no longer matches")
+            except SourceTypeError as exc:
+                problems.append(f"current source type analysis failed: {exc}")
         requirements = load_requirements(requirements_path)
         if raw.get("english_requirements") != requirements.to_mapping():
             problems.append("serialized English requirements no longer match")
@@ -367,9 +405,16 @@ def verify_certificate(
         problems.extend(translation_audit.findings)
         if raw.get("translation_audit") != translation_audit.to_mapping():
             problems.append("English-to-formal translation audit no longer matches")
-        if certificate_schema == "dagcert-certificate/v5":
-            if contract.schema != "dagcert-contract/v3" or requirements.schema != "dagcert-english-requirements/v2":
-                problems.append("v5 certificate requires hardened v3 contract and v2 requirements")
+        if certificate_schema in {"dagcert-certificate/v5", "dagcert-certificate/v6"}:
+            expected_contract_schema = (
+                "dagcert-contract/v4" if certificate_schema == "dagcert-certificate/v6"
+                else "dagcert-contract/v3"
+            )
+            if contract.schema != expected_contract_schema or requirements.schema != "dagcert-english-requirements/v2":
+                problems.append(
+                    f"{certificate_schema.rsplit('/', 1)[-1]} certificate requires "
+                    f"{expected_contract_schema} and v2 requirements"
+                )
             else:
                 try:
                     claim_analysis = _claim_analysis(requirements, contract, analysis)

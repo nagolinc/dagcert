@@ -27,6 +27,7 @@ class TimingSample:
     observed_worker_concurrency: int | None = None
     observed_input_type: str | None = None
     observed_output_type: str | None = None
+    outcome_type: str | None = None
     resource_acquired: Mapping[str, float] = field(default_factory=dict)
     resource_consumed: Mapping[str, float] = field(default_factory=dict)
     resource_produced: Mapping[str, float] = field(default_factory=dict)
@@ -59,7 +60,7 @@ class TimingSample:
             or self.observed_worker_concurrency < 1
         ):
             raise EvidenceError("observed_worker_concurrency must be a positive integer")
-        for field_name in ("observed_input_type", "observed_output_type"):
+        for field_name in ("observed_input_type", "observed_output_type", "outcome_type"):
             value = getattr(self, field_name)
             if value is not None and (not isinstance(value, str) or not value.strip()):
                 raise EvidenceError(f"{field_name} must be a nonempty string or null")
@@ -100,6 +101,7 @@ def load_evidence(path: str | Path) -> tuple[TimingSample, ...]:
                 observed_worker_concurrency=row.get("observed_worker_concurrency"),
                 observed_input_type=row.get("observed_input_type"),
                 observed_output_type=row.get("observed_output_type"),
+                outcome_type=row.get("outcome_type"),
                 resource_acquired=_number_mapping(row.get("resource_acquired", {})),
                 resource_consumed=_number_mapping(row.get("resource_consumed", {})),
                 resource_produced=_number_mapping(row.get("resource_produced", {})),

@@ -19,7 +19,7 @@ def test_wrong_source_and_resource_excess_fail(project):
     samples = list(load_evidence(project["evidence"]))
     samples.append(TimingSample(
         task_id="work", case="normal", value_ms=1, worker_id="worker",
-        source_fingerprint="wrong", observed_input_type="int", observed_output_type="int",
+        source_fingerprint="wrong", outcome_type="WorkCompleted",
         resource_acquired={"state": 2},
     ))
     report = analyze_contract(load_contract(project["contract"]), samples, source_fingerprint=project["fingerprint"])
@@ -29,7 +29,7 @@ def test_wrong_source_and_resource_excess_fail(project):
 
 def test_structural_progress_rejects_consumer_without_supply(project, tmp_path: Path):
     raw = json.loads(Path(project["contract"]).read_text(encoding="utf-8"))
-    raw["tasks"][0]["resources"] = {"state": {"consume": 1}}
+    raw["tasks"][0]["outcomes"][0]["resources"] = {"state": {"consume": 1}}
     contract_path = tmp_path / "blocked.json"
     contract_path.write_text(json.dumps(raw), encoding="utf-8")
     samples = tuple(
@@ -37,7 +37,8 @@ def test_structural_progress_rejects_consumer_without_supply(project, tmp_path: 
         for sample in load_evidence(project["evidence"])
     )
     report = analyze_contract(
-        load_contract(contract_path), samples, source_fingerprint=project["fingerprint"],
+        load_contract(contract_path, source_root=project["root"]), samples,
+        source_fingerprint=project["fingerprint"],
     )
     assert not report.structural_progress.passed
     blocked = [item for item in report.findings if item.code == "structurally-blocked-task"]

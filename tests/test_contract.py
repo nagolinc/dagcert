@@ -17,19 +17,19 @@ def test_loads_only_four_primitive_contract(project):
 def test_resources_may_be_empty(project, tmp_path: Path):
     raw = json.loads(Path(project["contract"]).read_text(encoding="utf-8"))
     raw["resources"] = []
-    raw["tasks"][0]["resources"] = {}
+    raw["tasks"][0]["outcomes"][0]["resources"] = {}
     path = tmp_path / "contract.json"
     path.write_text(json.dumps(raw), encoding="utf-8")
-    assert load_contract(path).resources == ()
+    assert load_contract(path, source_root=project["root"]).resources == ()
 
 
 def test_rejects_cycles(project, tmp_path: Path):
     raw = json.loads(Path(project["contract"]).read_text(encoding="utf-8"))
-    raw["tasks"][0]["depends_on"] = ["work"]
+    raw["tasks"][0]["depends_on"] = [{"task": "work", "outcome_type": "WorkCompleted"}]
     path = tmp_path / "bad.json"
     path.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(ContractError):
-        load_contract(path)
+        load_contract(path, source_root=project["root"])
 
 
 def test_minimum_samples_must_be_integer(project, tmp_path: Path):
@@ -38,7 +38,7 @@ def test_minimum_samples_must_be_integer(project, tmp_path: Path):
     path = tmp_path / "bad.json"
     path.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(ContractError):
-        load_contract(path)
+        load_contract(path, source_root=project["root"])
 
 
 def test_every_task_requires_duration_timing(project, tmp_path: Path):
@@ -47,23 +47,23 @@ def test_every_task_requires_duration_timing(project, tmp_path: Path):
     path = tmp_path / "bad.json"
     path.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(ContractError, match="duration"):
-        load_contract(path)
+        load_contract(path, source_root=project["root"])
 
 
-@pytest.mark.parametrize("field", ["id", "input_type", "output_type"])
+@pytest.mark.parametrize("field", ["id", "implementation", "outcomes"])
 def test_task_identifiers_are_required_strings(project, tmp_path: Path, field: str):
     raw = json.loads(Path(project["contract"]).read_text(encoding="utf-8"))
     raw["tasks"][0].pop(field)
     path = tmp_path / f"missing-{field}.json"
     path.write_text(json.dumps(raw), encoding="utf-8")
-    with pytest.raises(ContractError, match="string"):
-        load_contract(path)
+    with pytest.raises(ContractError):
+        load_contract(path, source_root=project["root"])
 
 
 def test_dependency_ids_are_not_coerced(project, tmp_path: Path):
     raw = json.loads(Path(project["contract"]).read_text(encoding="utf-8"))
-    raw["tasks"][0]["depends_on"] = [None]
+    raw["tasks"][0]["depends_on"] = [{"task": None, "outcome_type": "WorkCompleted"}]
     path = tmp_path / "bad-dependency.json"
     path.write_text(json.dumps(raw), encoding="utf-8")
-    with pytest.raises(ContractError, match="dependency must be a string"):
-        load_contract(path)
+    with pytest.raises(ContractError, match="dependency.task must be a string"):
+        load_contract(path, source_root=project["root"])

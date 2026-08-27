@@ -2,9 +2,9 @@
   "schema": "dagcert-check-result/v2",
   "checker": "example.database-ui.deletion-projection/v1",
   "passed": true,
-  "source_fingerprint": "6d4a3f556d4075c1979a004c64b5aed7154ab2012f5f5208f7bb559d02b4a9f2",
-  "contract_sha256": "39bb0af2dad76b1c471c2a7af8bb463eadd743abafe041b541deb257b550e629",
-  "evidence_sha256": "985d1a575a82625dc5e412c1e7f5eb968dbc50773efd124975697445fae8010c",
+  "source_fingerprint": "832044b60c53929b0766b99122e10cd69b6f21e5465fc7150497a7ff3f861c37",
+  "contract_sha256": "62e1dfcc56d5a13e345444190e283a0589704adb4abe23800d627f1834c93edd",
+  "evidence_sha256": "9012685e8717535903042b24d3559df303f7a5b07aac50554e5de15240266e22",
   "requirements_sha256": "721b35e11709f245b564ed4d766f43b5d8a85660c5733b5a196ece5666e987d0",
   "primitive_refs": [
     "task:items.delete",

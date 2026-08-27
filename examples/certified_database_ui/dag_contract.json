@@ -1,5 +1,5 @@
 {
-  "schema": "dagcert-contract/v3",
+  "schema": "dagcert-contract/v4",
   "metadata": {
     "application": "certified-database-ui",
     "scope": "Sequential reference workload through real SQLite, HTTP, and browser boundaries"
@@ -14,10 +14,13 @@
       "id": "items.list",
       "role": "operation",
       "worker": "http-server",
-      "input_type": "ItemPageQuery",
-      "output_type": "ItemPage",
+      "implementation": {"language": "python", "path": "operations.py", "symbol": "list_items_task"},
+      "outcomes": [
+        {"type": "ItemsListed", "resources": {}, "metadata": {}},
+        {"type": "ItemsListInvalid", "resources": {}, "metadata": {}},
+        {"type": "dagcert.runtime.UnhandledException", "resources": {}, "metadata": {}}
+      ],
       "depends_on": [],
-      "resources": {},
       "timings": {
         "http": {
           "metric": "duration",
@@ -32,10 +35,13 @@
       "id": "items.insert",
       "role": "operation",
       "worker": "http-server",
-      "input_type": "NewItem",
-      "output_type": "StoredItem",
+      "implementation": {"language": "python", "path": "operations.py", "symbol": "insert_item_task"},
+      "outcomes": [
+        {"type": "ItemStored", "resources": {}, "metadata": {}},
+        {"type": "ItemInsertInvalid", "resources": {}, "metadata": {}},
+        {"type": "dagcert.runtime.UnhandledException", "resources": {}, "metadata": {}}
+      ],
       "depends_on": [],
-      "resources": {},
       "timings": {
         "http": {
           "metric": "duration",
@@ -50,10 +56,12 @@
       "id": "items.delete",
       "role": "operation",
       "worker": "http-server",
-      "input_type": "ItemId",
-      "output_type": "DeletionResult",
+      "implementation": {"language": "python", "path": "operations.py", "symbol": "delete_item_task"},
+      "outcomes": [
+        {"type": "ItemDeleted", "resources": {}, "metadata": {}},
+        {"type": "dagcert.runtime.UnhandledException", "resources": {}, "metadata": {}}
+      ],
       "depends_on": [],
-      "resources": {},
       "timings": {
         "http": {
           "metric": "duration",
@@ -66,12 +74,14 @@
     },
     {
       "id": "ui.feedback",
-      "role": "operation",
+      "role": "instrumentation",
       "worker": "browser",
-      "input_type": "UserAction",
-      "output_type": "VisibleStatus",
+      "implementation": {"language": "python", "path": "browser_observations.py", "symbol": "observe_feedback"},
+      "outcomes": [
+        {"type": "BrowserFeedbackObserved", "resources": {}, "metadata": {}},
+        {"type": "dagcert.runtime.UnhandledException", "resources": {}, "metadata": {}}
+      ],
       "depends_on": [],
-      "resources": {},
       "timings": {
         "visible": {
           "metric": "duration",
@@ -84,12 +94,14 @@
     },
     {
       "id": "ui.render",
-      "role": "operation",
+      "role": "instrumentation",
       "worker": "browser",
-      "input_type": "ItemPage",
-      "output_type": "RenderedItemRows",
-      "depends_on": ["items.list"],
-      "resources": {},
+      "implementation": {"language": "python", "path": "browser_observations.py", "symbol": "observe_render"},
+      "outcomes": [
+        {"type": "BrowserRenderObserved", "resources": {}, "metadata": {}},
+        {"type": "dagcert.runtime.UnhandledException", "resources": {}, "metadata": {}}
+      ],
+      "depends_on": [],
       "timings": {
         "visible": {
           "metric": "duration",
