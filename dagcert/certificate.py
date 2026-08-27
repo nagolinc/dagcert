@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from hashlib import sha256
+import os
 from pathlib import Path, PurePosixPath
 from time import time
 from typing import Any, Iterable, cast
@@ -66,12 +67,43 @@ def source_manifest(root: str | Path, *, exclude: Iterable[str] = ()) -> dict[st
         )
     ignored_parts = {".git", ".dagcert", "artifacts", "dist", "build", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache"}
     result: dict[str, str] = {}
-    for path in sorted(item for item in base.rglob("*") if item.is_file()):
+
+    def excluded_path(relative: str) -> bool:
+        return any(
+            relative == item
+            or relative.startswith(item + "/")
+            or PurePosixPath(relative).match(item)
+            for item in excluded
+        )
+
+    def raise_walk_error(error: OSError) -> None:
+        raise error
+
+    files: list[Path] = []
+    for current, directories, names in os.walk(
+        base, topdown=True, onerror=raise_walk_error, followlinks=False
+    ):
+        current_path = Path(current)
+        kept_directories: list[str] = []
+        for name in directories:
+            relative = (current_path / name).relative_to(base).as_posix()
+            if name.lower() in ignored_parts or name.lower() in {"venv", ".venv", "env"} or name.lower().endswith("venv"):
+                continue
+            # A literal directory exclusion covers every descendant. Glob
+            # matches are still evaluated per file because matching a directory
+            # does not necessarily mean that the pattern matches its contents.
+            if any(relative == item or relative.startswith(item + "/") for item in excluded):
+                continue
+            kept_directories.append(name)
+        directories[:] = kept_directories
+        files.extend(
+            path for name in names
+            if (path := current_path / name).is_file()
+        )
+
+    for path in sorted(files):
         relative = path.relative_to(base).as_posix()
-        parts = tuple(part.lower() for part in path.relative_to(base).parts)
-        if any(part in ignored_parts or part in {"venv", ".venv", "env"} or part.endswith("venv") for part in parts[:-1]):
-            continue
-        if any(relative == item or relative.startswith(item + "/") or PurePosixPath(relative).match(item) for item in excluded):
+        if excluded_path(relative):
             continue
         result[relative] = sha256_file(path)
     return result

@@ -5,9 +5,47 @@ from dagcert import (
     CertificateError, CheckContext, CheckResult, issue_certificate, load_check_result, load_contract, load_evidence,
     load_requirements, run_checker, sha256_file, verify_certificate,
 )
-from dagcert.certificate import canonical_json
+from dagcert.certificate import canonical_json, source_manifest
 from hashlib import sha256
 import pytest
+
+
+def test_source_manifest_prunes_ignored_directories(tmp_path, monkeypatch):
+    (tmp_path / "app.py").write_text("print('bound')\n", encoding="utf-8")
+    (tmp_path / ".dagcertignore").write_text("static\n", encoding="utf-8")
+    ignored = tmp_path / "static" / "large-tree"
+    ignored.mkdir(parents=True)
+    (ignored / "asset.bin").write_bytes(b"unrelated")
+    generated = tmp_path / "node_modules" / "package"
+    generated.mkdir(parents=True)
+    (generated / "index.js").write_text("ignored\n", encoding="utf-8")
+
+    import os
+
+    scanned: list[Path] = []
+    original_scandir = os.scandir
+
+    def recording_scandir(path):
+        scanned.append(Path(path).resolve())
+        return original_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", recording_scandir)
+    manifest = source_manifest(tmp_path)
+
+    assert set(manifest) == {".dagcertignore", "app.py"}
+    assert ignored.parent.resolve() not in scanned
+    assert generated.parent.resolve() not in scanned
+
+
+def test_source_manifest_preserves_glob_exclusions(tmp_path):
+    assets = tmp_path / "static" / "nested"
+    assets.mkdir(parents=True)
+    (tmp_path / "static" / "top.bin").write_bytes(b"excluded")
+    (assets / "nested.bin").write_bytes(b"included")
+
+    manifest = source_manifest(tmp_path, exclude=["static/*.bin"])
+
+    assert set(manifest) == {"static/nested/nested.bin"}
 
 
 def _set_checker_refs(project, *checker_names: str):
