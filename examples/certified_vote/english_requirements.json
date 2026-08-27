@@ -1,9 +1,9 @@
 {
-  "schema": "dagcert-english-requirements/v1",
+  "schema": "dagcert-english-requirements/v2",
   "claims": [
     {
       "id": "completion-and-structural-progress",
-      "statement": "Each declared task's exact in-process Python implementation has ten successful completion samples, and the declared task/resource graph has no structural blocked state under its explicit scheduling assumptions.",
+      "statement": "Each declared task's exact in-process Python implementation has ten successful completion samples for the retained workload.",
       "primitive_refs": [
         "task:vote.preview",
         "task:vote.commit",
@@ -15,9 +15,9 @@
         "timing:snapshot.render/completion"
       ],
       "checker_refs": [],
-      "assumptions": [
-        "Declared resource effects match runtime behavior, acquisition is atomic, and scheduling is fair."
-      ]
+      "assumptions": [],
+      "basis": "observed",
+      "formula": null
     },
     {
       "id": "in-process-responsiveness",
@@ -27,7 +27,9 @@
         "timing:vote.commit/completion"
       ],
       "checker_refs": [],
-      "assumptions": []
+      "assumptions": [],
+      "basis": "observed",
+      "formula": null
     },
     {
       "id": "snapshot-non-starvation",
@@ -40,13 +42,28 @@
         "timing:vote.commit/cadence",
         "timing:snapshot.render/service-envelope"
       ],
-      "checker_refs": [
-        "example.flow-guarantees/v1"
-      ],
+      "checker_refs": [],
       "assumptions": [
         "vote.commit recurs between 100 ms and 200 ms.",
         "snapshot.render service duration remains between 500 ms and 1000 ms."
-      ]
+      ],
+      "basis": "derived",
+      "formula": {
+        "and": [
+          {
+            "gt": [
+              {"divide": [1000, {"timing_upper_ms": "timing:vote.commit/cadence"}]},
+              {
+                "multiply": [
+                  {"worker_concurrency": "worker:renderer"},
+                  {"divide": [1000, {"timing_lower_ms": "timing:snapshot.render/service-envelope"}]}
+                ]
+              }
+            ]
+          },
+          {"gte": [{"resource_initial": "resource:snapshot-work"}, 2]}
+        ]
+      }
     },
     {
       "id": "bounded-summary-lag",
@@ -59,12 +76,27 @@
         "timing:vote.commit/cadence",
         "timing:summary.advance/service-envelope"
       ],
-      "checker_refs": [
-        "example.flow-guarantees/v1"
-      ],
+      "checker_refs": [],
       "assumptions": [
         "The declared vote.commit cadence and summary.advance service envelope hold."
-      ]
+      ],
+      "basis": "derived",
+      "formula": {
+        "and": [
+          {
+            "gte": [
+              {
+                "multiply": [
+                  {"worker_concurrency": "worker:summarizer"},
+                  {"divide": [1000, {"timing_upper_ms": "timing:summary.advance/service-envelope"}]}
+                ]
+              },
+              {"divide": [1000, {"timing_lower_ms": "timing:vote.commit/cadence"}]}
+            ]
+          },
+          {"gte": [{"resource_capacity": "resource:summary-lag"}, 3]}
+        ]
+      }
     }
   ],
   "metadata": {

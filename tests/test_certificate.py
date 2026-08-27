@@ -88,6 +88,16 @@ def test_certificate_embeds_and_digest_binds_plain_english_requirements(project)
     assert document["translation_audit"]["passed"] is True
     assert document["translation_audit"]["covered_tasks"] == ["task:work"]
     assert document["translation_audit"]["covered_timings"] == ["timing:work/normal"]
+    assert document["schema"] == "dagcert-certificate/v5"
+    assert document["claim_analysis"] == [{
+        "claim_id": "work-completes",
+        "basis": "observed",
+        "passed": True,
+        "scope": "retained evidence only",
+        "formula": None,
+        "composition_refs": [],
+        "primitive_refs": ["task:work", "timing:work/normal"],
+    }]
 
     raw = json.loads(Path(project["requirements"]).read_text(encoding="utf-8"))
     raw["claims"][0]["statement"] = "A different promise that was never certified."
@@ -154,6 +164,25 @@ def test_issue_rejects_required_checker_that_was_not_run(project):
             project["contract"], project["evidence"],
             Path(project["root"]) / "artifacts" / "certificate.json",
             requirements_path=project["requirements"], source_root=project["root"],
+        )
+
+
+def test_derived_claim_cannot_delegate_proof_to_checker(project):
+    path = Path(project["requirements"])
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    claim = raw["claims"][0]
+    claim["basis"] = "derived"
+    claim["formula"] = {
+        "lte": [{"timing_upper_ms": "timing:work/normal"}, 10]
+    }
+    claim["checker_refs"] = ["application.says-pass/v1"]
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(CertificateError, match="cannot delegate proof to arbitrary checkers"):
+        issue_certificate(
+            project["contract"], project["evidence"],
+            Path(project["root"]) / "artifacts" / "certificate.json",
+            requirements_path=path, source_root=project["root"],
         )
 
 

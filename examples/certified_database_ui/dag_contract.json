@@ -1,5 +1,5 @@
 {
-  "schema": "dagcert-contract/v2",
+  "schema": "dagcert-contract/v3",
   "metadata": {
     "application": "certified-database-ui",
     "scope": "Sequential reference workload through real SQLite, HTTP, and browser boundaries"
@@ -12,6 +12,7 @@
   "tasks": [
     {
       "id": "items.list",
+      "role": "operation",
       "worker": "http-server",
       "input_type": "ItemPageQuery",
       "output_type": "ItemPage",
@@ -29,6 +30,7 @@
     },
     {
       "id": "items.insert",
+      "role": "operation",
       "worker": "http-server",
       "input_type": "NewItem",
       "output_type": "StoredItem",
@@ -46,6 +48,7 @@
     },
     {
       "id": "items.delete",
+      "role": "operation",
       "worker": "http-server",
       "input_type": "ItemId",
       "output_type": "DeletionResult",
@@ -63,6 +66,7 @@
     },
     {
       "id": "ui.feedback",
+      "role": "operation",
       "worker": "browser",
       "input_type": "UserAction",
       "output_type": "VisibleStatus",
@@ -80,6 +84,7 @@
     },
     {
       "id": "ui.render",
+      "role": "operation",
       "worker": "browser",
       "input_type": "ItemPage",
       "output_type": "RenderedItemRows",
@@ -95,5 +100,6 @@
         }
       }
     }
-  ]
+  ],
+  "compositions": []
 }

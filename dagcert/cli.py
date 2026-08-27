@@ -19,7 +19,7 @@ from .requirements import RequirementsError, audit_translation, load_requirement
 
 
 CONTRACT_TEMPLATE = """{
-  "schema": "dagcert-contract/v2",
+  "schema": "dagcert-contract/v3",
   "workers": [
     {"id": "app", "concurrency": 1}
   ],
@@ -29,6 +29,7 @@ CONTRACT_TEMPLATE = """{
   "tasks": [
     {
       "id": "replace_me",
+      "role": "operation",
       "worker": "app",
       "input_type": "builtins:dict",
       "output_type": "builtins:dict",
@@ -38,19 +39,23 @@ CONTRACT_TEMPLATE = """{
         "replace_me": {"metric": "duration", "upper_ms": 1000, "minimum_samples": 10, "policy": "max", "safety_factor": 1.30}
       }
     }
-  ]
+  ],
+  "compositions": [],
+  "metadata": {}
 }
 """
 
 REQUIREMENTS_TEMPLATE = """{
-  "schema": "dagcert-english-requirements/v1",
+  "schema": "dagcert-english-requirements/v2",
   "claims": [
     {
       "id": "replace_me",
       "statement": "Replace this with the exact plain-English behavior being certified.",
       "primitive_refs": ["task:replace_me", "timing:replace_me/replace_me"],
       "checker_refs": [],
-      "assumptions": []
+      "assumptions": [],
+      "basis": "observed",
+      "formula": null
     }
   ],
   "metadata": {}
@@ -135,6 +140,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "lint":
             contract = load_contract(args.contract)
             requirements = load_requirements(args.requirements)
+            if contract.schema != "dagcert-contract/v3":
+                raise ContractError("new certificate issuance requires dagcert-contract/v3")
+            if requirements.schema != "dagcert-english-requirements/v2":
+                raise RequirementsError(
+                    "new certificate issuance requires dagcert-english-requirements/v2"
+                )
             translation_audit = audit_translation(requirements, contract)
             if not translation_audit.passed:
                 raise RequirementsError("; ".join(translation_audit.findings))

@@ -19,7 +19,10 @@ from .checks import (
     run_checker,
     write_check_result,
 )
-from .contract import Contract, ContractError, Resource, ResourceEffect, Task, Timing, Worker, load_contract
+from .contract import (
+    Composition, CompositionStep, Contract, ContractError, Resource, ResourceEffect,
+    Task, Timing, Worker, load_contract,
+)
 from .evidence import EvidenceError, EvidenceRecorder, TimingSample, load_evidence
 from .requirements import (
     EnglishClaim,
@@ -32,7 +35,8 @@ from .requirements import (
 
 __all__ = [
     "AnalysisReport", "CertificateError", "CertificateVerification", "CheckContext",
-    "CheckFinding", "Checker", "CheckResult", "Contract", "ContractError",
+    "CheckFinding", "Checker", "CheckResult", "Composition", "CompositionStep",
+    "Contract", "ContractError",
     "EnglishClaim", "EnglishRequirements", "EvidenceError", "EvidenceRecorder", "Finding",
     "RequirementsError", "Resource", "ResourceEffect",
     "StructuralProgress", "Task", "Timing", "TimingResult", "TimingSample", "TranslationAudit",
@@ -41,4 +45,4 @@ __all__ = [
     "source_fingerprint", "source_manifest", "verify_certificate", "write_check_result",
 ]
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"

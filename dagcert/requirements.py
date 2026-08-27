@@ -22,15 +22,21 @@ class EnglishClaim:
     primitive_refs: tuple[str, ...]
     checker_refs: tuple[str, ...] = ()
     assumptions: tuple[str, ...] = ()
+    basis: str = "legacy"
+    formula: Mapping[str, Any] | None = None
 
-    def to_mapping(self) -> dict[str, Any]:
-        return {
+    def to_mapping(self, *, schema: str = "dagcert-english-requirements/v1") -> dict[str, Any]:
+        result: dict[str, Any] = {
             "id": self.id,
             "statement": self.statement,
             "primitive_refs": list(self.primitive_refs),
             "checker_refs": list(self.checker_refs),
             "assumptions": list(self.assumptions),
         }
+        if schema == "dagcert-english-requirements/v2":
+            result["basis"] = self.basis
+            result["formula"] = dict(self.formula) if self.formula is not None else None
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,7 +48,7 @@ class EnglishRequirements:
     def to_mapping(self) -> dict[str, Any]:
         return {
             "schema": self.schema,
-            "claims": [claim.to_mapping() for claim in self.claims],
+            "claims": [claim.to_mapping(schema=self.schema) for claim in self.claims],
             "metadata": dict(self.metadata),
         }
 
@@ -89,6 +95,7 @@ def audit_translation(
     valid_primitives.update(
         f"timing:{task.id}/{case}" for task in contract.tasks for case in task.timings
     )
+    valid_primitives.update(f"composition:{item.id}" for item in contract.compositions)
     required_tasks = {f"task:{item.id}" for item in contract.tasks}
     required_timings = {
         f"timing:{task.id}/{case}" for task in contract.tasks for case in task.timings
@@ -102,6 +109,14 @@ def audit_translation(
     referenced_primitives = {
         reference for claim in requirements.claims for reference in claim.primitive_refs
     }
+    coverage_primitives = set(referenced_primitives)
+    for composition in contract.compositions:
+        if f"composition:{composition.id}" not in referenced_primitives:
+            continue
+        coverage_primitives.update(f"task:{step.task}" for step in composition.steps)
+        coverage_primitives.update(
+            f"timing:{step.task}/{step.timing}" for step in composition.steps
+        )
     required_checkers = {
         reference for claim in requirements.claims for reference in claim.checker_refs
     }
@@ -111,10 +126,10 @@ def audit_translation(
     unknown_primitives = referenced_primitives - valid_primitives
     if unknown_primitives:
         findings.append(f"English claims cite unknown primitives: {sorted(unknown_primitives)}")
-    uncovered_tasks = required_tasks - referenced_primitives
+    uncovered_tasks = required_tasks - coverage_primitives
     if uncovered_tasks:
         findings.append(f"formal tasks lack an English claim: {sorted(uncovered_tasks)}")
-    uncovered_timings = required_timings - referenced_primitives
+    uncovered_timings = required_timings - coverage_primitives
     if uncovered_timings:
         findings.append(f"formal timings lack an English claim: {sorted(uncovered_timings)}")
     if selected is not None:
@@ -123,6 +138,34 @@ def audit_translation(
             findings.append(
                 f"English claims cite unselected checkers: {sorted(missing_checkers)}"
             )
+
+    if requirements.schema == "dagcert-english-requirements/v2":
+        from .formula import FormulaError, formula_references
+
+        for claim in requirements.claims:
+            if claim.basis == "derived":
+                if claim.checker_refs:
+                    findings.append(
+                        f"derived claim {claim.id} cannot delegate proof to arbitrary checkers"
+                    )
+                if claim.formula is None:
+                    findings.append(f"derived claim {claim.id} lacks a kernel formula")
+                    continue
+                try:
+                    formula_refs = set(formula_references(claim.formula))
+                except FormulaError as exc:
+                    findings.append(f"derived claim {claim.id} has invalid formula: {exc}")
+                    continue
+                missing_formula_refs = formula_refs - set(claim.primitive_refs)
+                if missing_formula_refs:
+                    findings.append(
+                        f"derived claim {claim.id} formula references are not declared: "
+                        f"{sorted(missing_formula_refs)}"
+                    )
+            elif claim.formula is not None:
+                findings.append(
+                    f"observed claim {claim.id} must not contain a derived formula"
+                )
 
     assumption_gaps: list[str] = []
     for reference in sorted(assumed_timings):
@@ -140,8 +183,8 @@ def audit_translation(
     return TranslationAudit(
         passed=not findings,
         findings=tuple(findings),
-        covered_tasks=tuple(sorted(required_tasks & referenced_primitives)),
-        covered_timings=tuple(sorted(required_timings & referenced_primitives)),
+        covered_tasks=tuple(sorted(required_tasks & coverage_primitives)),
+        covered_timings=tuple(sorted(required_timings & coverage_primitives)),
         required_checkers=tuple(sorted(required_checkers)),
         supplementary_checkers=supplementary,
         conditional_claims=tuple(sorted(
@@ -159,9 +202,12 @@ def load_requirements(path: str | Path) -> EnglishRequirements:
         raise RequirementsError(
             "English requirements must contain exactly schema, claims, and metadata"
         )
-    if raw.get("schema") != "dagcert-english-requirements/v1":
+    schema = raw.get("schema")
+    if schema not in {
+        "dagcert-english-requirements/v1", "dagcert-english-requirements/v2",
+    }:
         raise RequirementsError(
-            "English requirements schema must be dagcert-english-requirements/v1"
+            "English requirements schema must be dagcert-english-requirements/v1 or v2"
         )
     if not isinstance(raw["metadata"], dict):
         raise RequirementsError("English requirements metadata must be an object")
@@ -170,9 +216,12 @@ def load_requirements(path: str | Path) -> EnglishRequirements:
         raise RequirementsError("English requirements must contain at least one claim")
     claims: list[EnglishClaim] = []
     for index, value in enumerate(claim_rows, 1):
-        if not isinstance(value, dict) or set(value) != {
+        expected_fields = {
             "id", "statement", "primitive_refs", "checker_refs", "assumptions",
-        }:
+        }
+        if schema == "dagcert-english-requirements/v2":
+            expected_fields.update({"basis", "formula"})
+        if not isinstance(value, dict) or set(value) != expected_fields:
             raise RequirementsError(f"English claim {index} has unexpected or missing fields")
         identifier = _text(value["id"], f"English claim {index} id")
         statement = _text(value["statement"], f"English claim {identifier} statement")
@@ -185,6 +234,28 @@ def load_requirements(path: str | Path) -> EnglishRequirements:
         assumptions = _text_array(
             value["assumptions"], f"English claim {identifier} assumptions"
         )
+        basis = "legacy"
+        formula: Mapping[str, Any] | None = None
+        if schema == "dagcert-english-requirements/v2":
+            basis = _text(value["basis"], f"English claim {identifier} basis")
+            if basis not in {"observed", "derived"}:
+                raise RequirementsError(
+                    f"English claim {identifier} basis must be observed or derived"
+                )
+            formula_value = value["formula"]
+            if formula_value is not None and not isinstance(formula_value, Mapping):
+                raise RequirementsError(
+                    f"English claim {identifier} formula must be an object or null"
+                )
+            formula = dict(formula_value) if formula_value is not None else None
+            if basis == "derived" and formula is None:
+                raise RequirementsError(
+                    f"derived English claim {identifier} must contain a formula"
+                )
+            if basis == "observed" and formula is not None:
+                raise RequirementsError(
+                    f"observed English claim {identifier} formula must be null"
+                )
         if not primitive_refs and not checker_refs:
             raise RequirementsError(
                 f"English claim {identifier} must reference a primitive or checker"
@@ -195,12 +266,14 @@ def load_requirements(path: str | Path) -> EnglishRequirements:
             primitive_refs,
             checker_refs,
             assumptions,
+            basis,
+            formula,
         ))
     identifiers = [claim.id for claim in claims]
     if len(identifiers) != len(set(identifiers)):
         raise RequirementsError("English claim IDs must be unique")
     return EnglishRequirements(
-        schema="dagcert-english-requirements/v1",
+        schema=str(schema),
         claims=tuple(claims),
         metadata=dict(raw["metadata"]),
     )

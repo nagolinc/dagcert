@@ -130,7 +130,7 @@ def prepare_handoffs(
     shared = _shared_packet(context)
     prepared: list[tuple[int, dict[str, Any], bytes, str, str]] = []
     for index, claim_value in enumerate(context.requirements.claims, 1):
-        claim = claim_value.to_mapping()
+        claim = claim_value.to_mapping(schema=context.requirements.schema)
         packet = {
             "schema": "dagcert-semantic-audit-packet/v3",
             "claim_index": index,
@@ -226,7 +226,9 @@ def _shared_packet(context: CheckContext) -> dict[str, Any]:
 
 
 def _validate_claim(claim: Mapping[str, Any], index: int) -> None:
-    if set(claim) != {"id", "statement", "primitive_refs", "checker_refs", "assumptions"}:
+    v1_fields = {"id", "statement", "primitive_refs", "checker_refs", "assumptions"}
+    v2_fields = v1_fields | {"basis", "formula"}
+    if frozenset(claim) not in {frozenset(v1_fields), frozenset(v2_fields)}:
         raise ValueError(f"claim {index} does not match the English requirements schema")
     if not isinstance(claim.get("id"), str) or not str(claim["id"]).strip():
         raise ValueError(f"claim {index} requires a stable ID")
@@ -371,7 +373,9 @@ def _validate_packet_binding(packet: Any, context: CheckContext) -> None:
     index = packet.get("claim_index")
     if not isinstance(index, int) or index < 1 or index > len(context.requirements.claims):
         raise ValueError("audit packet has invalid claim index")
-    expected_claim = context.requirements.claims[index - 1].to_mapping()
+    expected_claim = context.requirements.claims[index - 1].to_mapping(
+        schema=context.requirements.schema
+    )
     if packet.get("claim") != expected_claim:
         raise ValueError("audit packet claim does not exactly match the English requirements")
     manifest = packet.get("source_manifest")
@@ -569,6 +573,7 @@ def main(argv: list[str] | None = None) -> int:
         handoff_directory=args.handoff_directory,
         output_path=args.output,
     )
+    assert result.facts is not None
     print(f"accepted {len(result.facts['audits'])} independent claim audits: passed={result.passed}")
     return 0 if result.passed else 2
 

@@ -31,6 +31,9 @@ def initialize_database(path: str | Path, *, reset: bool = False) -> None:
     if reset:
         database.unlink(missing_ok=True)
     with sqlite3.connect(database) as connection:
+        # WAL avoids a rollback-journal create/delete cycle on every HTTP write
+        # and permits readers to continue while a request commits.
+        connection.execute("PRAGMA journal_mode = WAL")
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS items (

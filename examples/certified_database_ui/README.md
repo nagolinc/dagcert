@@ -1,9 +1,10 @@
 # Certified database-to-UI reference application
 
-This is a real SQLite, HTTP, JavaScript, and Selenium reference application. Its certificate covers
-the exact source and exercised sequential workload, not every possible deployment or dataset.
+This is a real SQLite, HTTP, JavaScript, and Selenium reference application. See
+[artifacts/STATUS.md](artifacts/STATUS.md) for the latest retained certification result. The workflow
+below is reproducible; do not retry-to-pass or widen a bound when rebuilding it.
 
-It demonstrates and independently audits three narrow promises:
+The workflow is designed to exercise and independently audit three narrow promises:
 
 - exact row membership and ordering across initial load, ascending/descending sorting, and
   next/previous pagination;
@@ -14,7 +15,7 @@ The ordinary non-streaming HTTP deadlines are 50 ms. Immediate browser DOM feedb
 rendering use the 16 ms defaults. The browser checks compare application-owned read-only SQL
 projections with Selenium observations using stable semantic row keys and visible fields.
 
-## Rebuild the certificate
+## Attempt certification
 
 From the Dagcert repository root, collect fresh evidence through real HTTP and Selenium boundaries:
 

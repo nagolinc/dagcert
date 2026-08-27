@@ -16,12 +16,17 @@ Repeat `--exclude PATTERN` identically when project-specific source exclusions a
 
 ## Contract
 
-The `dagcert-contract/v2` JSON or YAML object contains only `workers`, `tasks`, `resources`, and
-task-local `timings`, plus optional metadata. A task's `input_type` and `output_type` are stable
+The hardened `dagcert-contract/v3` JSON or YAML object contains `workers`, `tasks`, `resources`,
+task-local `timings`, finite `compositions`, and metadata. A task's `input_type` and `output_type` are stable
 application type identifiers; Dagcert records them but does not import or execute application code.
 Task resource effects contain `acquire`, `consume`, and `produce` amounts. Resources contain
 `capacity`, `initial`, and `unit`. Every task has a duration timing; other timing metrics may be
 `interval`, `wait`, or `age`. An `assumed` timing requires zero samples and makes results conditional.
+
+Every task is either an `operation` or `instrumentation`. A composition contains at least two
+connected operation tasks and names the exact duration case and finite execution count for each.
+Instrumentation cannot be included. The kernel computes a conservative serial upper bound from
+the certified leaf bounds; a composition never declares its own measured timing.
 
 ## Timing evidence
 
@@ -29,21 +34,23 @@ Evidence is JSON Lines. Each line contains `task_id`, `case`, `value_ms`, `worke
 `source_fingerprint`, `succeeded`, and `recorded_at`. It may also contain
 `observed_worker_concurrency`, `observed_input_type`, `observed_output_type`,
 `resource_acquired`, `resource_consumed`, `resource_produced`, `resource_levels`, and `metadata`.
-Successful duration samples must report matching types and every declared resource effect. Failed
-work is retained but does not count toward the minimum successful sample count.
+Successful duration samples must report matching types and every declared resource effect. Any
+retained failed attempt makes analysis fail; it cannot be discarded in favor of a later passing retry.
 
 ## Mandatory English requirements
 
-`dagcert-english-requirements/v1` is required for linting, analysis, issuance, and verification.
+`dagcert-english-requirements/v2` is required for new issuance.
 Each claim has a stable ID, complete plain-English statement, exact primitive and required-checker
-references, and explicit assumptions. The certificate embeds both its normalized content and exact
+references, explicit assumptions, a basis (`observed` or `derived`), and a formula. Observed claims
+use a null formula and describe retained executions. Derived claims use the fixed kernel algebra
+and cannot cite application checkers as proof. The certificate embeds both its normalized content and exact
 file digest. This is the source of truth for what the certificate means; it is not a separate audit
 input and cannot be reconstructed from checker output.
 
 `dagcert lint` and issuance run the mandatory deterministic translation audit. All formal tasks and
 timings must be covered by the English claims; primitive references must resolve; assumed timings
 must have explicit English assumptions; and issuance requires every checker named by a claim.
-`dagcert-certificate/v4` embeds that recomputable audit. The Luna workflow below is the optional,
+`dagcert-certificate/v5` embeds that recomputable audit and kernel claim analysis. The Luna workflow below is the optional,
 user-requested semantic audit and never replaces this always-on coverage check.
 
 ## Optional checker result
@@ -55,6 +62,7 @@ A `dagcert-check-result/v2` document contains a unique `checker`, boolean `passe
 
 Checkers are ordinary application tools. Dagcert does not register checker kinds or interpret
 their free-form facts; it validates their identity bindings, result, and primitive references.
+They may support observed application facts but cannot prove a derived formula.
 
 The kernel not implementing a derivation does not make the behavior uncertifiable. For example,
 “the database entries appear as the correct UI rows” is checked by comparing an application-defined
@@ -66,8 +74,9 @@ binding and certificate verification. Do not invent a new primitive for this str
 Core structural progress rejects a task whose dependencies are unreachable or whose consumed
 resource has neither sufficient initial supply for a first execution nor a reachable producer.
 The result assumes reachable producer task types can recur, resource effects match runtime,
-acquisition is atomic, and scheduling is fair. Use timing-based checkers for sustained throughput,
-non-starvation, or bounded lag; do not overstate structural reachability as those stronger claims.
+acquisition is atomic, and scheduling is fair. A timing-based checker may diagnose sustained
+throughput, non-starvation, or bounded lag, but its boolean cannot prove those derived properties.
+An unsupported derived formula remains uncertified.
 
 ## User-requested independent audit handoff
 
@@ -126,6 +135,10 @@ The worker response is a substantive engineering review, not a one-sentence verd
 records claim reasoning, a Rule 0 assessment, reviewed source files, strengths, weaknesses,
 improvements, test-fitting risks, evidence gaps, and claim-invalidating findings. Passing one claim
 does not erase weaknesses and does not certify the application as a whole.
+The worker must reconstruct the execution DAG from source and compare it with the contract. It
+fails synthetic observer/summary stopwatches presented as derivations, missing queues or
+reservations, omitted failure transitions, average-rate substitutions for burst bounds, and proof
+models that do not resemble the actual application graph.
 
 ## Handoff
 

@@ -41,6 +41,38 @@ Required review
    prioritized improvements and state their user-experience impact. Do not
    recommend restrictions merely because they make a proof easier.
 
+DAG and proof integrity
+
+Treat the declared decomposition itself as an object of audit. Reconstruct the
+actual execution graph from the source before accepting the contract's graph.
+Identify the real execution boundaries, worker pools, queues, reservations,
+resource transfers, scheduling choices, success transitions, and failure
+transitions that can affect the claim. Then compare that reconstructed graph
+with the declared workers, tasks, dependencies, resources, compositions, and
+formula.
+
+Reject the claim when an important behavior that should be derived from that
+graph is instead supplied as a direct observation. In particular, look for a
+synthetic observer, monitor, pipeline, batch, summary, or end-to-end task whose
+stopwatch directly measures the desired conclusion. A passing aggregate sample
+does not prove non-starvation, bounded backlog, capacity safety, priority,
+sustained throughput, bounded staleness, or a composed latency bound.
+
+Also reject a purported DAG proof when the model does not resemble the actual
+system. Examples include collapsing several independently scheduled stages
+into one task; omitting queues or in-flight reservations; recording capacity
+only after work completes; ignoring release behavior on failure; replacing
+burst/gap behavior with average rates; omitting worker contention; or declaring
+dependencies that are documentation rather than runtime ordering. Merely
+having multiple task names is not adequate decomposition.
+
+For every derived claim, explain the chain from leaf bounds and state
+transitions to the conclusion. Confirm that the conclusion is recomputed from
+those premises rather than copied from timing evidence or trusted from an
+application checker. If the packet does not contain enough structure to make
+that derivation, record a finding and fail the claim rather than treating a
+successful run as proof.
+
 Verdict rules
 
 - `passed` answers only whether this one English claim is faithfully and

@@ -1,5 +1,9 @@
 # Reference example audit
 
+> Historical record: these responses predate the v3 contract/v2 claim-algebra migration and are
+> not attached to the current v5 vote certificate. A new independent audit must reconstruct the
+> actual execution DAG under the strengthened prompt before it can be attached.
+
 The optional v3 audit requires separate claim reasoning, Rule 0 analysis, reviewed files,
 strengths, weaknesses, improvements, test-fitting risks, evidence gaps, and invalidating findings.
 Every claim is sealed into its own packet and assigned to a different fresh `gpt-5.6-luna`

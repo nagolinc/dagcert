@@ -22,27 +22,31 @@ def project(tmp_path: Path) -> dict[str, object]:
     (root / "app.py").write_text("def work(value: int) -> int:\n    return value + 1\n", encoding="utf-8")
     contract = root / "dag_contract.json"
     contract.write_text(json.dumps({
-        "schema": "dagcert-contract/v2",
+        "schema": "dagcert-contract/v3",
         "workers": [{"id": "worker", "concurrency": 2}],
         "resources": [{"id": "state", "capacity": 1, "initial": 0}],
         "tasks": [{
-            "id": "work", "worker": "worker", "input_type": "int", "output_type": "int",
+            "id": "work", "role": "operation", "worker": "worker", "input_type": "int", "output_type": "int",
             "depends_on": [], "resources": {"state": {"acquire": 1}},
             "timings": {"normal": {
                 "metric": "duration", "upper_ms": 10, "minimum_samples": 3,
                 "policy": "max", "safety_factor": 1.3,
             }},
         }],
+        "compositions": [],
+        "metadata": {},
     }, indent=2), encoding="utf-8")
     requirements = root / "english_requirements.json"
     requirements.write_text(json.dumps({
-        "schema": "dagcert-english-requirements/v1",
+        "schema": "dagcert-english-requirements/v2",
         "claims": [{
             "id": "work-completes",
             "statement": "The declared work task completes within 10 ms for the measured source.",
             "primitive_refs": ["task:work", "timing:work/normal"],
             "checker_refs": [],
             "assumptions": [],
+            "basis": "observed",
+            "formula": None,
         }],
         "metadata": {},
     }, indent=2), encoding="utf-8")

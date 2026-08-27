@@ -3,9 +3,9 @@
   "checker": "example.flow-guarantees/v1",
   "passed": true,
   "source_fingerprint": "73c36ddc7f365da5366bae3a47d666e8025f7cd7d2a57b9fcb336ecb1c52c4dc",
-  "contract_sha256": "640d1b3bbbb3702a6f2172b19e0c65b9bc665702d295d6310c7be64eab40689b",
-  "evidence_sha256": "73c813840a862e5c51950299216e0cf164b70618db730667f4083f9d554115b7",
-  "requirements_sha256": "f6a981cce5e5d0587462cf3aaab29b91cd48dbc0b6c762adebbaf90d93ba5576",
+  "contract_sha256": "d5116a8ad177fd313be30a747d3c15dcd211a2b680a7d87df64c8d2667b2864e",
+  "evidence_sha256": "aa3688e7a9e47c5d8c58e6a94a473b4d1b381290c1922df350bc874ba5deea75",
+  "requirements_sha256": "20e7d7001cd05ce5b2f4cdb42b82ada79d64e0eb30bc629f05cba669bd6b89be",
   "primitive_refs": [
     "resource:snapshot-work",
     "resource:summary-lag",

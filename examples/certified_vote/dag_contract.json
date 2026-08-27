@@ -1,5 +1,5 @@
 {
-  "schema": "dagcert-contract/v2",
+  "schema": "dagcert-contract/v3",
   "workers": [
     {"id": "interface", "concurrency": 1},
     {"id": "ledger", "concurrency": 1},
@@ -13,6 +13,7 @@
   "tasks": [
     {
       "id": "vote.preview",
+      "role": "operation",
       "worker": "interface",
       "input_type": "VoteDelta",
       "output_type": "PreviewTotal",
@@ -29,6 +30,7 @@
     },
     {
       "id": "vote.commit",
+      "role": "operation",
       "worker": "ledger",
       "input_type": "VoteDelta",
       "output_type": "CommittedTotal",
@@ -55,6 +57,7 @@
     },
     {
       "id": "summary.advance",
+      "role": "operation",
       "worker": "summarizer",
       "input_type": "Generation",
       "output_type": "SummaryGeneration",
@@ -77,6 +80,7 @@
     },
     {
       "id": "snapshot.render",
+      "role": "operation",
       "worker": "renderer",
       "input_type": "VoteTotal",
       "output_type": "TextSnapshot",
@@ -97,5 +101,18 @@
         }
       }
     }
-  ]
+  ],
+  "compositions": [
+    {
+      "id": "vote-flow",
+      "steps": [
+        {"task": "vote.preview", "timing": "completion", "count": 1},
+        {"task": "vote.commit", "timing": "completion", "count": 1},
+        {"task": "summary.advance", "timing": "completion", "count": 1},
+        {"task": "snapshot.render", "timing": "completion", "count": 1}
+      ],
+      "metadata": {"scope": "one finite vote update through both downstream branches"}
+    }
+  ],
+  "metadata": {}
 }

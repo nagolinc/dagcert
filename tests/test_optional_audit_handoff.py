@@ -82,6 +82,8 @@ def test_each_claim_gets_a_separate_sealed_handoff_and_response(project):
         prompt = handoff.prompt_path.read_text(encoding="utf-8")
         packet = json.loads(handoff.packet_path.read_text(encoding="utf-8"))
         assert "RULE 0" in prompt
+        assert "DAG and proof integrity" in prompt
+        assert "synthetic observer, monitor, pipeline, batch, summary" in prompt
         assert "claim" in packet and "claims" not in packet
         assert packet["schema"] == "dagcert-semantic-audit-packet/v3"
         assert packet["source_files"]["app.py"]["content"].startswith("def work")

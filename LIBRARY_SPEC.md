@@ -12,13 +12,15 @@ behavioral regression merely to make a claim pass.
 
 ## 2. Contract schema
 
-The schema is `dagcert-contract/v2`. JSON is built in; YAML is available with PyYAML.
+New issuance uses `dagcert-contract/v3`. The loader retains v2 support for verification of existing
+certificates. JSON is built in; YAML is available with PyYAML.
 
 ### Worker
 
 - `id`: unique nonempty string.
 - `concurrency`: positive integer describing actual simultaneous task capacity.
 - `metadata`: optional opaque object.
+- `role`: `operation` for real executable work or `instrumentation` for observers/aggregate probes.
 
 ### Resource
 
@@ -55,6 +57,14 @@ consumer without adding a queue or framework primitive.
 Dagcert records type identifiers but does not import application code. Instrumentation is
 responsible for mapping actual work to the declared task, worker, and resource effects truthfully.
 
+### Composition
+
+A composition is a finite DAG workload over at least two connected `operation` tasks. Each step
+names an exact task duration case and a positive integer execution count. Instrumentation tasks are
+forbidden. Compositions have no directly measured timing: the kernel conservatively sums their
+certified leaf upper bounds. This prevents a monolithic pipeline stopwatch from substituting for a
+derivation over the actual task graph.
+
 ### Timing
 
 A timing is a named temporal constraint on a task:
@@ -85,7 +95,7 @@ Standard application profiles remain ordinary duration timings:
 ## 3. Mandatory plain-English requirements
 
 Every certificate has an `english_requirements.json` document with schema
-`dagcert-english-requirements/v1`. This is mandatory certificate input, not optional audit input or
+`dagcert-english-requirements/v2`. This is mandatory certificate input, not optional audit input or
 supporting documentation. It contains at least one claim. Each claim has:
 
 - a stable unique `id`;
@@ -93,10 +103,14 @@ supporting documentation. It contains at least one claim. Each claim has:
 - `primitive_refs` naming the workers, tasks, resources, and timings that support it;
 - `checker_refs` naming any application checkers required to establish it;
 - explicit `assumptions`, including workload or environment limits.
+- `basis`: `observed` or `derived`;
+- `formula`: null for observed claims and a fixed-algebra kernel formula for derived claims.
 
 Every reference must resolve. Every checker named by a claim must be supplied, pass, and bind to
 the exact source, contract, evidence, and requirements document. Additional checker results may be
 attached as supplementary evidence; the optional independent semantic audit is one such result.
+Derived claims cannot name checkers as proof. Their formulas must use a declared composition or a
+connected multi-task worker/resource surface that Dagcert evaluates itself.
 
 The requirements document does not enlarge the four-primitive ontology. It is the certificate's
 mandatory human-readable promise and traceability map. Issuance embeds its complete normalized
@@ -114,6 +128,19 @@ This deterministic audit proves coverage and traceability, not natural-language 
 explicit user request, the independent Luna workflow performs the semantic audit of each exact
 English claim against source, contract, evidence, analysis, assumptions, and application checks.
 It consumes the same mandatory requirements file and cannot substitute different prose.
+
+### Kernel claim algebra
+
+The claim algebra is deliberately closed and small. Numeric expressions support finite literals,
+certified timing upper/lower bounds, worker concurrency, resource capacity/initial state,
+composition upper bounds, addition, multiplication, division, and maximum. Boolean expressions
+support comparison, conjunction, disjunction, negation, and implication. Unknown operators fail.
+
+A derived formula must use either `composition_upper_ms` or timing bounds from at least two tasks
+that form one dependency/resource-connected DAG surface plus worker/resource state. A one-task
+aggregate stopwatch therefore cannot become a derived claim. Temporal reachable-state operators
+are intentionally not accepted until Dagcert has a model checker for them; such claims remain
+unsupported rather than being delegated to a checker boolean.
 
 ## 4. What the four primitives can express
 
@@ -133,8 +160,8 @@ Consequently analyzers can derive statements such as:
 - `model.update` remains at most G generation units behind its producer.
 
 These are results over the four primitives, not additional `proof`, `queue`, `blocked_state`, or
-`staleness` primitives. The optional flow-checker example implements all three. Its rate derivations
-make atomic resource acquisition and fair, work-conserving scheduling explicit assumptions.
+`staleness` primitives. Domain-specific helpers may construct formula syntax, but their boolean
+results are not trusted proof. The kernel evaluates the normalized fixed-algebra formula.
 
 ## 5. Evidence
 
@@ -173,7 +200,7 @@ Issuance requires:
 1. unique, valid primitive references and an acyclic task graph;
 2. positive worker capacity and feasible resource effects;
 3. a duration timing for every task;
-4. enough exact-source successful evidence for every measured timing;
+4. enough exact-source successful evidence for every measured timing and no retained failed attempt;
 5. every safety-adjusted timing range inside its declared bounds;
 6. every explicitly selected optional checker to pass and bind exactly.
 
@@ -192,7 +219,7 @@ must first represent them as tasks, resources, or timings.
 
 ## 7. Extensible checkers
 
-Some derivations or application semantics do not belong in the kernel. `CheckContext` supplies the
+Some observed application semantics do not belong in the kernel. `CheckContext` supplies the
 parsed four-primitive contract, timing observations, source root/fingerprint, and contract/evidence
 digests. A Python `Checker` emits `CheckResult`; any language may emit equivalent JSON.
 
@@ -203,9 +230,10 @@ digests. A Python `Checker` emits `CheckResult`; any language may emit equivalen
 - references limited to `worker:ID`, `task:ID`, `resource:ID`, and `timing:TASK/CASE`;
 - structured findings and optional application-owned facts.
 
-Dagcert does not register checker categories or interpret their facts. A generic rate analyzer,
-model checker, route inventory, DOM test, or independent semantic audit can evolve without growing
-the application ontology. Attaching a result is explicit through repeated `--check-result` options.
+Dagcert does not register checker categories or interpret their facts. A route inventory, DOM test,
+or independent semantic audit can evolve without growing the application ontology. Because those
+facts are untrusted by the kernel, a checker can support an observed claim but cannot establish a
+derived formula. Attaching a result is explicit through repeated `--check-result` options.
 
 The optional semantic-audit workflow reads the mandatory requirements document directly, creates
 one sealed packet per English claim, and requires a
@@ -221,9 +249,10 @@ SHA-256 hashes it. It ignores common generated directories and `.dagcertignore` 
 selected checker artifacts inside the source root are automatically excluded to avoid
 self-reference.
 
-`dagcert-certificate/v4` records source identity, exclusions, contract/evidence/requirements
+`dagcert-certificate/v5` records source identity, exclusions, contract/evidence/requirements
 digests, the complete normalized English requirements, the mandatory translation audit, serialized
-primitives, deterministic analysis, selected checker results and hashes, issue time, and its own
+primitives and compositions, deterministic primitive and claim analysis, selected checker results
+and hashes, issue time, and its own
 canonical digest. Verification recomputes all of them and fails closed on any mismatch.
 It separately compares the stored serialized primitives and exclusion list with the current
 contract and invocation, so recomputing the outer digest cannot hide fabricated display data.

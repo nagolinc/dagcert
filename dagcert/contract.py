@@ -58,6 +58,27 @@ class Task:
     resources: Mapping[str, ResourceEffect] = field(default_factory=dict)
     timings: Mapping[str, Timing] = field(default_factory=dict)
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    role: str = "operation"
+
+
+@dataclass(frozen=True, slots=True)
+class CompositionStep:
+    task: str
+    timing: str
+    count: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class Composition:
+    """A finite application path whose bound is derived from real operation tasks."""
+
+    id: str
+    steps: tuple[CompositionStep, ...]
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    @property
+    def task_refs(self) -> tuple[str, ...]:
+        return tuple(step.task for step in self.steps)
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +88,7 @@ class Contract:
     tasks: tuple[Task, ...]
     resources: tuple[Resource, ...]
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    compositions: tuple[Composition, ...] = ()
 
     @property
     def worker_by_id(self) -> Mapping[str, Worker]:
@@ -79,6 +101,10 @@ class Contract:
     @property
     def resource_by_id(self) -> Mapping[str, Resource]:
         return {item.id: item for item in self.resources}
+
+    @property
+    def composition_by_id(self) -> Mapping[str, Composition]:
+        return {item.id: item for item in self.compositions}
 
     def topological_tasks(self) -> tuple[str, ...]:
         remaining = {task.id: set(task.depends_on) for task in self.tasks}
@@ -143,8 +169,13 @@ def _load(path: Path) -> Mapping[str, Any]:
 
 def load_contract(path: str | Path) -> Contract:
     raw = _load(Path(path))
-    if raw.get("schema") != "dagcert-contract/v2":
-        raise ContractError("contract schema must be dagcert-contract/v2")
+    schema = raw.get("schema")
+    if schema not in {"dagcert-contract/v2", "dagcert-contract/v3"}:
+        raise ContractError("contract schema must be dagcert-contract/v2 or dagcert-contract/v3")
+    if schema == "dagcert-contract/v3" and set(raw) != {
+        "schema", "workers", "resources", "tasks", "compositions", "metadata",
+    }:
+        raise ContractError("v3 contract must contain exactly schema, workers, resources, tasks, compositions, and metadata")
 
     workers: list[Worker] = []
     for value in _array(raw.get("workers", ()), "workers"):
@@ -171,7 +202,22 @@ def load_contract(path: str | Path) -> Contract:
     tasks: list[Task] = []
     for value in _array(raw.get("tasks", ()), "tasks"):
         row = _object(value, "task")
+        v3_task_fields = {
+            "id", "role", "worker", "input_type", "output_type", "depends_on",
+            "resources", "timings",
+        }
+        unexpected_task_fields = set(row) - (v3_task_fields | {"metadata"})
+        if schema == "dagcert-contract/v3" and unexpected_task_fields:
+            raise ContractError(
+                f"v3 task contains unexpected fields {sorted(unexpected_task_fields)}"
+            )
         task_id = _identifier(row.get("id"), "task.id")
+        role = _identifier(
+            row.get("role") if schema == "dagcert-contract/v3" else row.get("role", "operation"),
+            f"task {task_id}.role",
+        )
+        if schema == "dagcert-contract/v3" and role not in {"operation", "instrumentation"}:
+            raise ContractError(f"task {task_id}.role must be operation or instrumentation")
         timing_rows = _object(row.get("timings", {}), f"task {task_id}.timings")
         timings: dict[str, Timing] = {}
         for case, timing_value in timing_rows.items():
@@ -248,11 +294,45 @@ def load_contract(path: str | Path) -> Contract:
             resource_use,
             timings,
             dict(_object(row.get("metadata", {}), f"task {task_id}.metadata")),
+            role,
+        ))
+
+    compositions: list[Composition] = []
+    for value in _array(raw.get("compositions", ()), "compositions"):
+        row = _object(value, "composition")
+        if set(row) != {"id", "steps", "metadata"}:
+            raise ContractError("composition must contain exactly id, steps, and metadata")
+        composition_id = _identifier(row.get("id"), "composition.id")
+        steps: list[CompositionStep] = []
+        for step_value in _array(row.get("steps"), f"composition {composition_id}.steps"):
+            step = _object(step_value, f"composition {composition_id}.step")
+            if set(step) != {"task", "timing", "count"}:
+                raise ContractError("composition step must contain exactly task, timing, and count")
+            count = _positive(step.get("count"), "composition step count")
+            if not count.is_integer():
+                raise ContractError("composition step count must be an integer")
+            steps.append(CompositionStep(
+                _identifier(step.get("task"), f"composition {composition_id}.step.task"),
+                _identifier(step.get("timing"), f"composition {composition_id}.step.timing"),
+                int(count),
+            ))
+        task_refs = tuple(step.task for step in steps)
+        if len(set(task_refs)) < 2:
+            raise ContractError(f"composition {composition_id} must contain at least two operation tasks")
+        if len(task_refs) != len(set(task_refs)):
+            raise ContractError(
+                f"composition {composition_id} must combine repeated executions with step.count"
+            )
+        compositions.append(Composition(
+            composition_id,
+            tuple(steps),
+            dict(_object(row.get("metadata", {}), f"composition {composition_id}.metadata")),
         ))
 
     contract = Contract(
-        "dagcert-contract/v2", tuple(workers), tuple(tasks), tuple(resources),
+        str(schema), tuple(workers), tuple(tasks), tuple(resources),
         dict(_object(raw.get("metadata", {}), "metadata")),
+        tuple(compositions),
     )
     _validate(contract)
     return contract
@@ -263,8 +343,9 @@ def _validate(contract: Contract) -> None:
         ("worker", [item.id for item in contract.workers]),
         ("task", [item.id for item in contract.tasks]),
         ("resource", [item.id for item in contract.resources]),
+        ("composition", [item.id for item in contract.compositions]),
     ):
-        if label != "resource" and not identifiers:
+        if label not in {"resource", "composition"} and not identifiers:
             raise ContractError(f"contract must declare at least one {label}")
         if len(identifiers) != len(set(identifiers)):
             raise ContractError(f"{label} IDs must be unique")
@@ -294,4 +375,51 @@ def _validate(contract: Contract) -> None:
     for resource in contract.resources:
         if resource.initial > resource.capacity:
             raise ContractError(f"resource {resource.id} initial amount exceeds capacity")
+    for composition in contract.compositions:
+        unknown = set(composition.task_refs) - set(tasks)
+        if unknown:
+            raise ContractError(
+                f"composition {composition.id} references unknown tasks {sorted(unknown)}"
+            )
+        instrumentation = sorted(
+            task_id for task_id in composition.task_refs
+            if tasks[task_id].role != "operation"
+        )
+        if instrumentation:
+            raise ContractError(
+                f"composition {composition.id} cannot use instrumentation tasks {instrumentation}"
+            )
+        for step in composition.steps:
+            timing = tasks[step.task].timings.get(step.timing)
+            if timing is None:
+                raise ContractError(
+                    f"composition {composition.id} cites unknown timing {step.task}/{step.timing}"
+                )
+            if timing.metric != "duration":
+                raise ContractError(
+                    f"composition {composition.id} step {step.task}/{step.timing} must be a duration"
+                )
+        selected = set(composition.task_refs)
+        connected = {composition.task_refs[0]}
+        changed = True
+        while changed:
+            changed = False
+            for task_id in selected - connected:
+                dependencies = set(tasks[task_id].depends_on) & selected
+                dependents = {
+                    candidate.id for candidate in contract.tasks
+                    if task_id in candidate.depends_on and candidate.id in selected
+                }
+                resource_neighbors = {
+                    candidate.id for candidate in contract.tasks
+                    if candidate.id in selected
+                    and set(tasks[task_id].resources) & set(candidate.resources)
+                }
+                if (dependencies | dependents | resource_neighbors) & connected:
+                    connected.add(task_id)
+                    changed = True
+        if connected != selected:
+            raise ContractError(
+                f"composition {composition.id} tasks must form one connected DAG subgraph"
+            )
     contract.topological_tasks()

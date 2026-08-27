@@ -10,11 +10,12 @@ from time import time
 from typing import Any, Iterable, cast
 import json
 
-from .analysis import analyze_contract
+from .analysis import AnalysisReport, analyze_contract
 from .checks import CheckResult, load_check_result
 from .contract import Contract, load_contract
 from .evidence import load_evidence
-from .requirements import audit_translation, load_requirements
+from .formula import FormulaError, evaluate_formula
+from .requirements import EnglishRequirements, audit_translation, load_requirements
 
 
 class CertificateError(RuntimeError):
@@ -118,18 +119,66 @@ def _primitive_refs(contract: Contract) -> set[str]:
     refs.update(f"task:{item.id}" for item in contract.tasks)
     refs.update(f"resource:{item.id}" for item in contract.resources)
     refs.update(f"timing:{task.id}/{case}" for task in contract.tasks for case in task.timings)
+    refs.update(f"composition:{item.id}" for item in contract.compositions)
     return refs
 
 
 def _serialized_primitives(contract: Contract, analysis_mapping: dict[str, Any]) -> dict[str, Any]:
     """Return the exact JSON shape stored in a certificate (tuples become arrays)."""
+    tasks = [asdict(item) for item in contract.tasks]
+    if contract.schema == "dagcert-contract/v2":
+        for task in tasks:
+            task.pop("role", None)
     value = {
         "workers": [asdict(item) for item in contract.workers],
-        "tasks": [asdict(item) for item in contract.tasks],
+        "tasks": tasks,
         "resources": [asdict(item) for item in contract.resources],
         "timings": analysis_mapping["timings"],
     }
+    if contract.schema == "dagcert-contract/v3":
+        value["compositions"] = [asdict(item) for item in contract.compositions]
     return cast(dict[str, Any], json.loads(canonical_json(value)))
+
+
+def _claim_analysis(
+    requirements: EnglishRequirements, contract: Contract, analysis: AnalysisReport,
+) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    for claim in requirements.claims:
+        if claim.basis == "observed":
+            results.append({
+                "claim_id": claim.id,
+                "basis": "observed",
+                "passed": True,
+                "scope": "retained evidence only",
+                "formula": None,
+                "composition_refs": [],
+                "primitive_refs": list(claim.primitive_refs),
+            })
+            continue
+        if claim.basis != "derived" or claim.formula is None:
+            raise CertificateError(
+                f"claim {claim.id} uses legacy untyped semantics; migrate requirements to v2"
+            )
+        try:
+            evaluation = evaluate_formula(claim.formula, contract, analysis)
+        except FormulaError as exc:
+            raise CertificateError(f"derived claim {claim.id} cannot be proved: {exc}") from exc
+        if not evaluation.passed:
+            raise CertificateError(f"derived claim {claim.id} formula evaluated false")
+        results.append({
+            "claim_id": claim.id,
+            "basis": "derived",
+            "passed": True,
+            "scope": (
+                "declared finite DAG composition" if evaluation.composition_refs
+                else "declared connected task/resource DAG"
+            ),
+            "formula": dict(claim.formula),
+            "composition_refs": list(evaluation.composition_refs),
+            "primitive_refs": list(evaluation.primitive_refs),
+        })
+    return results
 
 
 def _validate_checks(
@@ -181,6 +230,14 @@ def issue_certificate(
     fingerprint = sha256(canonical_json(manifest)).hexdigest()
     contract = load_contract(contract_path)
     requirements = load_requirements(requirements_path)
+    if contract.schema != "dagcert-contract/v3":
+        raise CertificateError(
+            "new certificate issuance requires dagcert-contract/v3 with explicit compositions"
+        )
+    if requirements.schema != "dagcert-english-requirements/v2":
+        raise CertificateError(
+            "new certificate issuance requires dagcert-english-requirements/v2 with claim bases"
+        )
     evidence = load_evidence(evidence_path)
     analysis = analyze_contract(contract, evidence, source_fingerprint=fingerprint)
     if not analysis.passed:
@@ -200,8 +257,9 @@ def issue_certificate(
     check_problems.extend(translation_audit.findings)
     if check_problems:
         raise CertificateError("certificate refused: " + "; ".join(check_problems))
+    claim_analysis = _claim_analysis(requirements, contract, analysis)
     document: dict[str, Any] = {
-        "schema": "dagcert-certificate/v4",
+        "schema": "dagcert-certificate/v5",
         "issued_at": time(),
         "source_manifest": manifest,
         "source_fingerprint": fingerprint,
@@ -211,6 +269,7 @@ def issue_certificate(
         "requirements_sha256": requirements_hash,
         "english_requirements": requirements.to_mapping(),
         "translation_audit": translation_audit.to_mapping(),
+        "claim_analysis": claim_analysis,
         "primitives": _serialized_primitives(contract, analysis.to_mapping()),
         "analysis": analysis.to_mapping(),
         "checks": [item.to_mapping() for item in checks],
@@ -240,14 +299,19 @@ def verify_certificate(
         raw = json.loads(Path(certificate_path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         return CertificateVerification(False, (f"certificate cannot be read: {exc}",))
-    if not isinstance(raw, dict) or raw.get("schema") != "dagcert-certificate/v4":
-        return CertificateVerification(False, ("certificate schema must be dagcert-certificate/v4",))
+    if not isinstance(raw, dict) or raw.get("schema") not in {
+        "dagcert-certificate/v4", "dagcert-certificate/v5",
+    }:
+        return CertificateVerification(False, ("certificate schema must be dagcert-certificate/v4 or v5",))
+    certificate_schema = raw["schema"]
     expected_fields = {
         "schema", "issued_at", "source_manifest", "source_fingerprint", "source_exclude",
         "contract_sha256", "evidence_sha256", "requirements_sha256",
         "english_requirements", "translation_audit", "primitives", "analysis", "checks",
         "check_result_sha256", "certificate_sha256",
     }
+    if certificate_schema == "dagcert-certificate/v5":
+        expected_fields.add("claim_analysis")
     if set(raw) != expected_fields:
         unexpected = sorted(set(raw) - expected_fields)
         missing = sorted(expected_fields - set(raw))
@@ -303,6 +367,16 @@ def verify_certificate(
         problems.extend(translation_audit.findings)
         if raw.get("translation_audit") != translation_audit.to_mapping():
             problems.append("English-to-formal translation audit no longer matches")
+        if certificate_schema == "dagcert-certificate/v5":
+            if contract.schema != "dagcert-contract/v3" or requirements.schema != "dagcert-english-requirements/v2":
+                problems.append("v5 certificate requires hardened v3 contract and v2 requirements")
+            else:
+                try:
+                    claim_analysis = _claim_analysis(requirements, contract, analysis)
+                    if raw.get("claim_analysis") != claim_analysis:
+                        problems.append("kernel claim analysis no longer matches")
+                except CertificateError as exc:
+                    problems.append(str(exc))
         if raw.get("checks") != [item.to_mapping() for item in checks]:
             problems.append("checker results mismatch")
         expected_check_hashes = _check_result_digests(check_result_paths)

@@ -77,9 +77,16 @@ Those primitives are enough to express conditional statements such as:
 - model X is never more than G generations out of date; and
 - a handler or visible action completes within its declared deadline.
 
-The core also provides a small checker protocol. Applications can prove domain-specific facts—such
-as “these database rows are exactly the rows visible in the DOM”—without adding database, browser,
-queue, or UI concepts to the core ontology.
+New issuance separates real `operation` tasks from `instrumentation` and supports finite
+multi-operation compositions. A composition has no stopwatch of its own: Dagcert computes its
+bound from exact leaf duration cases. Claims are either `observed` (retained executions only) or
+`derived` (a fixed-algebra formula evaluated by the kernel). Derived claims cannot delegate proof
+to an arbitrary checker boolean.
+
+The core also provides a small checker protocol. Applications can record case-bounded semantic
+facts—such as database rows matching the visible DOM—without adding database, browser, queue, or UI
+concepts to the core ontology. These support observed claims; they do not establish derived system
+properties.
 
 ### From a plain-English requirement to a formal certificate
 
@@ -88,9 +95,9 @@ The English requirements are the source of truth, not documentation added after 
 ```text
 english_requirements.json
         |
-        | each claim names assumptions and formal/checker references
+        | each claim declares observed/derived basis, assumptions, and references
         v
-dag_contract.json: workers + tasks + resources + timings
+dag_contract.json: workers + tasks + resources + timings + compositions
         |
         | deterministic analysis + measurements of the exact app
         v
@@ -102,18 +109,18 @@ certificate.json
 ```
 
 1. `english_requirements.json` states every promised behavior in ordinary language. Each claim has
-   a stable ID, explicit assumptions, and exact references to the primitives or application
-   checkers intended to support it.
+   a stable ID, observed/derived basis, explicit assumptions, and exact references. A derived claim
+   also has a kernel formula and cannot cite a checker as proof.
 2. `dag_contract.json` is the formal translation using the four primitives.
 3. Runtime evidence records real task executions, timings, worker identity, observed input/output
    types, concurrency, resource effects, and failures. Optional checkers record additional facts.
-4. Deterministic analysis checks graph/resource feasibility, timing coverage and bounds, explicit
-   assumptions, and structural progress.
+4. Deterministic analysis checks graph/resource feasibility, timing coverage and bounds, retained
+   failures, explicit assumptions, structural progress, and derived formulas.
 5. Every issuance performs a mandatory deterministic translation audit. It rejects uncovered formal
    tasks or timings, unresolved English references, absent required checkers, and assumed timings
    without a matching English assumption.
-6. `certificate.json` embeds the complete English requirements, formal primitives, analysis, and
-   checker results, with cryptographic bindings to the exact source and evidence.
+6. `certificate.json` embeds the complete English requirements, formal primitives and compositions,
+   primitive and claim analysis, and checker results, with bindings to exact source and evidence.
 
 The core modules are deliberately limited to contract loading, evidence recording, deterministic
 analysis, English/formal traceability, the checker boundary, and certificate issue/verification.
@@ -195,17 +202,17 @@ automatic retry, or rejection policy. Its executable tests are in
 These helpers demonstrate the extension boundary. An application remains responsible for choosing
 its actual query, selectors, workload, assumptions, and product behavior.
 
-## Complete examples and their example certifications
+## Complete examples and their certification status
 
-The repository ships two complete, checked-in certificates. Both include mandatory plain-English
-requirements and a separately accepted independent audit for every English claim.
+The repository ships two current hardened example certificates. Historical audit artifacts remain
+review material but are not proof for changed requirements.
 
 ### Certified vote and flow model
 
 [`examples/certified_vote`](examples/certified_vote/README.md) is a deliberately narrow in-process
 example showing how the core primitives express performance and conditional flow guarantees.
 
-Its checked-in certificate proves and independently audits:
+Its checked-in v5 certificate establishes:
 
 - ten successful measured executions for every declared task;
 - no structural blocked state under the stated scheduling/resource assumptions;
@@ -214,19 +221,19 @@ Its checked-in certificate proves and independently audits:
 - enough modeled summarizer capacity to remain within three generations of lag.
 
 Inspect its [plain-English requirements](examples/certified_vote/english_requirements.json),
-[formal contract](examples/certified_vote/dag_contract.json),
-[certificate](examples/certified_vote/artifacts/certificate.json), and
-[independent audit result](examples/certified_vote/artifacts/independent-audit-result.json).
+[formal contract](examples/certified_vote/dag_contract.json), and
+[certificate](examples/certified_vote/artifacts/certificate.json). The flow checker is retained as
+supplementary diagnostic evidence; the derived claims are recomputed by the kernel formulas.
 
 This example deliberately makes no browser, HTTP, database, or production worker-pool promise. Its
-requirements and independent audit state those limitations plainly.
+requirements state those limitations plainly.
 
-### Certified database-to-UI application
+### Database-to-UI certification example
 
 [`examples/certified_database_ui`](examples/certified_database_ui/README.md) is a real SQLite, HTTP,
 JavaScript, and Selenium application.
 
-Its checked-in certificate proves and independently audits:
+Its workflow checks:
 
 - exact database-to-DOM membership and ordering on initial load;
 - ascending and descending sorting;
@@ -236,10 +243,12 @@ Its checked-in certificate proves and independently audits:
 - `<50ms` measured non-streaming HTTP work; and
 - `<16ms` immediate browser feedback and local rendering for the measured workload.
 
-Inspect its [plain-English requirements](examples/certified_database_ui/english_requirements.json),
-[formal contract](examples/certified_database_ui/dag_contract.json),
-[certificate](examples/certified_database_ui/artifacts/certificate.json), and
-[independent audit result](examples/certified_database_ui/artifacts/independent-audit-result.json).
+Its first rollback-journal hardened run retained a safety-adjusted HTTP timing failure. After the
+application changed to use SQLite WAL mode, the first new exact-source run passed the unchanged
+bounds and produced a verified [v5 certificate](examples/certified_database_ui/artifacts/certificate.json).
+See the complete [status record](examples/certified_database_ui/artifacts/STATUS.md),
+[plain-English requirements](examples/certified_database_ui/english_requirements.json), and
+[formal contract](examples/certified_database_ui/dag_contract.json).
 Run `python -m dagcert help database-ui` for the reusable certification workflow.
 
 ## Manual CLI workflow

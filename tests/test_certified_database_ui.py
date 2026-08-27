@@ -1,4 +1,5 @@
 from pathlib import Path
+import sqlite3
 
 from examples.certified_database_ui.app import (
     delete_item,
@@ -11,6 +12,8 @@ from examples.certified_database_ui.app import (
 def test_database_ui_operations_preserve_sorting_and_pagination(tmp_path: Path):
     database = tmp_path / "items.sqlite3"
     initialize_database(database, reset=True)
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
     first = list_items(database, page=1, page_size=3, sort="title", direction="asc")
     second = list_items(database, page=2, page_size=3, sort="title", direction="asc")

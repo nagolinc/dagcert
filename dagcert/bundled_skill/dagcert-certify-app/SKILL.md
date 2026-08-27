@@ -1,109 +1,81 @@
 ---
 name: dagcert-certify-app
-description: Certify an application with dagcert by declaring workers, tasks, resources, and timings; collecting source-bound timing evidence; and optionally attaching application-specific checker results. Use when a user says "certify this app", "use dag-certificate", or "use dagcert".
+description: Certify an application with dagcert by modeling its real worker/task/resource DAG, separating observed claims from kernel-derived formulas, collecting exact-source evidence, and optionally auditing application-specific observations. Use when a user says "certify this app", "use dag-certificate", or "use dagcert".
 ---
 
 # Certify an application with dagcert
 
-This skill is the focused getting-started guide, not the library reference. After installation,
-run `python -m dagcert help` to discover the authoritative packaged guides and reusable examples.
+This is the focused workflow. Run `python -m dagcert help` for packaged guides and examples, and
+read [references/workflow.md](references/workflow.md) for current artifact formats and commands.
 
 ## Rule 0: improve the experience; never certify a regression
 
-Certification observes and reports. It is not permission to redesign the application.
+Certification observes and reports. It is not permission to redesign the application. Do not add
+queues, limits, timeouts, retries, debounce, serialization, rejection, reduced concurrency,
+resource caps, fake fast paths, or altered behavior merely to pass. Report a truthful failure.
 
-Do not introduce queues, queue limits, rate limits, timeouts, cancellation, retries, debounce,
-serialization, rejection, worker-count changes, resource caps, or altered product behavior merely
-to obtain a passing result. A truthful failure is preferable to a certificate obtained by making
-the application worse. If a change is independently desirable, explain it and obtain the same
-approval it would require without certification.
+## Model the actual execution DAG
 
-## The complete model
+Dagcert's primitives remain workers, tasks, resources, and timings. A hardened contract also
+declares finite compositions over those primitives.
 
-Dagcert's domain model has exactly four kinds of things:
+- `operation` tasks are real executable leaf boundaries and may have measured timings.
+- `instrumentation` tasks may record aggregate observations but cannot participate in a derived
+  composition.
+- A composition names at least two connected operation tasks, exact duration cases, and finite
+  execution counts. Dagcert computes its conservative bound from those leaves; it never accepts a
+  direct aggregate stopwatch as the derivation.
 
-- **workers** execute tasks and declare concurrency;
-- **tasks** declare dependencies, types, their worker, and resource acquisition/consumption/production;
-- **resources** declare capacities, initial amounts, and application-defined units;
-- **timings** bound task duration, arrival interval, waiting, or age using measurements or explicit assumptions.
+Reconstruct the execution graph from source before writing the contract. Represent independently
+scheduled stages, actual worker pools, queues, reservations, resource transfers, ordering rules,
+success transitions, and failure-release transitions that affect a requested guarantee. Do not
+collapse them into a pipeline observer or surround one catch-all measurement with meaningless task
+names.
 
-Do not invent Dagcert concepts for endpoints, pages, controls, queues, databases, retries, user
-actions, or frameworks. Represent work as tasks and relevant constraints as resources/timings.
-Put application-specific structure in an optional checker owned by the application.
+## Claim boundary
 
-**Core cannot derive does not mean Dagcert cannot certify.** When a promise depends on semantic
-application facts—such as database entries appearing as the correct UI rows—observe those facts in
-an application-owned checker and attach its passing result to issuance and verification. A selected
-checker result is a required, exact-source-bound part of the certificate, not informal supporting
-documentation.
+Classify every claim before collecting evidence:
+
+- `observed` describes only retained executions. Its formula is `null`. Application checkers may
+  support case-bounded semantic facts such as database-to-DOM correspondence.
+- `derived` contains a formula in Dagcert's fixed kernel algebra. It cannot cite a checker as proof.
+  The formula must use a declared multi-operation composition or bounds from at least two connected
+  tasks plus relevant worker/resource state.
+
+If the kernel cannot express or prove a requested system property, report it as unsupported. Never
+replace non-starvation, bounded backlog, capacity, priority, sustained throughput, staleness, or
+composed latency with a summary task whose measured output is the desired conclusion.
 
 ## Workflow
 
-1. Run `dagcert init <app-root>`. It creates `dag_contract.json` and the mandatory
-   `english_requirements.json`; replace every `replace_me` value in both.
-2. Write every promised behavior as a complete plain-English claim with a stable ID, explicit
-   assumptions, and references to the exact primitives and required application checkers. This
-   file is the source of truth for certificate meaning, not optional audit material.
-3. Map real work to the smallest useful task DAG. Do not mirror every function or DOM node.
-4. Declare actual workers and resources. Use task resource effects to represent transient
-   acquisition and the production/consumption of downstream work. Do not add a queue or cap to the
-   application; describe existing flow.
-5. Declare timing cases for real requirements. For recognizable non-streaming HTTP handling and
-   visible local UI feedback, use the standard `<50ms` and `<16ms` limits respectively unless the
-   product already specifies another limit. These are ordinary task timings, not special endpoint
-   or UI primitives.
-6. Record successful, exact-source timing samples. Exercise representative and adversarial cases.
-   A sample names its task, timing case, worker, source fingerprint, timing value, and optionally
-   observed concurrency/resource use.
-7. Run `dagcert lint`, the application's tests, and `dagcert analyze`, always supplying the
-   requirements path where the command requires it. Lint's mandatory translation audit must show
-   that every formal task and timing appears in the English claims, references resolve, and assumed
-   timings have explicit English assumptions.
-8. Derive important claims from the primitives. Work supply comes from producer resource effects
-   and interval timings; service capacity comes from duration timings and worker concurrency;
-   generation lag is a flowing resource; structural progress comes from the task/resource graph.
-   Represent external behavior as an `assumed` timing so the resulting claim is conditional. Use a
-   checker for a derivation the kernel does not implement; it still cites only the four primitives
-   and emits `dagcert-check-result/v2` bound to exact source, contract, evidence, and requirements.
-9. Run `dagcert issue`, then `dagcert verify` with the same contract, English requirements,
-   evidence, source root, exclusions, and optional checker result files.
-10. Report `CERTIFIED` only for the exact verified source and only for the claims actually encoded
-   by the contract and selected checkers. Otherwise report `NOT CERTIFIED` and the findings.
+1. Run `dagcert init <app-root>` and replace every placeholder.
+2. Inventory the user's requested guarantees. Classify each as observed or derived and write its
+   exact scope and assumptions before evidence collection.
+3. Trace source paths and build the smallest faithful worker/task/resource DAG. Do not mirror every
+   function, but do not omit state or scheduling boundaries material to a claim.
+4. Declare real workers, operation tasks, instrumentation, resources, and finite compositions.
+5. Put external premises in `assumed` leaf timings. Do not infer worst-case gaps from averages or a
+   few favorable samples.
+6. Record every exact-source attempt, including failures. Exercise representative and adversarial
+   cases. Never retry to replace a failed observation.
+7. Run `dagcert lint`, application tests, and `dagcert analyze`. Resolve every coverage, binding,
+   resource-effect, failed-attempt, and timing finding.
+8. Encode derived claims as kernel formulas over the actual DAG. Do not use checker booleans or
+   aggregate samples as proof premises.
+9. Run `dagcert issue`, then `dagcert verify` with identical inputs and exclusions.
+10. Report `CERTIFIED` only for the exact verified source and the exact observed/derived scope.
+    Otherwise report `NOT CERTIFIED` and preserve the failures.
 
-Never fabricate samples, types, capacities, coverage, checker results, or a passing outcome.
-Never claim that certification eliminates every possible defect. It demonstrates only the stated,
-measured, source-bound claims.
+Never fabricate samples, types, capacities, transitions, formulas, checker results, or a passing
+outcome. Certification does not imply general production readiness.
 
-## Optional work
+## Optional semantic audit
 
-- Multi-page browser inventories, repeated controls, and database-to-UI correspondence belong in
-  an application checker. For database-backed rows, use the optional exact-projection helper and
-  run `python -m dagcert help database-ui` for the installed source-of-truth guide. Define expected
-  rows with an application-owned read-only query, observe the real DOM with Selenium, compare stable
-  semantic keys and promised visible fields, then attach the result to issuance and verification.
-- Optimistic Mithril updates and buffered deltas are an application pattern; see the optional
-  helper example. Choose debounce and retry semantics from product needs, not certification.
-- The optional flow checker demonstrates non-starvation, structural progress, and bounded
-  generation lag using only workers, tasks, resources, and timings.
-- The optional stats viewer is presentation only. When modifying it, keep source unminified and use
-  Selenium to capture and inspect desktop and mobile screenshots.
-- Run an independent semantic audit only when the user requests it. It reads the exact mandatory
-  `english_requirements.json`; there is no separate audit-claims file that can drift. The optional
-  audit example generates a separate sealed directory, packet, prompt, schema, and response path
-  for every claim.
-  The human-authored worker instructions live in `examples/independent_audit_prompt.txt`; do not
-  bury or duplicate system prompts in Python or JavaScript source. Every packet includes the exact
-  source contents so the worker can review the implementation, not only hashes and formal data.
-  For each claim, launch a different fresh built-in `spawn_agent` worker with
-  `model="gpt-5.6-luna"`, `fork_turns="none"`, a unique task name, and only that claim's complete
-  prompt. Never give multiple claims to one worker. Save each final JSON to its designated response
-  path, then run the example's accept command to validate every digest and aggregate the results.
-  Built-in `spawn_agent` uses the active ChatGPT/Codex subscription session; do not substitute an
-  API-key call or claim separate API execution occurred.
-  Reject terse entailment-only answers. Each worker must apply Rule 0, identify concrete strengths,
-  weaknesses, evidence gaps, certificate-fitting risks, and prioritized improvements, and distinguish
-  “this claim is entailed” from “this application is production-ready.”
-  This is a user-requested tool for the active app-building agent, never a build/release gate. Use
-  an external Codex CLI runner only when the current host has no subagent facility.
+Run the independent audit only when requested. It uses the mandatory requirements file and creates
+one sealed packet per claim. Each fresh audit worker must reconstruct the real execution graph from
+source and compare it with the declared model. It must reject synthetic observer/summary timings,
+missing queues or reservations, omitted failure transitions, average-rate substitutions for burst
+bounds, and any proof that does not resemble the actual application DAG.
 
-Read [references/workflow.md](references/workflow.md) for artifact formats and exact commands.
+The review remains advisory: it can invalidate a claim, but its `passed` boolean cannot establish a
+derived formula. Follow the per-claim handoff procedure in the workflow reference.

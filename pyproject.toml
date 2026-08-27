@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dagcert"
-version = "0.6.0"
+version = "0.7.0"
 description = "Plain-English certificates over workers, tasks, resources, and timings"
 readme = "readme.md"
 requires-python = ">=3.12"
@@ -50,6 +50,7 @@ examples = [
     "certified_database_ui/static/*.js",
     "certified_database_ui/artifacts/*.json",
     "certified_database_ui/artifacts/*.jsonl",
+    "certified_database_ui/artifacts/*.md",
     "certified_database_ui/artifacts/*.png",
     "certified_database_ui/artifacts/independent-audit/**/*.json",
     "certified_database_ui/artifacts/independent-audit/**/*.txt",

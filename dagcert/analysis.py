@@ -92,6 +92,11 @@ def analyze_contract(
                 f"declared {worker.concurrency}, observed {sample.observed_worker_concurrency}",
             ))
         timing = task.timings.get(sample.case)
+        if contract.schema == "dagcert-contract/v3" and timing is not None and not sample.succeeded:
+            findings.append(Finding(
+                "failed-task-attempt", f"{sample.task_id}/{sample.case}",
+                "retained timing evidence contains a failed task attempt",
+            ))
         if timing is not None and timing.metric == "duration" and sample.succeeded:
             _check_execution_observation(task, sample, contract, findings)
 

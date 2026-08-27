@@ -1,5 +1,5 @@
 {
-  "schema": "dagcert-english-requirements/v1",
+  "schema": "dagcert-english-requirements/v2",
   "claims": [
     {
       "id": "browse-sort-and-pagination",
@@ -16,7 +16,9 @@
       "assumptions": [
         "The guarantee is limited to the exercised SQLite dataset and sequential reference workload.",
         "The UI timing measures browser DOM mutation, not compositor paint or total network-to-paint latency."
-      ]
+      ],
+      "basis": "observed",
+      "formula": null
     },
     {
       "id": "browser-insertion",
@@ -35,7 +37,9 @@
       ],
       "assumptions": [
         "The guarantee is limited to successful operations in the exercised SQLite dataset and sequential reference workload."
-      ]
+      ],
+      "basis": "observed",
+      "formula": null
     },
     {
       "id": "browser-deletion",
@@ -54,7 +58,9 @@
       ],
       "assumptions": [
         "The guarantee is limited to successful operations in the exercised SQLite dataset and sequential reference workload."
-      ]
+      ],
+      "basis": "observed",
+      "formula": null
     }
   ],
   "metadata": {
