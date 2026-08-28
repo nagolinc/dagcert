@@ -16,8 +16,10 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import sys
 import sysconfig
+import tempfile
 
 from .python_verifier import PythonVerificationError, verify_exception_freedom
 
@@ -123,19 +125,24 @@ def check_python_sources(
         "--python-executable",
         sys.executable,
     ]
-    package_root = str(Path(__file__).resolve().parent.parent)
-    mypy_stub_root = str(Path(__file__).resolve().parent / "mypy_stubs")
+    bundled_stub_root = Path(__file__).resolve().parent / "mypy_stubs"
     previous_path = os.environ.get("MYPYPATH")
-    os.environ["MYPYPATH"] = os.pathsep.join(
-        item for item in (mypy_stub_root, str(root), package_root, previous_path) if item
-    )
-    try:
-        stdout, stderr, status = mypy_api.run(arguments)
-    finally:
-        if previous_path is None:
-            os.environ.pop("MYPYPATH", None)
-        else:
-            os.environ["MYPYPATH"] = previous_path
+    # An installed Dagcert's bundled stubs can live below the selected interpreter's
+    # site-package directory.  Mypy deliberately rejects any such MYPYPATH entry, so
+    # give it an isolated copy instead of exposing a path inside the application venv.
+    with tempfile.TemporaryDirectory(prefix="dagcert-mypy-stubs-") as temporary_root:
+        mypy_stub_root = Path(temporary_root) / "mypy_stubs"
+        shutil.copytree(bundled_stub_root, mypy_stub_root)
+        os.environ["MYPYPATH"] = os.pathsep.join(
+            item for item in (str(mypy_stub_root), str(root), previous_path) if item
+        )
+        try:
+            stdout, stderr, status = mypy_api.run(arguments)
+        finally:
+            if previous_path is None:
+                os.environ.pop("MYPYPATH", None)
+            else:
+                os.environ["MYPYPATH"] = previous_path
     if status != 0:
         detail = "\n".join(item for item in (stdout.strip(), stderr.strip()) if item)
         raise SourceTypeError("bound application source failed strict mypy checking:\n" + detail)

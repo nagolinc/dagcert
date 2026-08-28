@@ -3,12 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from dataclasses import dataclass
 import json
+import os
 import sys
 
 import pytest
 from mypy import api as mypy_api
 
 from dagcert import CertificateError, ContractError, TimingSample, analyze_contract, issue_certificate, load_contract, load_evidence, operation
+from dagcert.source_types import SourceSignature, check_python_sources
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,64 @@ def test_pytyped_public_api_is_visible_to_standard_strict_mypy(tmp_path: Path):
         str(consumer), "--strict", "--no-incremental", "--python-executable", sys.executable,
     ])
     assert status == 0, "\n".join(item for item in (stdout, stderr) if item)
+
+
+def test_source_checker_keeps_bundled_stubs_out_of_an_in_tree_venv(
+    tmp_path: Path, monkeypatch,
+):
+    root = tmp_path / "application"
+    site_packages = root / ".venv" / "Lib" / "site-packages"
+    installed_package = site_packages / "dagcert"
+    bundled_stubs = installed_package / "mypy_stubs" / "dagcert"
+    bundled_stubs.mkdir(parents=True)
+    (bundled_stubs / "__init__.pyi").write_text(
+        "from .runtime import operation as operation\n", encoding="utf-8",
+    )
+    (bundled_stubs / "runtime.pyi").write_text(
+        "def operation(function): ...\n", encoding="utf-8",
+    )
+    root.mkdir(exist_ok=True)
+    (root / "app.py").write_text("def work(value: int) -> int:\n    return value\n")
+    nested_python = root / ".venv" / "Scripts" / "python.exe"
+    captured: dict[str, object] = {}
+
+    def fake_mypy_run(arguments):
+        mypy_path = os.environ["MYPYPATH"].split(os.pathsep)
+        captured["arguments"] = arguments
+        captured["mypy_path"] = mypy_path
+        captured["stub"] = (
+            Path(mypy_path[0]) / "dagcert" / "runtime.pyi"
+        ).read_text(encoding="utf-8")
+        assert Path(mypy_path[0]).is_dir()
+        return "", "", 0
+
+    monkeypatch.setattr("dagcert.source_types.__file__", installed_package / "source_types.py")
+    monkeypatch.setattr("dagcert.source_types.sys.executable", str(nested_python))
+    monkeypatch.setattr("mypy.api.run", fake_mypy_run)
+
+    result = check_python_sources(
+        root,
+        [
+            SourceSignature(
+                language="python", path="app.py", symbol="work",
+                input_type="int", outcome_types=("int",), line=1,
+            )
+        ],
+        prove_exceptions=False,
+    )
+
+    mypy_path = captured["mypy_path"]
+    assert isinstance(mypy_path, list)
+    assert str(root.resolve()) in mypy_path
+    assert not any(
+        Path(item).resolve().is_relative_to((root / ".venv").resolve())
+        for item in mypy_path
+    )
+    assert captured["stub"] == "def operation(function): ...\n"
+    arguments = captured["arguments"]
+    assert isinstance(arguments, list)
+    assert arguments[arguments.index("--python-executable") + 1] == str(nested_python)
+    assert result["mode"] == "strict"
 
 
 def _contract(project: dict[str, object]) -> dict[str, object]:
