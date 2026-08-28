@@ -1,5 +1,5 @@
 {
-  "schema": "dagcert-contract/v4",
+  "schema": "dagcert-contract/v5",
   "workers": [
     {"id": "interface", "concurrency": 1},
     {"id": "ledger", "concurrency": 1},
@@ -18,8 +18,15 @@
       "implementation": {"language": "python", "path": "app.py", "symbol": "preview_vote_total"},
       "outcomes": [
         {"type": "PreviewTotal", "resources": {}, "metadata": {}},
-        {"type": "dagcert.runtime.UnhandledException", "resources": {}, "metadata": {}}
+        {"type": "PreviewRejected", "resources": {}, "metadata": {}}
       ],
+      "error_budget": {
+        "basis": "engineering_assumption",
+        "evidence_case": "completion",
+        "good_outcomes": ["PreviewTotal"],
+        "bad_event_probability_upper": 0.01,
+        "minimum_observations": 10
+      },
       "depends_on": [],
       "timings": {
         "completion": {
@@ -37,8 +44,15 @@
       "implementation": {"language": "python", "path": "app.py", "symbol": "commit_vote_total"},
       "outcomes": [
         {"type": "CommittedTotal", "resources": {"snapshot-work": {"produce": 1}, "summary-lag": {"produce": 1}}, "metadata": {}},
-        {"type": "dagcert.runtime.UnhandledException", "resources": {}, "metadata": {}}
+        {"type": "CommitRejected", "resources": {}, "metadata": {}}
       ],
+      "error_budget": {
+        "basis": "engineering_assumption",
+        "evidence_case": "completion",
+        "good_outcomes": ["CommittedTotal"],
+        "bad_event_probability_upper": 0.01,
+        "minimum_observations": 10
+      },
       "depends_on": [{"task": "vote.preview", "outcome_type": "PreviewTotal"}],
       "timings": {
         "completion": {
@@ -55,9 +69,9 @@
       "worker": "summarizer",
       "implementation": {"language": "python", "path": "app.py", "symbol": "advance_summary_generation"},
       "outcomes": [
-        {"type": "SummaryGeneration", "resources": {"summary-lag": {"consume": 1}}, "metadata": {}},
-        {"type": "dagcert.runtime.UnhandledException", "resources": {}, "metadata": {}}
+        {"type": "SummaryGeneration", "resources": {"summary-lag": {"consume": 1}}, "metadata": {}}
       ],
+      "error_budget": null,
       "depends_on": [{"task": "vote.commit", "outcome_type": "CommittedTotal"}],
       "timings": {
         "completion": {
@@ -73,9 +87,9 @@
       "worker": "renderer",
       "implementation": {"language": "python", "path": "app.py", "symbol": "render_vote_snapshot"},
       "outcomes": [
-        {"type": "TextSnapshot", "resources": {"snapshot-work": {"consume": 1}}, "metadata": {}},
-        {"type": "dagcert.runtime.UnhandledException", "resources": {}, "metadata": {}}
+        {"type": "TextSnapshot", "resources": {"snapshot-work": {"consume": 1}}, "metadata": {}}
       ],
+      "error_budget": null,
       "depends_on": [{"task": "vote.commit", "outcome_type": "CommittedTotal"}],
       "timings": {
         "completion": {
@@ -86,6 +100,15 @@
       }
     }
   ],
-  "compositions": [],
+  "compositions": [
+    {
+      "id": "vote-cast",
+      "steps": [
+        {"task": "vote.preview", "timing": "completion", "count": 1, "outcome_type": "PreviewTotal"},
+        {"task": "vote.commit", "timing": "completion", "count": 1, "outcome_type": "CommittedTotal"}
+      ],
+      "metadata": {"horizon": "one preview followed by one commit"}
+    }
+  ],
   "metadata": {}
 }

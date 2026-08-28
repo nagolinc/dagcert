@@ -23,13 +23,15 @@ Required review
 2. Trace the actual implementation paths relevant to this claim. Compare them
    with the declared workers, tasks, resources, types, dependencies, and
    timings.
-   For every operation, start at its v4 implementation binding and verify that
+   For every operation, start at its v5 implementation binding and verify that
    the named source symbol is the boundary the production worker actually
    invokes. Reject a typed adapter, wrapper, or certification-only function
    that the real execution path bypasses.
-   Confirm the production import resolves to Dagcert's real `operation` guard and that no local
-   module, rebinding, monkey patch, `__wrapped__` access, or alternate call path bypasses its runtime
-   input/outcome validation.
+   Confirm the production import resolves to Dagcert's real type-preserving `operation` marker and
+   that no local module, rebinding, monkey patch, alternate callable, or call-site argument
+   preparation moves claim-relevant logic outside the verified operation. In particular, reject a
+   proof boundary that begins only after parsing, normalization, lookup, queue reservation, or
+   another exception-producing transformation has already occurred.
 3. Decide whether the evidence exercises the real user-visible or backend
    operation being promised. Check relevant concurrency, failure, blocking,
    and state-transition paths. A timed helper or stand-in is not evidence for
@@ -81,14 +83,32 @@ resource effects. Trace timeout, cancellation, exception, rejection, malformed
 response, and dependency-failure exits. Reject a model that types a worker as
 `Input -> Output` when the code can instead raise, drop the item, return no
 value, or enqueue a different type. Also reject an effects table that assigns
-success production to a failure or `UnhandledException` branch when the code
-does not perform that transition.
+success production to an explicit failure branch when the code does not perform
+that transition.
 
-Do not accept strict type-check output by itself as proof that the modeled
-symbol is the production boundary. Conversely, do not accept hand-authored
-evidence type names as source typing. The certificate must contain Dagcert's
-source extraction and compiler result, and the source/call graph must show
-that production uses the bound callable.
+Do not accept strict type-check output by itself as exception-freedom or as proof that the modeled
+symbol is the production boundary. Conversely, do not accept hand-authored evidence type names as
+source typing. For every `operation`, require the certificate's sealed source verification to show
+strict mypy success and a digest-pinned Nagini/Viper `proved` result for the complete bound source
+file. Treat a missing verifier, missing image, unsupported construct, translation failure, timeout,
+internal verifier error, skipped function, declared `Exsures` exit on the task operation, or a
+`not-applicable` result as failure. Instrumentation may be Nagini-not-applicable only for an
+`observed` claim and must not participate in a derived composition.
+
+Reject an operation-level Nagini `Requires`, any bound-module `Assume`, or `ContractOnly`
+application implementation. They can make totality over the declared input type vacuous rather
+than proving the executable task.
+
+This release has no approved JavaScript or TypeScript operation verifier. Reject any derived claim
+that treats `tsc --strict`, runtime browser evidence, or a Python wrapper as proof of exception
+freedom or totality for JavaScript/TypeScript production logic.
+
+Confirm that the finite source return union contains every normal success and expected failure.
+An unexpected Python exception is not an outcome and must make the proof fail. Reject a certificate
+that catches all exceptions into a generic result, turns a missing output into a probability budget,
+or relies on runtime testing to establish exception-freedom. Also trace transitive helpers and
+production callers: a proved leaf does not certify exception-producing glue before the call or an
+alternate production path that bypasses the bound operation.
 
 For every derived claim, explain the chain from leaf bounds and state
 transitions to the conclusion. Confirm that the conclusion is recomputed from
@@ -96,6 +116,30 @@ those premises rather than copied from timing evidence or trusted from an
 application checker. If the packet does not contain enough structure to make
 that derivation, record a finding and fail the claim rather than treating a
 successful run as proof.
+
+Distinguish may-reachability from must-reachability. A downstream task fed by a
+named success outcome may be a real, structurally reachable branch even when a
+failure outcome prevents unconditional progress. Conversely, never treat
+possible production on one favorable branch as production guaranteed across
+all outcomes. Check that universal resource claims use effects common to every
+source outcome, while success-conditioned claims name the exact typed outcome
+path. Reject either extreme: calling every success-only branch structurally
+impossible, or silently promoting that branch into an unconditional guarantee.
+
+For a chance claim, verify that it covers a finite composition of real operation
+tasks and that every selected step outcome is explicitly classified as good by
+that task's error budget. The complete good-outcome set must equal that exact selected typed
+outcome. Do not require or invent a failure branch merely to make a budget nontrivial. Confirm the
+invocation counts and horizon,
+require one direct probability-bound comparison rather than an `or`/`not`/implication escape, then
+recompute the system bad-event upper bound by summing count times leaf budget
+and capping the result at one. This union-bound calculation must not multiply
+success probabilities, assume independence, or become tighter because failures
+appear uncorrelated in a small sample. Treat each engineering error budget as an
+explicit premise: retained observations are only a consistency check and do not
+statistically establish the declared probability. Reject unbounded "never"
+claims, omitted failure outcomes, an unexpected exception hidden as an outcome,
+or a whole-pipeline pass rate substituted for the typed DAG derivation.
 
 Verdict rules
 

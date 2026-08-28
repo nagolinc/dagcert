@@ -16,7 +16,7 @@ Repeat `--exclude PATTERN` identically when project-specific source exclusions a
 
 ## Contract
 
-The hardened `dagcert-contract/v4` JSON or YAML object contains `workers`, `tasks`, `resources`,
+The hardened `dagcert-contract/v5` JSON or YAML object contains `workers`, `tasks`, `resources`,
 task-local `timings`, finite typed-path `compositions`, and metadata. Each composition step names
 the source outcome it traverses, and adjacent steps must match a real typed dependency edge.
 Each task has an `implementation` binding
@@ -24,24 +24,31 @@ with `language`, source-root-relative `path`, and `symbol`. For Python, Dagcert 
 callable, requires one explicit source-defined input class and an inline closed union of explicit
 source-defined outcome classes, runs strict mypy itself, and seals the result. The contract contains
 no authoritative `input_type` or `output_type` fields.
-The current Python provider certifies synchronous guarded callables only; async callables fail
-closed until Dagcert has an async boundary that types cancellation and awaited exceptions.
+The current Python provider certifies synchronous operations only; async callables fail closed until
+the approved external verifier can prove cancellation and awaited exception behavior.
 
-Python operations use `@dagcert.runtime.operation`. The guarded callable adds
-`dagcert.runtime.UnhandledException` to the extracted outcome union, so escaped exceptions cannot
-silently become missing outputs. This kernel-owned outcome cannot carry resource effects; cleanup
-requires an explicit recovery outcome in production source. The contract's `outcomes` array must cover the extracted union
-exactly and gives each variant its `acquire`, `consume`, and `produce` effects. A derived resource
+Python operations use `@dagcert.runtime.operation`, a type-preserving source marker. Dagcert runs
+strict mypy and then invokes a digest-pinned Nagini/Viper container with networking disabled and the
+source mounted read-only. Nagini verifies the complete bound file and must prove that no undeclared
+exceptional exit is reachable. Missing Docker/image, unsupported syntax, translation failure,
+timeout, internal verifier error, or any failed proof refuses issuance. Expected failures are
+explicit return variants; task operations may not declare `Exsures`. The contract's `outcomes`
+array must cover the extracted union exactly and gives each variant its `acquire`, `consume`, and
+`produce` effects. A derived resource
 formula uses the minimum effect across all variants. Resources contain
 `capacity`, `initial`, and `unit`. Every task has a duration timing; other timing metrics may be
 `interval`, `wait`, or `age`. An `assumed` timing requires zero samples and makes results conditional.
 
-Dagcert resolves decorator provenance from imports and rejects locally defined lookalikes or local
-modules shadowing `dagcert`/`dataclasses`. At invocation time, the operation guard recursively
-validates the actual input and returned dataclass fields against the source annotations. Values
-originating as dependency `Any` therefore cannot cross the certified boundary with malformed fields.
+Task operations also may not declare `Requires`, because a task must be total over its complete
+source input type. Bound application modules may not use Nagini `Assume` or `ContractOnly`; these
+would introduce a trusted axiom or specification-only implementation instead of proving real code.
 
-Each v4 dependency is `{"task": "UPSTREAM", "outcome_type": "Variant"}`. Dagcert verifies that the
+Dagcert resolves decorator provenance from imports and rejects locally defined lookalikes or local
+modules shadowing `dagcert`/`dataclasses`. Strict mypy rejects `Any` at the source boundary. Keep all
+claim-relevant input construction and transformation inside bound operations; a verified leaf does
+not certify exception-producing glue that ran before the call.
+
+Each v5 dependency is `{"task": "UPSTREAM", "outcome_type": "Variant"}`. Dagcert verifies that the
 variant is in the upstream source return union and exactly equals the downstream source input type.
 This makes dependency arrows typed dataflow rather than documentation.
 
@@ -50,31 +57,48 @@ connected operation tasks and names the exact duration case and finite execution
 Instrumentation cannot be included. The kernel computes a conservative serial upper bound from
 the certified leaf bounds; a composition never declares its own measured timing.
 
+Each v5 task also contains `error_budget`, either null or an object with basis
+`engineering_assumption`, one canonical duration `evidence_case`, source-derived `good_outcomes`, a
+`bad_event_probability_upper` in `[0,1)`, and positive `minimum_observations`. A finite chance
+composition uses the union bound: sum `step.count` times each task
+budget and cap at one. The kernel never multiplies success probabilities or assumes independence.
+`good_outcomes` may include every real outcome; Dagcert never requires an invented failure branch.
+For a chance path it must equal the exact single outcome selected by the step. A chance claim directly compares the composition
+success lower bound or failure upper bound with a literal probability in `[0,1]`; `or`, `not`, and
+implication escape branches are invalid. Observed outcomes merely check that the retained rate does
+not already exceed the declared premise.
+
 ## Timing evidence
 
-Evidence is JSON Lines. Each v4 line contains `task_id`, `case`, `value_ms`, `worker_id`,
+Evidence is JSON Lines. Each v5 line contains `task_id`, `case`, `value_ms`, `worker_id`,
 `source_fingerprint`, `recorded_at`, and the actual runtime `outcome_type`. It may also contain
 `observed_worker_concurrency`,
 `resource_acquired`, `resource_consumed`, `resource_produced`, `resource_levels`, and `metadata`.
 Evidence cannot declare task input/output types. Every duration sample is checked against its exact
-source outcome's effects. An undeclared outcome, legacy evidence type label, or retained
-`UnhandledException` makes analysis fail; it cannot be discarded in favor of a later passing retry.
+source outcome's effects. An undeclared outcome, unexpected exception sentinel, or legacy evidence
+type label makes analysis fail. Error budgets classify explicit task outcomes; they cannot turn an
+undeclared exception into an acceptable probabilistic branch.
 
 ## Mandatory English requirements
 
 `dagcert-english-requirements/v2` is required for new issuance.
 Each claim has a stable ID, complete plain-English statement, exact primitive and required-checker
-references, explicit assumptions, a basis (`observed` or `derived`), and a formula. Observed claims
+references, explicit assumptions, a basis (`observed`, `derived`, or `chance`), and a formula. Observed claims
 use a null formula and describe retained executions. Derived claims use the fixed kernel algebra
 and cannot cite application checkers as proof. The certificate embeds both its normalized content and exact
 file digest. This is the source of truth for what the certificate means; it is not a separate audit
 input and cannot be reconstructed from checker output.
 
+Chance claims use a formula containing `composition_failure_probability_upper` or
+`composition_success_probability_lower`, cite the finite composition and every participating
+`error-budget:TASK`, and state the engineering probability assumptions in English.
+
 `dagcert lint` and issuance run the mandatory deterministic translation audit. All formal tasks and
 timings must be covered by the English claims; primitive references must resolve; assumed timings
 must have explicit English assumptions; and issuance requires every checker named by a claim.
-`dagcert-certificate/v7` embeds source type extraction, strict compiler result, the exact
-source/runtime type-enforcement descriptor plus its core-file manifest hash, that recomputable audit, and kernel claim
+`dagcert-certificate/v9` embeds source type extraction, strict-mypy result, the digest-pinned
+Nagini/Viper proof result and scope, the exact source-verification descriptor plus its core-file
+manifest hash, that recomputable audit, and kernel claim
 analysis. The Luna workflow below is the optional,
 user-requested semantic audit and never replaces this always-on coverage check.
 
@@ -96,8 +120,9 @@ read-only database projection with Selenium observations and emitting a bound ch
 the query, equivalence key, selectors, user/session setup, and test cases; Dagcert owns result
 binding and certificate verification. Do not invent a new primitive for this structure.
 
-Core structural progress rejects a task whose dependencies are unreachable or whose consumed
-resource has neither sufficient initial supply for a first execution nor a reachable producer.
+Core structural progress rejects a task whose dependencies are unreachable on every typed outcome
+or whose consumed resource has neither sufficient initial supply nor any reachable producer.
+It separately reports may-reachable, must-reachable, and outcome-conditional tasks.
 The result assumes reachable producer task types can recur, resource effects match runtime,
 acquisition is atomic, and scheduling is fair. A timing-based checker may diagnose sustained
 throughput, non-starvation, or bounded lag, but its boolean cannot prove those derived properties.

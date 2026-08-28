@@ -2,7 +2,10 @@
 
 from ._version import VERSION
 
-from .analysis import AnalysisReport, Finding, StructuralProgress, TimingResult, analyze_contract
+from .analysis import (
+    AnalysisReport, ErrorBudgetResult, Finding, StructuralProgress, TimingResult,
+    analyze_contract,
+)
 from .certificate import (
     CertificateError,
     CertificateVerification,
@@ -23,7 +26,7 @@ from .checks import (
 )
 from .contract import (
     Composition, CompositionStep, Contract, ContractError, Implementation, Resource, ResourceEffect,
-    Task, TaskOutcome, Timing, TypedDependency, Worker, load_contract,
+    Task, TaskErrorBudget, TaskOutcome, Timing, TypedDependency, Worker, load_contract,
 )
 from .evidence import EvidenceError, EvidenceRecorder, TimingSample, load_evidence
 from .runtime import OperationTypeViolation, UnhandledException, operation, outcome_type
@@ -41,9 +44,9 @@ __all__ = [
     "AnalysisReport", "CertificateError", "CertificateVerification", "CheckContext",
     "CheckFinding", "Checker", "CheckResult", "Composition", "CompositionStep",
     "Contract", "ContractError", "Implementation",
-    "EnglishClaim", "EnglishRequirements", "EvidenceError", "EvidenceRecorder", "Finding",
+    "EnglishClaim", "EnglishRequirements", "ErrorBudgetResult", "EvidenceError", "EvidenceRecorder", "Finding",
     "RequirementsError", "Resource", "ResourceEffect",
-    "StructuralProgress", "Task", "TaskOutcome", "Timing", "TimingResult", "TimingSample", "TranslationAudit", "TypedDependency",
+    "StructuralProgress", "Task", "TaskErrorBudget", "TaskOutcome", "Timing", "TimingResult", "TimingSample", "TranslationAudit", "TypedDependency",
     "OperationTypeViolation", "SourceSignature", "SourceTypeError", "UnhandledException", "Worker", "analyze_contract", "audit_translation", "issue_certificate",
     "load_check_result", "load_contract", "load_evidence", "load_requirements", "run_checker", "sha256_file",
     "operation", "outcome_type", "source_fingerprint", "source_manifest", "verify_certificate", "write_check_result",

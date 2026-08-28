@@ -15,8 +15,10 @@ The ordinary non-streaming HTTP deadlines are 50 ms. Immediate browser DOM feedb
 rendering use the 16 ms defaults. The browser checks compare application-owned read-only SQL
 projections with Selenium observations using stable semantic row keys and visible fields.
 
-The SQLite list/insert/delete operations are real v4 Python task boundaries used by the production
-HTTP handlers. Dagcert extracts their named input and outcome classes and runs strict mypy. Browser
+The SQLite list/insert/delete operations are real v5 Python task boundaries used by the production
+HTTP handlers. Dagcert extracts their named input and outcome classes and runs strict mypy. These
+tasks are explicitly observational instrumentation: the certificate does not claim Nagini proved
+SQLite, browser JavaScript, or Selenium. Browser
 DOM timings are explicitly modeled as typed instrumentation; the certificate does not pretend that
 Python type-checks the JavaScript implementation. The real Selenium/HTTP/SQLite projection checker
 supports those observed browser claims.

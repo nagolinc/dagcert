@@ -1,5 +1,5 @@
 {
-  "schema": "dagcert-contract/v4",
+  "schema": "dagcert-contract/v5",
   "metadata": {
     "application": "certified-database-ui",
     "scope": "Sequential reference workload through real SQLite, HTTP, and browser boundaries"
@@ -12,14 +12,15 @@
   "tasks": [
     {
       "id": "items.list",
-      "role": "operation",
+      "role": "instrumentation",
       "worker": "http-server",
       "implementation": {"language": "python", "path": "operations.py", "symbol": "list_items_task"},
       "outcomes": [
         {"type": "ItemsListed", "resources": {}, "metadata": {}},
         {"type": "ItemsListInvalid", "resources": {}, "metadata": {}},
-        {"type": "dagcert.runtime.UnhandledException", "resources": {}, "metadata": {}}
+        {"type": "ItemsListFailed", "resources": {}, "metadata": {}}
       ],
+      "error_budget": null,
       "depends_on": [],
       "timings": {
         "http": {
@@ -33,14 +34,15 @@
     },
     {
       "id": "items.insert",
-      "role": "operation",
+      "role": "instrumentation",
       "worker": "http-server",
       "implementation": {"language": "python", "path": "operations.py", "symbol": "insert_item_task"},
       "outcomes": [
         {"type": "ItemStored", "resources": {}, "metadata": {}},
         {"type": "ItemInsertInvalid", "resources": {}, "metadata": {}},
-        {"type": "dagcert.runtime.UnhandledException", "resources": {}, "metadata": {}}
+        {"type": "ItemInsertFailed", "resources": {}, "metadata": {}}
       ],
+      "error_budget": null,
       "depends_on": [],
       "timings": {
         "http": {
@@ -54,13 +56,14 @@
     },
     {
       "id": "items.delete",
-      "role": "operation",
+      "role": "instrumentation",
       "worker": "http-server",
       "implementation": {"language": "python", "path": "operations.py", "symbol": "delete_item_task"},
       "outcomes": [
         {"type": "ItemDeleted", "resources": {}, "metadata": {}},
-        {"type": "dagcert.runtime.UnhandledException", "resources": {}, "metadata": {}}
+        {"type": "ItemDeleteFailed", "resources": {}, "metadata": {}}
       ],
+      "error_budget": null,
       "depends_on": [],
       "timings": {
         "http": {
@@ -78,9 +81,9 @@
       "worker": "browser",
       "implementation": {"language": "python", "path": "browser_observations.py", "symbol": "observe_feedback"},
       "outcomes": [
-        {"type": "BrowserFeedbackObserved", "resources": {}, "metadata": {}},
-        {"type": "dagcert.runtime.UnhandledException", "resources": {}, "metadata": {}}
+        {"type": "BrowserFeedbackObserved", "resources": {}, "metadata": {}}
       ],
+      "error_budget": null,
       "depends_on": [],
       "timings": {
         "visible": {
@@ -98,9 +101,9 @@
       "worker": "browser",
       "implementation": {"language": "python", "path": "browser_observations.py", "symbol": "observe_render"},
       "outcomes": [
-        {"type": "BrowserRenderObserved", "resources": {}, "metadata": {}},
-        {"type": "dagcert.runtime.UnhandledException", "resources": {}, "metadata": {}}
+        {"type": "BrowserRenderObserved", "resources": {}, "metadata": {}}
       ],
+      "error_budget": null,
       "depends_on": [],
       "timings": {
         "visible": {

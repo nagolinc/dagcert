@@ -35,7 +35,7 @@ def project(tmp_path: Path) -> dict[str, object]:
     )
     contract = root / "dag_contract.json"
     contract.write_text(json.dumps({
-        "schema": "dagcert-contract/v4",
+        "schema": "dagcert-contract/v5",
         "workers": [{"id": "worker", "concurrency": 2}],
         "resources": [{"id": "state", "capacity": 1, "initial": 0}],
         "tasks": [{
@@ -43,8 +43,8 @@ def project(tmp_path: Path) -> dict[str, object]:
             "implementation": {"language": "python", "path": "app.py", "symbol": "work"},
             "outcomes": [
                 {"type": "WorkCompleted", "resources": {"state": {"acquire": 1}}, "metadata": {}},
-                {"type": "dagcert.runtime.UnhandledException", "resources": {}, "metadata": {}},
             ],
+            "error_budget": None,
             "depends_on": [],
             "timings": {"normal": {
                 "metric": "duration", "upper_ms": 10, "minimum_samples": 3,

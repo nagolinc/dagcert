@@ -30,6 +30,26 @@
       "assumptions": [],
       "basis": "observed",
       "formula": null
+    },
+    {
+      "id": "vote-cast-error-budget",
+      "statement": "Conditional on the declared engineering bad-event budgets, one typed preview-to-commit vote path has a union-bound success budget of at least 98%; the retained observations are consistency checks and do not statistically establish the leaf budgets.",
+      "primitive_refs": [
+        "composition:vote-cast",
+        "error-budget:vote.preview",
+        "error-budget:vote.commit"
+      ],
+      "checker_refs": [],
+      "assumptions": [
+        "A preview invocation has bad-event probability at most 1% and a commit invocation has bad-event probability at most 1% for the represented workload; these are engineering assumptions, not statistically inferred guarantees."
+      ],
+      "basis": "chance",
+      "formula": {
+        "gte": [
+          {"composition_success_probability_lower": "composition:vote-cast"},
+          0.98
+        ]
+      }
     }
   ],
   "metadata": {

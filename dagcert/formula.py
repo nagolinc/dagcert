@@ -47,6 +47,15 @@ def evaluate_formula(
     state = _EvaluationState(contract, analysis)
     value = _boolean(formula, state, "formula")
     references = set(formula_references(formula))
+    probability_compositions = {
+        reference for reference in references
+        if reference.startswith("composition:")
+        and _formula_uses_probability_composition(formula, reference)
+    }
+    for composition_ref in probability_compositions:
+        composition = contract.composition_by_id.get(composition_ref.split(":", 1)[1])
+        if composition is not None:
+            references.update(f"error-budget:{step.task}" for step in composition.steps)
     composition_refs = {
         reference for reference in references if reference.startswith("composition:")
     }
@@ -67,6 +76,8 @@ def formula_references(formula: Mapping[str, Any]) -> tuple[str, ...]:
                 if operator in {
                     "composition_upper_ms", "timing_upper_ms", "timing_lower_ms",
                     "worker_concurrency", "resource_capacity", "resource_initial",
+                    "composition_failure_probability_upper",
+                    "composition_success_probability_lower",
                 } and isinstance(operand, str):
                     references.add(operand)
                 elif operator in {"task_guaranteed_produce", "task_guaranteed_consume"}:
@@ -86,6 +97,123 @@ def formula_references(formula: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(sorted(references))
 
 
+def formula_uses_error_budgets(formula: Mapping[str, Any]) -> bool:
+    """Whether a formula invokes the kernel's finite-scenario union-bound operators."""
+    if any(
+        operator in {
+            "composition_failure_probability_upper",
+            "composition_success_probability_lower",
+        }
+        for operator in formula
+    ):
+        return True
+    return any(
+        formula_uses_error_budgets(item)
+        for value in formula.values()
+        for item in (
+            list(value) if isinstance(value, list)
+            else [value] if isinstance(value, Mapping)
+            else []
+        )
+        if isinstance(item, Mapping)
+    )
+
+
+def validate_claim_formula(formula: Mapping[str, Any], *, basis: str) -> None:
+    """Reject vacuous claim shapes while keeping the kernel algebra deliberately small.
+
+    Formula evaluation remains a reusable expression engine. Certificate claims use a stricter
+    proof surface: deterministic claims are conjunctions of non-vacuous bound comparisons, and a
+    chance claim is one direct comparison against one finite composition's union-bound result.
+    This prevents a cited proof from being hidden in an always-true ``or`` branch.
+    """
+
+    if basis == "chance":
+        _validate_chance_claim_formula(formula)
+        return
+    if basis == "derived":
+        _validate_derived_claim_formula(formula, "formula")
+        return
+    raise FormulaError(f"unsupported formula-bearing claim basis {basis!r}")
+
+
+def _validate_chance_claim_formula(formula: Mapping[str, Any]) -> None:
+    row = _single_operator(formula, "formula")
+    operator, operand = next(iter(row.items()))
+    expected_probability_operator = {
+        "gte": "composition_success_probability_lower",
+        "lte": "composition_failure_probability_upper",
+    }.get(operator)
+    if expected_probability_operator is None:
+        raise FormulaError(
+            "chance formula must directly compare a composition success lower bound with gte "
+            "or a composition failure upper bound with lte"
+        )
+    left, right = _pair(operand, f"formula.{operator}")
+    probability = _single_operator(left, f"formula.{operator}[0]")
+    if set(probability) != {expected_probability_operator}:
+        raise FormulaError(
+            f"chance formula {operator} left operand must be exactly "
+            f"{expected_probability_operator}"
+        )
+    _reference(
+        probability[expected_probability_operator],
+        "composition",
+        f"formula.{operator}[0].{expected_probability_operator}",
+    )
+    if isinstance(right, bool) or not isinstance(right, (int, float)):
+        raise FormulaError("chance formula threshold must be a literal probability")
+    threshold = float(right)
+    if not isfinite(threshold) or not 0.0 <= threshold <= 1.0:
+        raise FormulaError("chance formula threshold must be finite and between 0 and 1")
+
+
+def _validate_derived_claim_formula(formula: Mapping[str, Any], label: str) -> None:
+    row = _single_operator(formula, label)
+    operator, operand = next(iter(row.items()))
+    if operator == "and":
+        for index, item in enumerate(_items(operand, f"{label}.and", minimum=2)):
+            if not isinstance(item, Mapping):
+                raise FormulaError(f"{label}.and[{index}] must be a formula object")
+            _validate_derived_claim_formula(item, f"{label}.and[{index}]")
+        return
+    if operator not in {"lt", "lte", "gt", "gte", "eq"}:
+        raise FormulaError(
+            "derived claim formulas may contain only bound comparisons or their conjunction; "
+            f"{operator!r} can make a proof vacuous"
+        )
+    left, right = _pair(operand, f"{label}.{operator}")
+    if left == right:
+        raise FormulaError(f"{label}.{operator} compares an expression with itself")
+    references = formula_references(row)
+    if not references:
+        raise FormulaError(f"{label}.{operator} must depend on a kernel DAG primitive")
+
+
+def _formula_uses_probability_composition(
+    formula: Mapping[str, Any], composition_ref: str,
+) -> bool:
+    for operator, operand in formula.items():
+        if (
+            operator in {
+                "composition_failure_probability_upper",
+                "composition_success_probability_lower",
+            }
+            and operand == composition_ref
+        ):
+            return True
+        children = (
+            value for value in (operand if isinstance(operand, list) else [operand])
+            if isinstance(value, Mapping)
+        )
+        if any(
+            _formula_uses_probability_composition(child, composition_ref)
+            for child in children
+        ):
+            return True
+    return False
+
+
 def _validate_dag_surface(references: set[str], contract: Contract) -> None:
     timing_tasks = {
         reference.split(":", 1)[1].split("/", 1)[0]
@@ -95,7 +223,7 @@ def _validate_dag_surface(references: set[str], contract: Contract) -> None:
         reference for reference in references
         if reference.startswith("worker:") or reference.startswith("resource:")
     }
-    if contract.schema == "dagcert-contract/v4":
+    if contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5"}:
         resource_ids = {
             reference.split(":", 1)[1]
             for reference in references if reference.startswith("resource:")
@@ -221,6 +349,17 @@ def _number(value: Any, state: _EvaluationState, label: str) -> float:
                 )
             total += timing_result.certified_upper_ms * step.count
         return total
+    if operator in {
+        "composition_failure_probability_upper",
+        "composition_success_probability_lower",
+    }:
+        reference = _reference(operand, "composition", f"{label}.{operator}")
+        failure_upper = _composition_failure_probability_upper(reference, state)
+        return (
+            failure_upper
+            if operator == "composition_failure_probability_upper"
+            else max(0.0, 1.0 - failure_upper)
+        )
     if operator in {"timing_upper_ms", "timing_lower_ms"}:
         reference = _reference(operand, "timing", f"{label}.{operator}")
         timing = next(
@@ -257,6 +396,50 @@ def _number(value: Any, state: _EvaluationState, label: str) -> float:
         kind = "produce" if operator.endswith("produce") else "consume"
         return task.guaranteed_effect(resource_id, kind)
     raise FormulaError(f"{label} uses unsupported numeric operator {operator!r}")
+
+
+def _composition_failure_probability_upper(
+    composition_id: str, state: _EvaluationState,
+) -> float:
+    if state.contract.schema != "dagcert-contract/v5":
+        raise FormulaError("error-budget formulas require dagcert-contract/v5")
+    composition = state.contract.composition_by_id.get(composition_id)
+    if composition is None:
+        raise FormulaError(f"formula cites unknown composition {composition_id!r}")
+    total = 0.0
+    for step in composition.steps:
+        task = state.contract.task_by_id[step.task]
+        budget = task.error_budget
+        if budget is None:
+            raise FormulaError(
+                f"composition {composition_id} task {task.id} has no error budget"
+            )
+        if step.timing != budget.evidence_case:
+            raise FormulaError(
+                f"composition {composition_id} step {task.id}/{step.timing} does not use "
+                f"its error-budget evidence case {budget.evidence_case}"
+            )
+        if step.outcome_type not in budget.good_outcomes:
+            raise FormulaError(
+                f"composition {composition_id} selects {task.id}/{step.outcome_type}, "
+                "which its error budget does not classify as good"
+            )
+        if set(budget.good_outcomes) != {step.outcome_type}:
+            raise FormulaError(
+                f"composition {composition_id} requires exactly {task.id}/{step.outcome_type}, "
+                f"but its error budget treats {list(budget.good_outcomes)} as good; the budget "
+                "therefore does not bound failure of this typed path"
+            )
+        result = next(
+            (item for item in state.analysis.error_budgets if item.task_id == task.id),
+            None,
+        )
+        if result is None or not result.passed:
+            raise FormulaError(
+                f"composition {composition_id} lacks a passing error-budget analysis for {task.id}"
+            )
+        total += step.count * budget.bad_event_probability_upper
+    return min(1.0, total)
 
 
 def _single_operator(value: Any, label: str) -> Mapping[str, Any]:

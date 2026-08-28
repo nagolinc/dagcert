@@ -8,6 +8,7 @@ from pathlib import Path
 from shutil import copytree, rmtree
 import json
 import sys
+from typing import cast
 
 from . import __version__
 from .analysis import analyze_contract
@@ -20,7 +21,7 @@ from .source_types import check_python_sources
 
 
 CONTRACT_TEMPLATE = """{
-  "schema": "dagcert-contract/v4",
+  "schema": "dagcert-contract/v5",
   "workers": [
     {"id": "app", "concurrency": 1}
   ],
@@ -34,9 +35,9 @@ CONTRACT_TEMPLATE = """{
       "worker": "app",
       "implementation": {"language": "python", "path": "app.py", "symbol": "replace_me"},
       "outcomes": [
-        {"type": "ReplaceMeCompleted", "resources": {"replace_me": {"acquire": 1}}, "metadata": {}},
-        {"type": "dagcert.runtime.UnhandledException", "resources": {}, "metadata": {}}
+        {"type": "ReplaceMeCompleted", "resources": {"replace_me": {"acquire": 1}}, "metadata": {}}
       ],
+      "error_budget": null,
       "depends_on": [],
       "timings": {
         "replace_me": {"metric": "duration", "upper_ms": 1000, "minimum_samples": 10, "policy": "max", "safety_factor": 1.30}
@@ -163,15 +164,28 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "lint":
             contract = load_contract(args.contract)
             requirements = load_requirements(args.requirements)
-            if contract.schema != "dagcert-contract/v4":
-                raise ContractError("new certificate issuance requires dagcert-contract/v4")
+            if contract.schema != "dagcert-contract/v5":
+                raise ContractError("new certificate issuance requires dagcert-contract/v5")
             if requirements.schema != "dagcert-english-requirements/v2":
                 raise RequirementsError(
                     "new certificate issuance requires dagcert-english-requirements/v2"
                 )
-            source_typing = check_python_sources(
-                Path(args.contract).resolve().parent,
+            lint_root = Path(args.contract).resolve().parent
+            lint_fingerprint = source_fingerprint(
+                lint_root,
+                exclude=[
+                    Path(args.contract).resolve().relative_to(lint_root).as_posix(),
+                    Path(args.requirements).resolve().relative_to(lint_root).as_posix(),
+                ],
+            )
+            source_verification = check_python_sources(
+                lint_root,
                 (task.source_signature for task in contract.tasks if task.source_signature is not None),
+                source_fingerprint=lint_fingerprint,
+                proof_signatures=(
+                    task.source_signature for task in contract.tasks
+                    if task.role == "operation" and task.source_signature is not None
+                ),
             )
             translation_audit = audit_translation(requirements, contract)
             if not translation_audit.passed:
@@ -179,10 +193,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"valid: {len(contract.workers)} workers, {len(contract.tasks)} tasks, {len(contract.resources)} resources, {sum(len(item.timings) for item in contract.tasks)} timings")
             print(f"human-readable requirements: {len(requirements.claims)} claims")
             print("English-to-formal coverage audit: passed")
-            print(
-                f"source typing: {source_typing['checker']} {source_typing['version']} "
-                f"{source_typing['mode']} passed"
+            exception_result = cast(
+                dict[str, object], source_verification["exception_verifier"],
             )
+            if exception_result.get("result") == "not-applicable":
+                print("source verification: strict mypy passed; Nagini not applicable (instrumentation-only contract)")
+            else:
+                print(
+                    "source verification: strict mypy and "
+                    f"{exception_result['checker']} {exception_result['version']} passed"
+                )
             return 0
         if args.command == "fingerprint":
             print(source_fingerprint(args.source_root, exclude=args.exclude))

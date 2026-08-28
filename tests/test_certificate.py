@@ -88,18 +88,23 @@ def test_certificate_embeds_and_digest_binds_plain_english_requirements(project)
     assert document["translation_audit"]["passed"] is True
     assert document["translation_audit"]["covered_tasks"] == ["task:work"]
     assert document["translation_audit"]["covered_timings"] == ["timing:work/normal"]
-    assert document["schema"] == "dagcert-certificate/v7"
-    assert document["type_enforcement"]["runtime_guard"] == "recursive-input-outcome-validation/v1"
+    assert document["schema"] == "dagcert-certificate/v9"
+    assert document["type_enforcement"]["operation_marker"] == "type-preserving/v1"
+    assert document["type_enforcement"]["mypy_import_surface"] == "sealed-type-preserving-dagcert-stub/v1"
+    assert document["type_enforcement"]["exception_verification"] == "nagini-viper-total-no-axioms/v2"
+    assert document["type_enforcement"]["chance_composition"] == "finite-union-bound-exact-path/v2"
     assert set(document["type_enforcement"]["kernel_manifest"]) >= {
         "analysis.py", "certificate.py", "contract.py", "runtime.py", "source_types.py",
     }
     assert len(document["type_enforcement"]["kernel_sha256"]) == 64
-    assert document["source_typing"]["checker"] == "mypy"
-    assert document["source_typing"]["mode"] == "strict"
-    assert document["source_typing"]["signatures"][0]["input_type"] == "WorkInput"
-    assert document["source_typing"]["signatures"][0]["outcome_types"] == [
-        "WorkCompleted", "dagcert.runtime.UnhandledException",
-    ]
+    verification = document["source_verification"]
+    assert verification["type_checker"]["checker"] == "mypy"
+    assert verification["type_checker"]["mode"] == "strict"
+    assert verification["type_checker"]["dagcert_import_surface"] == "sealed-type-preserving-stub"
+    assert verification["exception_verifier"]["checker"] == "nagini"
+    assert verification["exception_verifier"]["files"][0]["result"] == "proved"
+    assert verification["signatures"][0]["input_type"] == "WorkInput"
+    assert verification["signatures"][0]["outcome_types"] == ["WorkCompleted"]
     assert document["claim_analysis"] == [{
         "claim_id": "work-completes",
         "basis": "observed",
@@ -129,7 +134,7 @@ def test_certificate_binds_the_type_enforcement_kernel(project):
         requirements_path=project["requirements"], source_root=root,
     )
     raw = json.loads(certificate.read_text(encoding="utf-8"))
-    raw["type_enforcement"]["runtime_guard"] = "weaker-guard/v0"
+    raw["type_enforcement"]["operation_marker"] = "weaker-marker/v0"
     raw.pop("certificate_sha256")
     raw["certificate_sha256"] = sha256(canonical_json(raw)).hexdigest()
     certificate.write_bytes(canonical_json(raw) + b"\n")

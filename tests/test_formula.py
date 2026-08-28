@@ -1,10 +1,14 @@
 from pathlib import Path
+from dataclasses import replace
 import json
 
 import pytest
 
-from dagcert import ContractError, TimingSample, analyze_contract, load_contract
-from dagcert.formula import FormulaError, evaluate_formula
+from dagcert import (
+    ContractError, EnglishClaim, EnglishRequirements, TimingSample, analyze_contract,
+    audit_translation, load_contract, load_evidence,
+)
+from dagcert.formula import FormulaError, evaluate_formula, validate_claim_formula
 
 
 def _contract(tmp_path: Path, *, composition_uses_observer: bool = False):
@@ -131,3 +135,155 @@ def test_failed_attempt_makes_leaf_analysis_fail(tmp_path):
 
     assert not analysis.passed
     assert any(item.code == "failed-task-attempt" for item in analysis.findings)
+
+
+def test_finite_composition_uses_union_bound_without_independence():
+    root = Path(__file__).parents[1] / "examples" / "certified_vote"
+    contract = load_contract(root / "dag_contract.json", source_root=root)
+    samples = load_evidence(root / "artifacts" / "timings.jsonl")
+    analysis = analyze_contract(
+        contract, samples, source_fingerprint=samples[0].source_fingerprint,
+    )
+
+    evaluation = evaluate_formula({
+        "eq": [
+            {"composition_failure_probability_upper": "composition:vote-cast"},
+            0.02,
+        ]
+    }, contract, analysis)
+
+    assert evaluation.passed
+    assert evaluation.primitive_refs == (
+        "composition:vote-cast",
+        "error-budget:vote.commit",
+        "error-budget:vote.preview",
+    )
+
+
+def test_chance_claim_cannot_hide_a_failed_probability_bound_in_true_or_branch():
+    with pytest.raises(FormulaError, match="must directly compare"):
+        validate_claim_formula({
+            "or": [
+                {
+                    "gte": [
+                        {"composition_success_probability_lower": "composition:vote-cast"},
+                        0.999,
+                    ]
+                },
+                {"eq": [1, 1]},
+            ]
+        }, basis="chance")
+
+
+@pytest.mark.parametrize("threshold", [-0.01, 1.01, "0.98"])
+def test_chance_claim_requires_a_literal_probability_threshold(threshold):
+    with pytest.raises(FormulaError, match="literal probability|between 0 and 1"):
+        validate_claim_formula({
+            "gte": [
+                {"composition_success_probability_lower": "composition:vote-cast"},
+                threshold,
+            ]
+        }, basis="chance")
+
+
+def test_derived_claim_cannot_use_vacuous_boolean_logic_or_self_comparison():
+    with pytest.raises(FormulaError, match="can make a proof vacuous"):
+        validate_claim_formula({
+            "or": [
+                {"lte": [{"composition_upper_ms": "composition:pipeline"}, 30]},
+                {"eq": [1, 1]},
+            ]
+        }, basis="derived")
+    with pytest.raises(FormulaError, match="compares an expression with itself"):
+        validate_claim_formula({
+            "eq": [
+                {"composition_upper_ms": "composition:pipeline"},
+                {"composition_upper_ms": "composition:pipeline"},
+            ]
+        }, basis="derived")
+
+
+def test_error_budget_must_bound_the_exact_typed_outcome_selected_by_path():
+    root = Path(__file__).parents[1] / "examples" / "certified_vote"
+    contract = load_contract(root / "dag_contract.json", source_root=root)
+    preview = contract.task_by_id["vote.preview"]
+    assert preview.error_budget is not None
+    widened_preview = replace(
+        preview,
+        error_budget=replace(
+            preview.error_budget,
+            good_outcomes=("PreviewTotal", "PreviewRejected"),
+        ),
+    )
+    widened_contract = replace(
+        contract,
+        tasks=tuple(
+            widened_preview if task.id == preview.id else task
+            for task in contract.tasks
+        ),
+    )
+    samples = load_evidence(root / "artifacts" / "timings.jsonl")
+    analysis = analyze_contract(
+        widened_contract, samples, source_fingerprint=samples[0].source_fingerprint,
+    )
+
+    with pytest.raises(FormulaError, match="does not bound failure of this typed path"):
+        evaluate_formula({
+            "gte": [
+                {"composition_success_probability_lower": "composition:vote-cast"},
+                0.98,
+            ]
+        }, widened_contract, analysis)
+
+
+def test_error_budget_may_classify_every_real_outcome_as_good(tmp_path):
+    root = Path(__file__).parents[1] / "examples" / "certified_vote"
+    raw = json.loads((root / "dag_contract.json").read_text(encoding="utf-8"))
+    preview = next(task for task in raw["tasks"] if task["id"] == "vote.preview")
+    preview["error_budget"]["good_outcomes"] = [
+        outcome["type"] for outcome in preview["outcomes"]
+    ]
+    path = tmp_path / "all-outcomes-good.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    contract = load_contract(path, source_root=root)
+    loaded_preview = contract.task_by_id["vote.preview"]
+    assert loaded_preview.error_budget is not None
+    assert set(loaded_preview.error_budget.good_outcomes) == {
+        "PreviewTotal", "PreviewRejected",
+    }
+
+
+def test_derived_claim_extra_prose_references_do_not_fake_formal_coverage(tmp_path):
+    contract = _contract(tmp_path)
+    requirements = EnglishRequirements(
+        schema="dagcert-english-requirements/v2",
+        claims=(EnglishClaim(
+            id="pipeline-bound",
+            statement="The real two-stage pipeline has a finite composed upper bound.",
+            primitive_refs=(
+                "composition:pipeline",
+                "task:pipeline.observe",
+                "timing:pipeline.observe/aggregate",
+            ),
+            basis="derived",
+            formula={
+                "lte": [
+                    {"composition_upper_ms": "composition:pipeline"},
+                    30,
+                ]
+            },
+        ),),
+    )
+
+    audit = audit_translation(requirements, contract)
+
+    assert not audit.passed
+    assert any(
+        "task:pipeline.observe" in finding and "lack an English claim" in finding
+        for finding in audit.findings
+    )
+    assert any(
+        "timing:pipeline.observe/aggregate" in finding and "lack an English claim" in finding
+        for finding in audit.findings
+    )

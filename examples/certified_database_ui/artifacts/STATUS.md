@@ -1,13 +1,14 @@
 # Certification status
 
-The current source-typed v4 model was collected once after its implementation and documentation
-changed. That run passed the unchanged bounds and produced verified v7 certificate
-`202355d78fc6130d9da508140d656c26570c221c44c3a0e654d9a25fe3a0ac0e`, bound to source fingerprint
-`ab52fec94cb41f24c6447a09a5d23fdef8a1fda9bf40c2f45b4b5eec637c8cfe`.
+The current v5 source-bound observational model was collected once after its implementation and
+documentation changed. That run passed the unchanged bounds and produced a verified certificate
+`2be5f21145eb92a61a983490447abc8a0a7a0728fab8485cb505160792309d21`, bound to source fingerprint
+`c385804fa1402c6f5382b6334b77261b6d0844c934b0c8d5c9e62d7225e3e3f5`.
 
-Its production SQLite operations are compiler-checked source bindings. Browser timings are typed
-instrumentation and the browser/HTTP/SQLite promise remains observed through the real projection
-checkers; it is not presented as a Python-derived JavaScript DAG.
+Its production SQLite boundaries are strict-mypy-checked source bindings. Every task is explicitly
+observational instrumentation, so Nagini is sealed as not applicable and the browser/HTTP/SQLite
+promise remains observed through the real projection checkers; it is not presented as a proved
+Python or JavaScript DAG.
 
 The preceding rollback-journal run remains part of the engineering record: `items.insert/http`
 observed 39.862 ms and certified to 51.821 ms under the unchanged 1.3 safety factor, outside the

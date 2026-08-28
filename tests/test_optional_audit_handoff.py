@@ -86,9 +86,18 @@ def test_each_claim_gets_a_separate_sealed_handoff_and_response(project):
         assert "synthetic observer, monitor, pipeline, batch, summary" in prompt
         assert "closed return union come from the bound source symbol" in prompt
         assert "typed adapter, wrapper, or certification-only function" in prompt
-        assert "failure or `UnhandledException` branch" in prompt
+        assert "success production to an explicit failure branch" in prompt
+        assert "digest-pinned Nagini/Viper `proved` result" in prompt
+        assert "operation-level Nagini `Requires`" in prompt
+        assert "claim-relevant logic outside" in prompt
+        assert "Distinguish may-reachability from must-reachability" in prompt
+        assert "union-bound calculation must not multiply" in prompt
+        assert "complete good-outcome set must equal" in prompt
+        assert "direct probability-bound comparison" in prompt
         assert "claim" in packet and "claims" not in packet
-        assert packet["schema"] == "dagcert-semantic-audit-packet/v3"
+        assert packet["schema"] == "dagcert-semantic-audit-packet/v4"
+        assert packet["source_verification"]["type_checker"]["mode"] == "strict"
+        assert packet["source_verification"]["exception_verifier"]["files"][0]["result"] == "proved"
         assert "def work(request: WorkInput) -> WorkCompleted" in packet["source_files"]["app.py"]["content"]
         assert packet["analysis"]["passed"] is True
         assert len(packet["timing_evidence"]) == 3

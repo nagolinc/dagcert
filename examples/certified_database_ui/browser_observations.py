@@ -1,31 +1,29 @@
 """Typed boundaries for browser-originated timing observations."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 from dagcert.runtime import operation
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class BrowserFeedbackInput:
     value_ms: float
     metadata: dict[str, object]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class BrowserFeedbackObserved:
     value_ms: float
     metadata: dict[str, object]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class BrowserRenderInput:
     value_ms: float
     metadata: dict[str, object]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class BrowserRenderObserved:
     value_ms: float
     metadata: dict[str, object]

@@ -11,16 +11,17 @@ import argparse
 import json
 import sqlite3
 
-from dagcert import UnhandledException
-
 from .operations import (
+    ItemDeleteFailed,
     ItemDeleteInput,
     ItemDeleted,
     ItemInsertInput,
     ItemInsertInvalid,
+    ItemInsertFailed,
     ItemStored,
     ItemsListInput,
     ItemsListInvalid,
+    ItemsListFailed,
     ItemsListed,
     delete_item_task,
     insert_item_task,
@@ -72,8 +73,8 @@ def list_items(
     result = list_items_task(ItemsListInput(Path(path), page, page_size, sort, direction))
     if isinstance(result, ItemsListInvalid):
         raise ValueError(result.reason)
-    if isinstance(result, UnhandledException):
-        raise RuntimeError(f"list operation failed: {result.exception_type}: {result.message}")
+    if isinstance(result, ItemsListFailed):
+        raise RuntimeError(f"list operation failed: {result.reason}")
     return {
         "items": [
             {"id": item.id, "title": item.title, "category": item.category}
@@ -89,15 +90,15 @@ def insert_item(path: str | Path, *, title: str, category: str) -> dict[str, Any
     result = insert_item_task(ItemInsertInput(Path(path), title, category))
     if isinstance(result, ItemInsertInvalid):
         raise ValueError(result.reason)
-    if isinstance(result, UnhandledException):
-        raise RuntimeError(f"insert operation failed: {result.exception_type}: {result.message}")
+    if isinstance(result, ItemInsertFailed):
+        raise RuntimeError(f"insert operation failed: {result.reason}")
     return {"id": result.id, "title": result.title, "category": result.category}
 
 
 def delete_item(path: str | Path, identifier: int) -> bool:
     result = delete_item_task(ItemDeleteInput(Path(path), identifier))
-    if isinstance(result, UnhandledException):
-        raise RuntimeError(f"delete operation failed: {result.exception_type}: {result.message}")
+    if isinstance(result, ItemDeleteFailed):
+        raise RuntimeError(f"delete operation failed: {result.reason}")
     return result.found
 
 

@@ -12,7 +12,7 @@ behavioral regression merely to make a claim pass.
 
 ## 2. Contract schema
 
-New issuance uses `dagcert-contract/v4`. The loader retains v2/v3 support for verification of
+New issuance uses `dagcert-contract/v5`. The loader retains v2-v4 support for verification of
 existing certificates. JSON is built in; YAML is available with PyYAML.
 
 ### Worker
@@ -42,6 +42,8 @@ resource kinds.
 - `depends_on`: typed edges naming an upstream task and one exact upstream outcome type; the graph
   must be acyclic and the outcome must equal the downstream source input type.
 - `outcomes`: the complete source return union, with a ResourceEffect mapping for every variant.
+- `error_budget`: null or one engineering bad-event budget over a canonical duration case and a
+  nonempty subset of source outcomes classified as good.
 - `timings`: nonempty timing-case mapping containing at least one `duration` metric.
 - `metadata`: optional opaque object.
 
@@ -58,29 +60,62 @@ consumer without adding a queue or framework primitive.
 The contract is not authoritative for task types. For Python, Dagcert parses the bound source
 callable, requires exactly one explicit source-defined input class and an inline finite union of
 explicit source-defined outcome classes, rejects `Any` throughout that boundary, runs strict mypy
-over the real implementation body itself, and seals both
-the extraction and compiler result. Python operations use `@dagcert.runtime.operation`; its runtime guard
-adds `dagcert.runtime.UnhandledException` to every outcome union. The contract must cover that
-kernel-owned variant and cannot add, omit, or rename a source outcome.
-The kernel-owned exception variant cannot be assigned resource effects. Code that recovers or
-releases capacity must catch the failure and return an explicit source-defined recovery outcome.
-The v4 Python provider currently rejects async callables because a synchronous decorator cannot
-type exceptions and cancellation raised while awaiting them.
+over the real implementation body itself, and seals both the extraction and compiler result. Python
+operations use the type-preserving `@dagcert.runtime.operation` marker. A digest-pinned
+Nagini/Viper container then verifies the complete bound source file and must prove that the
+operation has no undeclared exceptional exit. Expected failures must be explicit source-defined
+return variants; the contract cannot add, omit, or rename them. Missing or unsupported verifier
+operation fails closed. Async callables remain unsupported until cancellation and awaited
+exceptions can be proved by the approved verifier.
+
+The proof must establish totality over the complete declared input class. A task operation may not
+declare `Requires`, and a bound application module may not use Nagini `Assume` or `ContractOnly`.
+Those constructs are useful in general verification work, but here they could make a source-bound
+task proof vacuous or replace executable application code with a trusted specification.
 
 Decorator names are provenance-checked. `operation` must resolve from `dagcert` or
 `dagcert.runtime`, and `dataclass` must resolve from the standard-library `dataclasses` module;
-local rebindings and source-tree modules that shadow either trusted module are rejected. At runtime,
-the operation guard recursively validates the actual input and returned dataclass fields against
-the resolved source annotations. A malformed value becomes `UnhandledException`, so an `Any` value
-originating in an external dependency cannot silently cross a certified task edge.
+local rebindings and source-tree modules that shadow either trusted module are rejected. Strict
+mypy rejects `Any` across source-owned task boundaries. Call-site parsing, normalization, lookup,
+and other claim-relevant transformations must remain inside a verified operation; proving a leaf
+does not certify an exception-producing prefix in ordinary glue code.
+
+The v5 source provider is Python-specific. A Python `operation` requires strict mypy and Nagini.
+No JavaScript or TypeScript operation provider is approved in this release: `tsc --strict` is a
+useful static type check but is not an exception/totality proof. JavaScript/TypeScript behavior may
+be covered only by explicitly observational instrumentation and cannot participate in a derived
+composition.
 
 Resource effects remain formal transitions, but any unconditional derived amount is the minimum
 effect across the complete source outcome union. Thus a success outcome producing one queue item
-and a failure/exception outcome producing none has guaranteed production zero.
+and an explicit failure outcome producing none has guaranteed production zero.
+
+Structural reachability does not use that minimum. Dagcert computes `may_reachable_tasks` by
+following any real typed outcome/resource branch and `must_reachable_tasks` using only dependencies
+and effects common to every outcome. A task that is may-reachable but not must-reachable is reported
+as outcome-conditional, not structurally blocked and not unconditionally guaranteed.
+
+### Engineering error budget
+
+A v5 task may declare one `error_budget` with exactly:
+
+- `basis`: `engineering_assumption`;
+- `evidence_case`: one declared duration timing used as the canonical invocation stream;
+- `good_outcomes`: nonempty source-outcome subset; it may contain every declared outcome;
+- `bad_event_probability_upper`: finite value in `[0, 1)`; and
+- `minimum_observations`: positive integer.
+
+Every retained canonical observation whose actual outcome is outside `good_outcomes` is a bad
+event. Analysis requires the minimum observation count and refuses when the observed fraction is
+above the declared budget. This is deliberately a consistency gate, not a statistical inference:
+the budget remains an explicit engineering assumption printed in the certificate.
+Dagcert does not require a task to have a bad outcome and does not infer semantic badness from a
+type name. A total task normally uses `error_budget: null`; if a budget classifies every outcome as
+good, its complement is simply empty.
 
 ### Composition
 
-A v4 composition is a finite, typed outcome path over at least two `operation` tasks. Each step
+A v5 composition is a finite, typed outcome path over at least two `operation` tasks. Each step
 names an exact task duration case, source outcome, and positive integer execution count; adjacent
 steps must match an actual typed dependency edge. Instrumentation tasks are
 forbidden. Compositions have no directly measured timing: the kernel conservatively sums their
@@ -125,14 +160,17 @@ supporting documentation. It contains at least one claim. Each claim has:
 - `primitive_refs` naming the workers, tasks, resources, and timings that support it;
 - `checker_refs` naming any application checkers required to establish it;
 - explicit `assumptions`, including workload or environment limits.
-- `basis`: `observed` or `derived`;
-- `formula`: null for observed claims and a fixed-algebra kernel formula for derived claims.
+- `basis`: `observed`, `derived`, or `chance`;
+- `formula`: null for observed claims and a fixed-algebra kernel formula for derived/chance claims.
 
 Every reference must resolve. Every checker named by a claim must be supplied, pass, and bind to
 the exact source, contract, evidence, and requirements document. Additional checker results may be
 attached as supplementary evidence; the optional independent semantic audit is one such result.
 Derived claims cannot name checkers as proof. Their formulas must use a declared composition or a
 connected multi-task worker/resource surface that Dagcert evaluates itself.
+Chance claims also cannot name checkers as proof. They must use a finite composition, cite every
+participating `error-budget:TASK`, state the engineering premise in English, and use the kernel's
+union-bound operators. A deterministic claim cannot silently use those probabilistic operators.
 
 The requirements document does not enlarge the four-primitive ontology. It is the certificate's
 mandatory human-readable promise and traceability map. Issuance embeds its complete normalized
@@ -155,7 +193,8 @@ It consumes the same mandatory requirements file and cannot substitute different
 
 The claim algebra is deliberately closed and small. Numeric expressions support finite literals,
 certified timing upper/lower bounds, worker concurrency, resource capacity/initial state,
-minimum all-outcome task production/consumption, composition upper bounds, addition,
+minimum all-outcome task production/consumption, composition upper bounds,
+finite-composition failure-probability upper bounds and success-probability lower bounds, addition,
 multiplication, division, and maximum. Boolean expressions
 support comparison, conjunction, disjunction, negation, and implication. Unknown operators fail.
 
@@ -198,7 +237,7 @@ Timing evidence is JSON Lines. Each record contains:
 - observed acquired, consumed, and produced resource amounts for declared task effects;
 - optional resource levels and opaque metadata.
 
-`value_ms` may measure duration, interval, wait, or age according to its declared timing. V4 records
+`value_ms` may measure duration, interval, wait, or age according to its declared timing. V5 records
 with the correct task, case, worker, source, and source-declared outcome count. Invalid records still
 produce findings. Assumed timings require no fabricated samples and are copied into the analysis as
 conditions.
@@ -209,8 +248,9 @@ concurrency a positive integer, and every numeric value finite and nonnegative.
 
 Evidence cannot state or override source input/output types. For every duration sample, the runtime
 outcome must be in the extracted source union and its outcome-specific effects must match. Legacy
-type labels, undeclared outcomes, retained `UnhandledException`, undeclared/missing effects, and
-resource levels above capacity fail.
+type labels, undeclared outcomes, undeclared/missing effects, and resource levels above capacity
+fail. An unexpected-exception sentinel is undeclared evidence and always fails; error budgets can
+classify only explicit task outcomes.
 
 Evidence collection remains application-owned. Unit/integration tests, benchmarks, browser
 automation, production traces, and hardware probes differ too much for one collector to be honest
@@ -227,15 +267,23 @@ Issuance requires:
 5. every safety-adjusted timing range inside its declared bounds;
 6. every explicitly selected optional checker to pass and bind exactly.
 
-Analysis reports a derived structural-progress claim: every declared task has a feasible
-worker/resource path and finite completion evidence. The claim states its semantics: declared
-resource effects match runtime behavior, reachable producer task types may recur, acquisition is
-atomic, and scheduling is fair. A task is structurally blocked when its task dependencies cannot
-be reached or it consumes a resource with neither enough initial supply for a first execution nor
-a reachable producer. This catches unseeded resource cycles and consumers with no supply. It does
-not pretend to prove throughput, queue policy, or all runtime waits; those require timings and,
-where appropriate, an optional checker. Assumed timings make the result conditional and are printed
-verbatim.
+Analysis reports both may- and must-reachability. A task is structurally blocked only when it has no
+possible typed worker/resource path: its dependencies cannot be reached on any declared outcome or
+it consumes a resource with neither enough initial supply nor any reachable producer. A may-only
+task is reported as outcome-conditional. It is not blocked, but it cannot support an unconditional
+progress claim. This catches unseeded resource cycles without making the mandatory exception branch
+erase every success path. It does not prove throughput, queue policy, or all runtime waits.
+
+For a finite composition, the chance algebra requires each task budget's complete `good_outcomes`
+set to be exactly the one typed outcome selected by that step. Otherwise the budget would bound
+leaving a larger set rather than failure of the actual path. It computes
+`min(1, sum(step.count * task_bad_event_probability_upper))`. The success
+lower bound is one minus that result. This is the correlation-safe union bound: the kernel has no
+independence declaration and never multiplies success probabilities. Missing budgets, non-good
+selected outcomes, mismatched evidence cases, or failing consistency analysis make the formula
+unprovable. A chance claim is one direct `success_lower >= threshold` or
+`failure_upper <= threshold` comparison with a literal probability in `[0,1]`; boolean escape
+branches are forbidden. Infinite-horizon claims are unsupported.
 
 This is a claim about the declared DAG. Undeclared waits or work cannot be proven away; the model
 must first represent them as tasks, resources, or timings.
@@ -272,9 +320,9 @@ SHA-256 hashes it. It ignores common generated directories and `.dagcertignore` 
 selected checker artifacts inside the source root are automatically excluded to avoid
 self-reference.
 
-`dagcert-certificate/v7` records source identity, exclusions, contract/evidence/requirements
-digests, source signature extraction and strict compiler result, the exact Dagcert source/runtime
-type-enforcement kernel descriptor and source-file manifest hash, the complete normalized English
+`dagcert-certificate/v9` records source identity, exclusions, contract/evidence/requirements
+digests, source signature extraction, strict-mypy result, digest-pinned Nagini/Viper proof result
+and scope, the exact Dagcert source-verification kernel descriptor and source-file manifest hash, the complete normalized English
 requirements, the mandatory translation audit, serialized
 primitives and compositions, deterministic primitive and claim analysis, selected checker results
 and hashes, issue time, and its own

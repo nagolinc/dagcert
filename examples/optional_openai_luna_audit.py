@@ -30,6 +30,7 @@ from dagcert import (
     write_check_result,
 )
 from dagcert.certificate import canonical_json
+from dagcert.source_types import check_python_sources
 
 
 DEFAULT_MAX_AUDIT_PACKET_BYTES = 200_000
@@ -103,6 +104,7 @@ RESPONSE_SCHEMA: dict[str, Any] = {
 class AuditContext(CheckContext):
     source_manifest_entries: Mapping[str, str]
     source_files: Mapping[str, Mapping[str, str]]
+    source_verification: Mapping[str, Any]
     check_results: tuple[Mapping[str, Any], ...] = ()
 
 
@@ -132,7 +134,7 @@ def prepare_handoffs(
     for index, claim_value in enumerate(context.requirements.claims, 1):
         claim = claim_value.to_mapping(schema=context.requirements.schema)
         packet = {
-            "schema": "dagcert-semantic-audit-packet/v3",
+            "schema": "dagcert-semantic-audit-packet/v4",
             "claim_index": index,
             "claim": dict(claim),
             **shared,
@@ -209,6 +211,7 @@ def _shared_packet(context: CheckContext) -> dict[str, Any]:
         "requirements_sha256": context.requirements_sha256,
         "source_manifest": dict(context.source_manifest_entries),
         "source_files": dict(context.source_files),
+        "source_verification": dict(context.source_verification),
         "analysis": analyze_contract(
             context.contract,
             context.timings,
@@ -357,7 +360,7 @@ def _validate_audit_manifest(raw: Any, context: CheckContext) -> list[dict[str, 
 
 
 def _validate_packet_binding(packet: Any, context: CheckContext) -> None:
-    if not isinstance(packet, dict) or packet.get("schema") != "dagcert-semantic-audit-packet/v3":
+    if not isinstance(packet, dict) or packet.get("schema") != "dagcert-semantic-audit-packet/v4":
         raise ValueError("invalid per-claim audit packet")
     expected = {
         "source_fingerprint": context.source_fingerprint,
@@ -368,6 +371,10 @@ def _validate_packet_binding(packet: Any, context: CheckContext) -> None:
     for field, value in expected.items():
         if packet.get(field) != value:
             raise ValueError(f"audit packet has wrong {field}")
+    if not isinstance(context, AuditContext):
+        raise ValueError("audit acceptance requires build_context() source verification")
+    if packet.get("source_verification") != dict(context.source_verification):
+        raise ValueError("audit packet has wrong sealed source verification")
     if packet.get("english_requirements") != context.requirements.to_mapping():
         raise ValueError("audit packet does not contain the exact English requirements")
     index = packet.get("claim_index")
@@ -508,8 +515,18 @@ def build_context(
             raise ValueError(
                 f"audit input checker is bound to other English requirements: {result.checker}"
             )
+    contract = load_contract(contract_file, source_root=root)
+    source_verification = check_python_sources(
+        root,
+        (task.source_signature for task in contract.tasks if task.source_signature is not None),
+        source_fingerprint=fingerprint,
+        proof_signatures=(
+            task.source_signature for task in contract.tasks
+            if task.role == "operation" and task.source_signature is not None
+        ),
+    )
     return AuditContext(
-        contract=load_contract(contract_file),
+        contract=contract,
         timings=load_evidence(evidence_file),
         source_root=root,
         source_fingerprint=fingerprint,
@@ -519,6 +536,7 @@ def build_context(
         requirements_sha256=requirements_digest,
         source_manifest_entries=manifest,
         source_files=files,
+        source_verification=source_verification,
         check_results=tuple(result.to_mapping() for result in check_results),
     )
 

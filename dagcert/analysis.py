@@ -34,10 +34,27 @@ class TimingResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ErrorBudgetResult:
+    task_id: str
+    basis: str
+    evidence_case: str
+    good_outcomes: tuple[str, ...]
+    bad_event_probability_upper: float
+    minimum_observations: int
+    observations: int
+    bad_observations: int
+    observed_bad_event_rate: float | None
+    passed: bool
+
+
+@dataclass(frozen=True, slots=True)
 class StructuralProgress:
     passed: bool
     claim: str
     task_order: tuple[str, ...]
+    may_reachable_tasks: tuple[str, ...]
+    must_reachable_tasks: tuple[str, ...]
+    conditionally_reachable_tasks: tuple[str, ...]
     assumptions: tuple[str, ...]
 
 
@@ -48,6 +65,7 @@ class AnalysisReport:
     assumptions: tuple[str, ...]
     structural_progress: StructuralProgress
     timings: tuple[TimingResult, ...]
+    error_budgets: tuple[ErrorBudgetResult, ...]
     findings: tuple[Finding, ...]
 
     def to_mapping(self) -> dict[str, Any]:
@@ -58,9 +76,18 @@ class AnalysisReport:
             "structural_progress": {
                 **asdict(self.structural_progress),
                 "task_order": list(self.structural_progress.task_order),
+                "may_reachable_tasks": list(self.structural_progress.may_reachable_tasks),
+                "must_reachable_tasks": list(self.structural_progress.must_reachable_tasks),
+                "conditionally_reachable_tasks": list(
+                    self.structural_progress.conditionally_reachable_tasks
+                ),
                 "assumptions": list(self.structural_progress.assumptions),
             },
             "timings": [asdict(item) for item in self.timings],
+            "error_budgets": [
+                {**asdict(item), "good_outcomes": list(item.good_outcomes)}
+                for item in self.error_budgets
+            ],
             "findings": [asdict(item) for item in self.findings],
         }
 
@@ -71,6 +98,7 @@ def analyze_contract(
     evidence = tuple(samples)
     findings: list[Finding] = []
     timing_results: list[TimingResult] = []
+    error_budget_results: list[ErrorBudgetResult] = []
     assumptions: list[str] = []
     tasks = contract.task_by_id
 
@@ -98,7 +126,7 @@ def analyze_contract(
                 "retained timing evidence contains a failed task attempt",
             ))
         if timing is not None and timing.metric == "duration":
-            if contract.schema == "dagcert-contract/v4":
+            if contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5"}:
                 _check_typed_outcome_observation(task, sample, contract, findings)
             elif sample.succeeded:
                 _check_execution_observation(task, sample, contract, findings)
@@ -114,9 +142,9 @@ def analyze_contract(
             usable = [
                 sample for sample in evidence
                 if sample.task_id == task.id and sample.case == case
-                and (contract.schema == "dagcert-contract/v4" or sample.succeeded)
+                and (contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5"} or sample.succeeded)
                 and (
-                    contract.schema != "dagcert-contract/v4"
+                    contract.schema not in {"dagcert-contract/v4", "dagcert-contract/v5"}
                     or sample.outcome_type in task.outcome_by_type
                 )
                 and sample.worker_id == task.worker and sample.source_fingerprint == source_fingerprint
@@ -154,26 +182,87 @@ def analyze_contract(
                 requirement.lower_ms, requirement.upper_ms, passed,
             ))
 
-    blocked = _structurally_blocked_tasks(contract)
+    if contract.schema == "dagcert-contract/v5":
+        for task in contract.tasks:
+            budget = task.error_budget
+            if budget is None:
+                continue
+            subject = f"{task.id}/{budget.evidence_case}"
+            observations = [
+                sample for sample in evidence
+                if sample.task_id == task.id
+                and sample.case == budget.evidence_case
+                and sample.worker_id == task.worker
+                and sample.source_fingerprint == source_fingerprint
+                and sample.outcome_type in task.outcome_by_type
+            ]
+            bad = [
+                sample for sample in observations
+                if sample.outcome_type not in budget.good_outcomes
+            ]
+            observed_rate = len(bad) / len(observations) if observations else None
+            enough = len(observations) >= budget.minimum_observations
+            within = observed_rate is not None and observed_rate <= budget.bad_event_probability_upper
+            if not enough:
+                findings.append(Finding(
+                    "insufficient-error-budget-observations", subject,
+                    f"requires {budget.minimum_observations} retained observations, "
+                    f"observed {len(observations)}",
+                ))
+            if enough and not within:
+                findings.append(Finding(
+                    "error-budget-observed-rate-exceeded", subject,
+                    f"observed {len(bad)}/{len(observations)} bad outcomes "
+                    f"({observed_rate:.6f}), declared engineering budget is "
+                    f"{budget.bad_event_probability_upper:.6f}",
+                ))
+            error_budget_results.append(ErrorBudgetResult(
+                task.id,
+                budget.basis,
+                budget.evidence_case,
+                budget.good_outcomes,
+                budget.bad_event_probability_upper,
+                budget.minimum_observations,
+                len(observations),
+                len(bad),
+                observed_rate,
+                enough and within,
+            ))
+            assumptions.append(
+                f"error-budget:{task.id} assumes bad-event probability <= "
+                f"{budget.bad_event_probability_upper:g} per {budget.evidence_case} invocation; "
+                "retained observations are a consistency check, not statistical proof"
+            )
+
+    may_reachable = _reachable_tasks(contract, guaranteed=False)
+    must_reachable = _reachable_tasks(contract, guaranteed=True)
+    blocked = _structurally_blocked_tasks(contract, reachable=may_reachable)
     for task_id, reason in blocked.items():
         findings.append(Finding("structurally-blocked-task", task_id, reason))
 
     passed = not findings
     progress_assumptions = (
         "outcome-specific resource effects match runtime acquisition and flow",
-        "reachable producer tasks may recur; only effects common to every source outcome count as guaranteed supply",
+        "may-reachability follows any real typed outcome branch; it is not an unconditional progress guarantee",
+        "must-reachability uses only dependencies and resource effects common to every source outcome",
         "resource acquisition is atomic and scheduling is fair",
         *assumptions,
     )
     progress = StructuralProgress(
-        passed=passed,
-        claim="every declared task has a feasible worker/resource path and finite completion evidence",
+        passed=not blocked,
+        claim=(
+            "every declared task has at least one feasible typed worker/resource path; "
+            "tasks absent from must_reachable_tasks remain outcome-conditional"
+        ),
         task_order=contract.topological_tasks(),
+        may_reachable_tasks=tuple(sorted(may_reachable)),
+        must_reachable_tasks=tuple(sorted(must_reachable)),
+        conditionally_reachable_tasks=tuple(sorted(may_reachable - must_reachable)),
         assumptions=progress_assumptions,
     )
     return AnalysisReport(
         passed, bool(assumptions), tuple(assumptions), progress,
-        tuple(timing_results), tuple(findings),
+        tuple(timing_results), tuple(error_budget_results), tuple(findings),
     )
 
 
@@ -277,6 +366,13 @@ def _check_typed_outcome_observation(
             "v4 timing evidence must identify the actual runtime outcome variant",
         ))
         return
+    if sample.outcome_type == "dagcert.runtime.UnhandledException":
+        findings.append(Finding(
+            "unhandled-operation-exception", task.id,
+            "an exception escaped the source-typed operation boundary; unexpected exceptions "
+            "cannot be converted into an error-budget branch",
+        ))
+        return
     outcome = task.outcome_by_type.get(sample.outcome_type)
     if outcome is None:
         findings.append(Finding(
@@ -284,11 +380,6 @@ def _check_typed_outcome_observation(
             f"runtime produced {sample.outcome_type!r}, outside the source-declared return union",
         ))
         return
-    if sample.outcome_type == "dagcert.runtime.UnhandledException":
-        findings.append(Finding(
-            "unhandled-operation-exception", task.id,
-            "an exception escaped the source-typed operation boundary",
-        ))
     observed_by_kind = {
         "acquire": sample.resource_acquired,
         "consume": sample.resource_consumed,
@@ -332,13 +423,11 @@ def _check_typed_outcome_observation(
             ))
 
 
-def _structurally_blocked_tasks(contract: Contract) -> dict[str, str]:
-    """Find task types with no dependency/resource path to a first execution.
+def _reachable_tasks(contract: Contract, *, guaranteed: bool) -> set[str]:
+    """Return may- or must-reachable task executions.
 
-    Tasks are repeatable types. Once a producer task is reachable, it may recur and
-    fill any resource it produces up to that resource's declared capacity. This is
-    intentionally a structural reachability check, not a throughput or scheduling
-    proof; those use timings and optional checkers.
+    May reachability follows any source-declared outcome. Must reachability follows
+    only typed dependencies and resource production common to every outcome.
     """
     reachable: set[str] = set()
     producible: set[str] = set()
@@ -349,6 +438,12 @@ def _structurally_blocked_tasks(contract: Contract) -> dict[str, str]:
         for task_id, task in tuple(remaining.items()):
             if not set(task.depends_on).issubset(reachable):
                 continue
+            if guaranteed and task.typed_dependencies:
+                if any(
+                    len(contract.task_by_id[item.task].outcomes) != 1
+                    for item in task.typed_dependencies
+                ):
+                    continue
             unavailable = [
                 resource_id
                 for resource_id, effect in task.resources.items()
@@ -358,13 +453,40 @@ def _structurally_blocked_tasks(contract: Contract) -> dict[str, str]:
             if unavailable:
                 continue
             reachable.add(task_id)
-            producible.update(
-                resource_id
-                for resource_id in task.resources
-                if task.guaranteed_effect(resource_id, "produce") > 0
-            )
+            for resource_id in task.resources:
+                amount = (
+                    task.guaranteed_effect(resource_id, "produce")
+                    if guaranteed
+                    else task.possible_effect(resource_id, "produce")
+                )
+                if amount > 0:
+                    producible.add(resource_id)
             remaining.pop(task_id)
             changed = True
+    return reachable
+
+
+def _structurally_blocked_tasks(
+    contract: Contract, *, reachable: set[str] | None = None,
+) -> dict[str, str]:
+    """Find task types with no dependency/resource path to a first execution.
+
+    Tasks are repeatable types. Once a producer task is reachable, it may recur and
+    fill any resource it produces up to that resource's declared capacity. This is
+    intentionally a structural reachability check, not a throughput or scheduling
+    proof; those use timings and optional checkers.
+    """
+    if reachable is None:
+        reachable = _reachable_tasks(contract, guaranteed=False)
+    remaining = {
+        task.id: task for task in contract.tasks if task.id not in reachable
+    }
+    producible = {
+        resource_id
+        for task in contract.tasks if task.id in reachable
+        for resource_id in task.resources
+        if task.possible_effect(resource_id, "produce") > 0
+    }
 
     blocked: dict[str, str] = {}
     for task_id, task in remaining.items():

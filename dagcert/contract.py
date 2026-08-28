@@ -65,6 +65,17 @@ class TaskOutcome:
 
 
 @dataclass(frozen=True, slots=True)
+class TaskErrorBudget:
+    """Engineering bad-event budget over one canonical task timing stream."""
+
+    basis: str
+    evidence_case: str
+    good_outcomes: tuple[str, ...]
+    bad_event_probability_upper: float
+    minimum_observations: int
+
+
+@dataclass(frozen=True, slots=True)
 class TypedDependency:
     task: str
     outcome_type: str
@@ -85,6 +96,7 @@ class Task:
     outcomes: tuple[TaskOutcome, ...] = ()
     source_signature: SourceSignature | None = None
     typed_dependencies: tuple[TypedDependency, ...] = ()
+    error_budget: TaskErrorBudget | None = None
 
     @property
     def outcome_by_type(self) -> Mapping[str, TaskOutcome]:
@@ -96,6 +108,16 @@ class Task:
             effect = self.resources.get(resource_id, ResourceEffect())
             return float(getattr(effect, kind))
         return min(
+            float(getattr(outcome.resources.get(resource_id, ResourceEffect()), kind))
+            for outcome in self.outcomes
+        )
+
+    def possible_effect(self, resource_id: str, kind: str) -> float:
+        """Return the largest effect on any source-declared outcome branch."""
+        if not self.outcomes:
+            effect = self.resources.get(resource_id, ResourceEffect())
+            return float(getattr(effect, kind))
+        return max(
             float(getattr(outcome.resources.get(resource_id, ResourceEffect()), kind))
             for outcome in self.outcomes
         )
@@ -186,6 +208,13 @@ def _nonnegative(value: Any, label: str) -> float:
     return float(value)
 
 
+def _probability(value: Any, label: str) -> float:
+    result = _nonnegative(value, label)
+    if result >= 1:
+        raise ContractError(f"{label} must be less than 1")
+    return result
+
+
 def _identifier(value: Any, label: str) -> str:
     if not isinstance(value, str):
         raise ContractError(f"{label} must be a string")
@@ -212,9 +241,12 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
     contract_path = Path(path)
     raw = _load(contract_path)
     schema = raw.get("schema")
-    if schema not in {"dagcert-contract/v2", "dagcert-contract/v3", "dagcert-contract/v4"}:
-        raise ContractError("contract schema must be dagcert-contract/v2, v3, or v4")
-    if schema in {"dagcert-contract/v3", "dagcert-contract/v4"} and set(raw) != {
+    if schema not in {
+        "dagcert-contract/v2", "dagcert-contract/v3", "dagcert-contract/v4",
+        "dagcert-contract/v5",
+    }:
+        raise ContractError("contract schema must be dagcert-contract/v2, v3, v4, or v5")
+    if schema in {"dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5"} and set(raw) != {
         "schema", "workers", "resources", "tasks", "compositions", "metadata",
     }:
         raise ContractError(
@@ -255,7 +287,12 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
         v4_task_fields = {
             "id", "role", "worker", "implementation", "outcomes", "depends_on", "timings",
         }
-        allowed_task_fields = v4_task_fields if schema == "dagcert-contract/v4" else legacy_task_fields
+        v5_task_fields = v4_task_fields | {"error_budget"}
+        allowed_task_fields = (
+            v5_task_fields if schema == "dagcert-contract/v5"
+            else v4_task_fields if schema == "dagcert-contract/v4"
+            else legacy_task_fields
+        )
         unexpected_task_fields = set(row) - (allowed_task_fields | {"metadata"})
         if schema == "dagcert-contract/v3" and unexpected_task_fields:
             raise ContractError(
@@ -266,12 +303,17 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             raise ContractError(
                 f"v4 task fields mismatch: unexpected={sorted(unexpected_task_fields)}, missing={missing}"
             )
+        if schema == "dagcert-contract/v5" and (unexpected_task_fields or set(row) - {"metadata"} != v5_task_fields):
+            missing = sorted(v5_task_fields - set(row))
+            raise ContractError(
+                f"v5 task fields mismatch: unexpected={sorted(unexpected_task_fields)}, missing={missing}"
+            )
         task_id = _identifier(row.get("id"), "task.id")
         role = _identifier(
-            row.get("role") if schema in {"dagcert-contract/v3", "dagcert-contract/v4"} else row.get("role", "operation"),
+            row.get("role") if schema in {"dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5"} else row.get("role", "operation"),
             f"task {task_id}.role",
         )
-        if schema in {"dagcert-contract/v3", "dagcert-contract/v4"} and role not in {"operation", "instrumentation"}:
+        if schema in {"dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5"} and role not in {"operation", "instrumentation"}:
             raise ContractError(f"task {task_id}.role must be operation or instrumentation")
         timing_rows = _object(row.get("timings", {}), f"task {task_id}.timings")
         timings: dict[str, Timing] = {}
@@ -342,7 +384,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
         implementation: Implementation | None = None
         outcomes: tuple[TaskOutcome, ...] = ()
         source_signature: SourceSignature | None = None
-        if schema == "dagcert-contract/v4":
+        if schema in {"dagcert-contract/v4", "dagcert-contract/v5"}:
             binding = _object(row.get("implementation"), f"task {task_id}.implementation")
             if set(binding) != {"language", "path", "symbol"}:
                 raise ContractError(
@@ -360,6 +402,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             try:
                 source_signature = read_python_signature(
                     implementation_root, implementation.path, implementation.symbol,
+                    include_legacy_unhandled=schema == "dagcert-contract/v4",
                 )
             except SourceTypeError as exc:
                 raise ContractError(f"task {task_id} source type error: {exc}") from exc
@@ -384,16 +427,17 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
                     f"task {task_id} outcomes do not exactly match source return union: "
                     f"source={list(source_signature.outcome_types)}, contract={list(declared_types)}"
                 )
-            unhandled = next(
-                item for item in parsed_outcomes
-                if item.type == "dagcert.runtime.UnhandledException"
-            )
-            if unhandled.resources:
-                raise ContractError(
-                    f"task {task_id} cannot assign resource effects to the kernel-owned "
-                    "UnhandledException outcome; catch and return an explicit typed recovery "
-                    "outcome after performing cleanup"
+            if schema == "dagcert-contract/v4":
+                unhandled = next(
+                    item for item in parsed_outcomes
+                    if item.type == "dagcert.runtime.UnhandledException"
                 )
+                if unhandled.resources:
+                    raise ContractError(
+                        f"task {task_id} cannot assign resource effects to the legacy "
+                        "UnhandledException outcome; catch and return an explicit typed recovery "
+                        "outcome after performing cleanup"
+                    )
             outcomes = tuple(parsed_outcomes)
             input_type = source_signature.input_type
             output_type = " | ".join(source_signature.outcome_types)
@@ -410,9 +454,58 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             resource_use = parse_effects(row.get("resources", {}), f"task {task_id}.resources")
             input_type = _identifier(row.get("input_type"), f"task {task_id}.input_type")
             output_type = _identifier(row.get("output_type"), f"task {task_id}.output_type")
+        error_budget: TaskErrorBudget | None = None
+        if schema == "dagcert-contract/v5" and row.get("error_budget") is not None:
+            budget = _object(row.get("error_budget"), f"task {task_id}.error_budget")
+            required_budget_fields = {
+                "basis", "evidence_case", "good_outcomes",
+                "bad_event_probability_upper", "minimum_observations",
+            }
+            if set(budget) != required_budget_fields:
+                raise ContractError(
+                    f"task {task_id}.error_budget must contain exactly "
+                    f"{sorted(required_budget_fields)}"
+                )
+            basis = _identifier(budget.get("basis"), f"task {task_id}.error_budget.basis")
+            if basis != "engineering_assumption":
+                raise ContractError(
+                    f"task {task_id}.error_budget.basis must be engineering_assumption"
+                )
+            good_outcomes = tuple(
+                _identifier(item, f"task {task_id}.error_budget.good_outcomes")
+                for item in _array(
+                    budget.get("good_outcomes"),
+                    f"task {task_id}.error_budget.good_outcomes",
+                )
+            )
+            if not good_outcomes or len(good_outcomes) != len(set(good_outcomes)):
+                raise ContractError(
+                    f"task {task_id}.error_budget.good_outcomes must be nonempty and unique"
+                )
+            observation_count = _positive(
+                budget.get("minimum_observations"),
+                f"task {task_id}.error_budget.minimum_observations",
+            )
+            if not observation_count.is_integer():
+                raise ContractError(
+                    f"task {task_id}.error_budget.minimum_observations must be an integer"
+                )
+            error_budget = TaskErrorBudget(
+                basis,
+                _identifier(
+                    budget.get("evidence_case"),
+                    f"task {task_id}.error_budget.evidence_case",
+                ),
+                good_outcomes,
+                _probability(
+                    budget.get("bad_event_probability_upper"),
+                    f"task {task_id}.error_budget.bad_event_probability_upper",
+                ),
+                int(observation_count),
+            )
         typed_dependencies: tuple[TypedDependency, ...] = ()
         dependency_values = _array(row.get("depends_on", ()), f"task {task_id}.depends_on")
-        if schema == "dagcert-contract/v4":
+        if schema in {"dagcert-contract/v4", "dagcert-contract/v5"}:
             parsed_dependencies: list[TypedDependency] = []
             for dependency_value in dependency_values:
                 dependency = _object(dependency_value, f"task {task_id}.dependency")
@@ -450,6 +543,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             outcomes,
             source_signature,
             typed_dependencies,
+            error_budget,
         ))
 
     compositions: list[Composition] = []
@@ -463,11 +557,11 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             step = _object(step_value, f"composition {composition_id}.step")
             required_step_fields = (
                 {"task", "timing", "count", "outcome_type"}
-                if schema == "dagcert-contract/v4"
+                if schema in {"dagcert-contract/v4", "dagcert-contract/v5"}
                 else {"task", "timing", "count"}
             )
             if set(step) != required_step_fields:
-                suffix = ", and outcome_type" if schema == "dagcert-contract/v4" else ""
+                suffix = ", and outcome_type" if schema in {"dagcert-contract/v4", "dagcert-contract/v5"} else ""
                 raise ContractError(
                     "composition step must contain exactly task, timing, count" + suffix
                 )
@@ -481,7 +575,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
                 _identifier(
                     step.get("outcome_type"),
                     f"composition {composition_id}.step.outcome_type",
-                ) if schema == "dagcert-contract/v4" else None,
+                ) if schema in {"dagcert-contract/v4", "dagcert-contract/v5"} else None,
             ))
         task_refs = tuple(step.task for step in steps)
         if len(set(task_refs)) < 2:
@@ -531,7 +625,7 @@ def _validate(contract: Contract) -> None:
             raise ContractError(f"task {task.id} has unknown dependencies {sorted(missing_dependencies)}")
         if task.id in task.depends_on:
             raise ContractError(f"task {task.id} depends on itself")
-        if contract.schema == "dagcert-contract/v4":
+        if contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5"}:
             for dependency in task.typed_dependencies:
                 upstream = tasks.get(dependency.task)
                 if upstream is None:
@@ -545,6 +639,23 @@ def _validate(contract: Contract) -> None:
                     raise ContractError(
                         f"task {task.id} source input {task.input_type!r} does not accept typed edge "
                         f"{dependency.task}/{dependency.outcome_type}"
+                    )
+            if contract.schema == "dagcert-contract/v5" and task.error_budget is not None:
+                budget = task.error_budget
+                unknown_good = set(budget.good_outcomes) - set(task.outcome_by_type)
+                if unknown_good:
+                    raise ContractError(
+                        f"task {task.id}.error_budget cites unknown good outcomes "
+                        f"{sorted(unknown_good)}"
+                    )
+                if budget.evidence_case not in task.timings:
+                    raise ContractError(
+                        f"task {task.id}.error_budget cites unknown evidence case "
+                        f"{budget.evidence_case!r}"
+                    )
+                if task.timings[budget.evidence_case].metric != "duration":
+                    raise ContractError(
+                        f"task {task.id}.error_budget evidence case must be a duration timing"
                     )
         for resource_id, effect in task.resources.items():
             if resource_id not in resources:
@@ -582,7 +693,7 @@ def _validate(contract: Contract) -> None:
                 raise ContractError(
                     f"composition {composition.id} step {step.task}/{step.timing} must be a duration"
                 )
-            if contract.schema == "dagcert-contract/v4":
+            if contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5"}:
                 if step.outcome_type not in task.outcome_by_type:
                     raise ContractError(
                         f"composition {composition.id} step {step.task} cites outcome "
@@ -593,7 +704,7 @@ def _validate(contract: Contract) -> None:
                         f"composition {composition.id} repeats {step.task}, but outcome "
                         f"{step.outcome_type!r} is not the task input {task.input_type!r}"
                     )
-        if contract.schema == "dagcert-contract/v4":
+        if contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5"}:
             for upstream_step, downstream_step in zip(
                 composition.steps, composition.steps[1:], strict=False,
             ):

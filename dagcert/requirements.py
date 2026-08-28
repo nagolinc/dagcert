@@ -97,6 +97,10 @@ def audit_translation(
     )
     valid_primitives.update(f"composition:{item.id}" for item in contract.compositions)
     valid_primitives.update(
+        f"error-budget:{task.id}" for task in contract.tasks
+        if task.error_budget is not None
+    )
+    valid_primitives.update(
         f"guarantee:{task.id}/{kind}/{resource.id}"
         for task in contract.tasks
         for kind in ("produce", "consume")
@@ -115,7 +119,22 @@ def audit_translation(
     referenced_primitives = {
         reference for claim in requirements.claims for reference in claim.primitive_refs
     }
-    coverage_primitives = set(referenced_primitives)
+    coverage_primitives: set[str] = set()
+    if requirements.schema == "dagcert-english-requirements/v2":
+        from .formula import formula_references
+
+        for claim in requirements.claims:
+            if claim.basis in {"derived", "chance"} and claim.formula is not None:
+                try:
+                    coverage_primitives.update(formula_references(claim.formula))
+                except ValueError:
+                    # The formula-specific audit below reports the precise invalidity. Invalid
+                    # prose references must not nevertheless count as formal coverage.
+                    pass
+            else:
+                coverage_primitives.update(claim.primitive_refs)
+    else:
+        coverage_primitives.update(referenced_primitives)
     for composition in contract.compositions:
         if f"composition:{composition.id}" not in referenced_primitives:
             continue
@@ -146,21 +165,25 @@ def audit_translation(
             )
 
     if requirements.schema == "dagcert-english-requirements/v2":
-        from .formula import FormulaError, formula_references
+        from .formula import (
+            FormulaError, formula_references, formula_uses_error_budgets,
+            validate_claim_formula,
+        )
 
         for claim in requirements.claims:
-            if claim.basis == "derived":
+            if claim.basis in {"derived", "chance"}:
                 if claim.checker_refs:
                     findings.append(
-                        f"derived claim {claim.id} cannot delegate proof to arbitrary checkers"
+                        f"{claim.basis} claim {claim.id} cannot delegate proof to arbitrary checkers"
                     )
                 if claim.formula is None:
-                    findings.append(f"derived claim {claim.id} lacks a kernel formula")
+                    findings.append(f"{claim.basis} claim {claim.id} lacks a kernel formula")
                     continue
                 try:
+                    validate_claim_formula(claim.formula, basis=claim.basis)
                     formula_refs = set(formula_references(claim.formula))
                 except FormulaError as exc:
-                    findings.append(f"derived claim {claim.id} has invalid formula: {exc}")
+                    findings.append(f"{claim.basis} claim {claim.id} has invalid formula: {exc}")
                     continue
                 missing_formula_refs = formula_refs - set(claim.primitive_refs)
                 if missing_formula_refs:
@@ -168,6 +191,39 @@ def audit_translation(
                         f"derived claim {claim.id} formula references are not declared: "
                         f"{sorted(missing_formula_refs)}"
                     )
+                uses_budgets = formula_uses_error_budgets(claim.formula)
+                if claim.basis == "chance" and not uses_budgets:
+                    findings.append(
+                        f"chance claim {claim.id} must use a finite composition error-budget operator"
+                    )
+                if claim.basis == "derived" and uses_budgets:
+                    findings.append(
+                        f"derived claim {claim.id} uses probabilistic error budgets; mark it chance"
+                    )
+                if claim.basis == "chance":
+                    if not claim.assumptions:
+                        findings.append(
+                            f"chance claim {claim.id} must state its engineering assumptions"
+                        )
+                    composition_ids = {
+                        reference.split(":", 1)[1]
+                        for reference in formula_refs
+                        if reference.startswith("composition:")
+                    }
+                    budget_refs: set[str] = set()
+                    for composition_id in composition_ids:
+                        referenced_composition = contract.composition_by_id.get(composition_id)
+                        if referenced_composition is not None:
+                            budget_refs.update(
+                                f"error-budget:{step.task}"
+                                for step in referenced_composition.steps
+                            )
+                    missing_budgets = budget_refs - set(claim.primitive_refs)
+                    if missing_budgets:
+                        findings.append(
+                            f"chance claim {claim.id} omits error-budget references: "
+                            f"{sorted(missing_budgets)}"
+                        )
             elif claim.formula is not None:
                 findings.append(
                     f"observed claim {claim.id} must not contain a derived formula"
@@ -244,9 +300,9 @@ def load_requirements(path: str | Path) -> EnglishRequirements:
         formula: Mapping[str, Any] | None = None
         if schema == "dagcert-english-requirements/v2":
             basis = _text(value["basis"], f"English claim {identifier} basis")
-            if basis not in {"observed", "derived"}:
+            if basis not in {"observed", "derived", "chance"}:
                 raise RequirementsError(
-                    f"English claim {identifier} basis must be observed or derived"
+                    f"English claim {identifier} basis must be observed, derived, or chance"
                 )
             formula_value = value["formula"]
             if formula_value is not None and not isinstance(formula_value, Mapping):
@@ -254,9 +310,9 @@ def load_requirements(path: str | Path) -> EnglishRequirements:
                     f"English claim {identifier} formula must be an object or null"
                 )
             formula = dict(formula_value) if formula_value is not None else None
-            if basis == "derived" and formula is None:
+            if basis in {"derived", "chance"} and formula is None:
                 raise RequirementsError(
-                    f"derived English claim {identifier} must contain a formula"
+                    f"{basis} English claim {identifier} must contain a formula"
                 )
             if basis == "observed" and formula is not None:
                 raise RequirementsError(

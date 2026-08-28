@@ -3,10 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from dataclasses import dataclass
 import json
+import sys
 
 import pytest
+from mypy import api as mypy_api
 
-from dagcert import CertificateError, ContractError, TimingSample, UnhandledException, analyze_contract, issue_certificate, load_contract, load_evidence, operation
+from dagcert import CertificateError, ContractError, TimingSample, analyze_contract, issue_certificate, load_contract, load_evidence, operation
 
 
 @dataclass(frozen=True)
@@ -17,6 +19,21 @@ class RuntimeInput:
 @dataclass(frozen=True)
 class RuntimeOutcome:
     value: int
+
+
+def test_pytyped_public_api_is_visible_to_standard_strict_mypy(tmp_path: Path):
+    consumer = tmp_path / "consumer.py"
+    consumer.write_text(
+        "from dagcert import CheckContext, Contract, issue_certificate\n\n"
+        "def keep_types(context: CheckContext, contract: Contract) -> tuple[CheckContext, Contract]:\n"
+        "    return context, contract\n\n"
+        "ISSUER = issue_certificate\n",
+        encoding="utf-8",
+    )
+    stdout, stderr, status = mypy_api.run([
+        str(consumer), "--strict", "--no-incremental", "--python-executable", sys.executable,
+    ])
+    assert status == 0, "\n".join(item for item in (stdout, stderr) if item)
 
 
 def _contract(project: dict[str, object]) -> dict[str, object]:
@@ -60,7 +77,7 @@ def test_async_boundary_is_rejected_until_its_exception_effect_is_guarded(projec
         source.read_text(encoding="utf-8").replace("def work(", "async def work("),
         encoding="utf-8",
     )
-    with pytest.raises(ContractError, match="currently certifies only synchronous"):
+    with pytest.raises(ContractError, match="current Python provider certifies only synchronous"):
         load_contract(project["contract"], source_root=project["root"])
 
 
@@ -152,35 +169,113 @@ def test_certificate_runs_static_checker_over_real_function_body(project):
         )
 
 
-def test_runtime_boundary_turns_exception_into_kernel_owned_outcome():
+def test_certificate_refuses_a_mypy_clean_unexpected_exception(project):
+    source = Path(project["root"]) / "app.py"
+    source.write_text(
+        source.read_text(encoding="utf-8").replace(
+            "return WorkCompleted(request.value + 1)",
+            "return WorkCompleted(10 // request.value)",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(CertificateError, match="Nagini could not prove"):
+        issue_certificate(
+            project["contract"], project["evidence"],
+            Path(project["root"]) / "artifacts" / "certificate.json",
+            requirements_path=project["requirements"], source_root=project["root"],
+        )
+
+
+def test_operation_cannot_declare_an_exception_instead_of_an_outcome(project):
+    source = Path(project["root"]) / "app.py"
+    source.write_text(
+        source.read_text(encoding="utf-8").replace(
+            "from dagcert.runtime import operation",
+            "from dagcert.runtime import operation\n"
+            "from nagini_contracts.contracts import Exsures",
+        ).replace(
+            "def work(request: WorkInput) -> WorkCompleted:\n",
+            "def work(request: WorkInput) -> WorkCompleted:\n"
+            "    Exsures(ValueError, lambda error: True)\n",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ContractError, match="declares Exsures"):
+        load_contract(project["contract"], source_root=project["root"])
+
+
+@pytest.mark.parametrize(
+    ("contract_name", "statement", "message"),
+    [
+        ("Assume", "Assume(False)", "may not introduce trusted axioms"),
+        ("Requires", "Requires(False)", "must be total over its complete"),
+    ],
+)
+def test_operation_cannot_make_exception_proof_vacuous_with_nagini_contract(
+    project, contract_name: str, statement: str, message: str,
+):
+    source = Path(project["root"]) / "app.py"
+    source.write_text(
+        source.read_text(encoding="utf-8").replace(
+            "from dagcert.runtime import operation",
+            "from dagcert.runtime import operation\n"
+            f"from nagini_contracts.contracts import {contract_name}",
+        ).replace(
+            "def work(request: WorkInput) -> WorkCompleted:\n",
+            "def work(request: WorkInput) -> WorkCompleted:\n"
+            f"    {statement}\n",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ContractError, match=message):
+        load_contract(project["contract"], source_root=project["root"])
+
+
+def test_bound_module_cannot_hide_an_application_helper_behind_contract_only(project):
+    source = Path(project["root"]) / "app.py"
+    source.write_text(
+        source.read_text(encoding="utf-8").replace(
+            "from dagcert.runtime import operation",
+            "from dagcert.runtime import operation\n"
+            "from nagini_contracts.contracts import ContractOnly\n\n"
+            "@ContractOnly\n"
+            "def hidden(value: int) -> int:\n"
+            "    return value",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ContractError, match="must have a verified executable body"):
+        load_contract(project["contract"], source_root=project["root"])
+
+
+def test_operation_marker_preserves_the_declared_callable_and_exception_channel():
     @operation
     def fail(value: int) -> str:
         raise RuntimeError(f"bad {value}")
 
-    result = fail(3)
-    assert isinstance(result, UnhandledException)
-    assert result.exception_type == "RuntimeError"
+    with pytest.raises(RuntimeError, match="bad 3"):
+        fail(3)
 
 
-def test_runtime_boundary_also_closes_base_exception_exits():
+def test_operation_marker_does_not_hide_base_exception_exits():
     @operation
     def fail(value: int) -> str:
         raise KeyboardInterrupt(f"stop {value}")
 
-    result = fail(3)
-    assert isinstance(result, UnhandledException)
-    assert result.exception_type == "KeyboardInterrupt"
+    with pytest.raises(KeyboardInterrupt, match="stop 3"):
+        fail(3)
 
 
-def test_runtime_boundary_rejects_malformed_fields_inside_declared_variant():
+def test_runtime_marker_does_not_claim_to_replace_static_verification():
     @operation
     def malformed(request: RuntimeInput) -> RuntimeOutcome:
         return RuntimeOutcome(request.value)
 
     object.__setattr__(bad_input := RuntimeInput(1), "value", "wrong")
     bad_input_result = malformed(bad_input)
-    assert isinstance(bad_input_result, UnhandledException)
-    assert bad_input_result.exception_type == "OperationTypeViolation"
+    assert bad_input_result.value == "wrong"
 
     original = RuntimeOutcome
 
@@ -191,11 +286,10 @@ def test_runtime_boundary_rejects_malformed_fields_inside_declared_variant():
         return result
 
     bad_output_result = malformed_output(RuntimeInput(1))
-    assert isinstance(bad_output_result, UnhandledException)
-    assert bad_output_result.exception_type == "OperationTypeViolation"
+    assert bad_output_result.value == "wrong"
 
 
-def test_unhandled_exception_evidence_invalidates_analysis(project):
+def test_unexpected_exception_sentinel_is_always_fatal(project):
     samples = list(load_evidence(project["evidence"]))
     samples.append(TimingSample(
         task_id="work", case="normal", value_ms=1, worker_id="worker",
@@ -211,8 +305,19 @@ def test_unhandled_exception_evidence_invalidates_analysis(project):
 
 
 def test_guaranteed_effect_is_minimum_across_all_source_outcomes(project, tmp_path: Path):
+    source = Path(project["root"]) / "app.py"
+    source.write_text(
+        source.read_text(encoding="utf-8").replace(
+            "@operation\ndef work",
+            "@dataclass(frozen=True)\nclass WorkRejected:\n    reason: str\n\n@operation\ndef work",
+        ).replace("-> WorkCompleted:", "-> WorkCompleted | WorkRejected:"),
+        encoding="utf-8",
+    )
     raw = _contract(project)
     raw["tasks"][0]["outcomes"][0]["resources"] = {"state": {"produce": 1}}  # type: ignore[index]
+    raw["tasks"][0]["outcomes"].append({  # type: ignore[index]
+        "type": "WorkRejected", "resources": {}, "metadata": {},
+    })
     path = tmp_path / "outcome-effects.json"
     path.write_text(json.dumps(raw), encoding="utf-8")
     task = load_contract(path, source_root=project["root"]).tasks[0]
@@ -220,12 +325,16 @@ def test_guaranteed_effect_is_minimum_across_all_source_outcomes(project, tmp_pa
     assert task.guaranteed_effect("state", "produce") == 0
 
 
-def test_unhandled_exception_cannot_be_given_fabricated_resource_effects(project, tmp_path: Path):
+def test_v5_contract_cannot_reintroduce_a_catch_all_exception_outcome(project, tmp_path: Path):
     raw = _contract(project)
-    raw["tasks"][0]["outcomes"][1]["resources"] = {"state": {"produce": 1}}  # type: ignore[index]
+    raw["tasks"][0]["outcomes"].append({  # type: ignore[index]
+        "type": "dagcert.runtime.UnhandledException",
+        "resources": {"state": {"produce": 1}},
+        "metadata": {},
+    })
     path = tmp_path / "fake-unhandled-effects.json"
     path.write_text(json.dumps(raw), encoding="utf-8")
-    with pytest.raises(ContractError, match="cannot assign resource effects"):
+    with pytest.raises(ContractError, match="do not exactly match source return union"):
         load_contract(path, source_root=project["root"])
 
 

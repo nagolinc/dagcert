@@ -78,26 +78,49 @@ Those primitives are enough to express conditional statements such as:
 - model X is never more than G generations out of date; and
 - a handler or visible action completes within its declared deadline.
 
-New v7 issuance separates real `operation` tasks from `instrumentation` and supports finite,
-source-typed multi-operation paths. Every v4 composition step names the source outcome traversed,
+New v9 issuance separates real `operation` tasks from `instrumentation` and supports finite,
+source-typed multi-operation paths. Every v5 composition step names the source outcome traversed,
 and consecutive steps must match a real typed dependency edge. A composition has no stopwatch of its own: Dagcert computes its
-bound from exact leaf duration cases. Claims are either `observed` (retained executions only) or
-`derived` (a fixed-algebra formula evaluated by the kernel). Derived claims cannot delegate proof
-to an arbitrary checker boolean.
+bound from exact leaf duration cases. Claims are `observed` (retained executions only), `derived`
+(a fixed-algebra deterministic formula), or `chance` (a finite-composition union bound over explicit
+engineering error budgets). Derived and chance claims cannot delegate proof to an arbitrary checker
+boolean.
 
-For Python, each v4 task points to the production source file and symbol. Dagcert reads the real
+For Python, each v5 task points to the production source file and symbol. Dagcert reads the real
 one-input annotation and closed return union, rejects `Any` throughout those boundary variants,
-runs strict mypy over the real implementation body itself, and adds a guarded
-`UnhandledException` outcome. The JSON contract cannot invent `input_type` or `output_type` labels.
+runs strict mypy over the real implementation body itself, and requires a digest-pinned
+Nagini/Viper container to prove the complete bound file has no undeclared exceptional exit. The
+JSON contract cannot invent `input_type` or `output_type` labels.
 Decorator provenance is resolved from imports: a same-named local decorator or a shadowing local
-`dagcert`/`dataclasses` module is rejected. The runtime guard recursively checks actual input and
-outcome dataclass fields against those annotations before a value can cross a task edge.
-The v7 certificate seals a manifest hash of the checker, guard, outcome analyzer, and typing stubs,
+`dagcert`/`dataclasses` module is rejected. The operation marker preserves the callable's exact
+type; expected failures must be explicit return variants and unexpected exceptions fail proof.
+Task operations cannot narrow their declared input with Nagini `Requires`, and bound application
+modules cannot use `Assume` or `ContractOnly` to make verification vacuous.
+The v9 certificate seals strict-mypy output, the pinned verifier image digest and proof scope, and
+a manifest hash of the source-verification kernel and typing stubs,
 so verification also detects a changed type-enforcement kernel rather than trusting a version label.
 Every dependency names an upstream outcome that must exactly match the downstream callable's source
-input, and resource derivations use the minimum effect across every outcome. The kernel-owned
-exception outcome must have no resource effects; recovery and cleanup require an explicit source-
-typed outcome returned by production code.
+input, and resource derivations use the minimum effect across every explicit outcome. Missing
+Docker/image, unsupported syntax, verifier crash, translation failure, timeout, or failed proof
+refuses issuance. Instrumentation is strict-mypy checked but cannot enter a derived composition.
+
+This provider is deliberately language-specific. Python `operation` tasks require strict mypy plus
+Nagini. JavaScript and TypeScript have no approved exception/totality verifier in this release, so
+Dagcert refuses to bind them as operations; they may appear only behind explicitly observational
+instrumentation and cannot support derived DAG claims. `tsc --strict` alone is not misrepresented
+as an exception-freedom proof.
+
+Dagcert separately reports may-reachability and must-reachability. A success-only downstream branch
+is structurally reachable but outcome-conditional; it is not mislabeled blocked and cannot be used
+as an unconditional supply guarantee. Optional task error budgets classify a nonempty source-derived
+subset of outcomes as good for one canonical duration stream. That subset may include every real
+outcome; Dagcert does not require or invent a semantically bad branch. A
+chance path requires that set to equal the exact typed outcome selected at each step. Chance claims
+directly compare the finite path's union-bound result with a literal probability; boolean fallback
+branches are rejected. The kernel sums finite invocation budgets, so correlation and burstiness
+cannot make the result falsely tighter.
+Retained observations only check consistency with those engineering assumptions; they do not
+statistically establish rare-event rates.
 
 The core also provides a small checker protocol. Applications can record case-bounded semantic
 facts—such as database rows matching the visible DOM—without adding database, browser, queue, or UI
@@ -111,7 +134,7 @@ The English requirements are the source of truth, not documentation added after 
 ```text
 english_requirements.json
         |
-        | each claim declares observed/derived basis, assumptions, and references
+        | each claim declares observed/derived/chance basis, assumptions, and references
         v
 dag_contract.json: workers + tasks + resources + timings + compositions
         |
@@ -125,8 +148,8 @@ certificate.json
 ```
 
 1. `english_requirements.json` states every promised behavior in ordinary language. Each claim has
-   a stable ID, observed/derived basis, explicit assumptions, and exact references. A derived claim
-   also has a kernel formula and cannot cite a checker as proof.
+   a stable ID, observed/derived/chance basis, explicit assumptions, and exact references. Derived
+   and chance claims have kernel formulas and cannot cite a checker as proof.
 2. `dag_contract.json` is the formal translation using the four primitives.
 3. Runtime evidence records real task executions, timings, worker identity, actual runtime outcome
    variants, concurrency, resource effects, and failures. Source types never come from evidence.
@@ -229,20 +252,22 @@ review material but are not proof for changed requirements.
 [`examples/certified_vote`](examples/certified_vote/README.md) is a deliberately narrow in-process
 example showing how the core primitives express performance and conditional flow guarantees.
 
-Its checked-in v7 certificate establishes:
+Its checked-in v9 certificate establishes:
 
 - ten successful measured executions for every declared task;
 - no structural blocked state under the stated scheduling/resource assumptions;
 - `<16ms` in-process vote preview and `<50ms` in-process commit;
-- compiler-checked, source-owned task boundaries; and
+- strict-mypy-checked, Nagini-proved source-owned task boundaries; and
 - dependency edges whose upstream outcome types match the downstream source input types.
+- a 98% lower engineering success budget for one finite preview-to-commit path, conditional on two
+  declared 1% leaf bad-event budgets and composed without an independence assumption.
 
 Inspect its [plain-English requirements](examples/certified_vote/english_requirements.json),
 [formal contract](examples/certified_vote/dag_contract.json), and
 [certificate](examples/certified_vote/artifacts/certificate.json). The former unconditional flow
-claims were removed during v4 migration because the mandatory `UnhandledException` outcome makes
-their guaranteed production zero; retaining them would reproduce the omitted-failure error this
-release is designed to reject.
+claims remain removed because explicit rejection outcomes make their guaranteed production zero.
+The successful typed branches are reported as may-reachable, while the example's finite chance
+claim makes its leaf failure assumptions explicit.
 
 This example deliberately makes no browser, HTTP, database, or production worker-pool promise. Its
 requirements state those limitations plainly.
@@ -264,7 +289,9 @@ Its workflow checks:
 
 Its first rollback-journal hardened run retained a safety-adjusted HTTP timing failure. After the
 application changed to use SQLite WAL mode, the first new exact-source run passed the unchanged
-bounds and produced a verified [v5 certificate](examples/certified_database_ui/artifacts/certificate.json).
+bounds; the current artifacts are reissued as a verified [v9 certificate](examples/certified_database_ui/artifacts/certificate.json).
+This example's tasks are observational instrumentation: strict mypy checks their source types, but
+the certificate does not misstate SQLite, browser JavaScript, or Selenium behavior as Nagini-proved.
 See the complete [status record](examples/certified_database_ui/artifacts/STATUS.md),
 [plain-English requirements](examples/certified_database_ui/english_requirements.json), and
 [formal contract](examples/certified_database_ui/dag_contract.json).

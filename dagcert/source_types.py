@@ -16,6 +16,8 @@ import os
 import re
 import sys
 
+from .python_verifier import PythonVerificationError, verify_exception_freedom
+
 
 class SourceTypeError(ValueError):
     pass
@@ -27,8 +29,10 @@ def type_enforcement_descriptor() -> dict[str, object]:
 
     package = Path(__file__).resolve().parent
     kernel_files = (
-        "_version.py", "__init__.py", "__init__.pyi", "analysis.py", "certificate.py", "contract.py",
-        "evidence.py", "runtime.py", "runtime.pyi", "source_types.py",
+        "_version.py", "__init__.py", "analysis.py", "certificate.py", "contract.py",
+        "evidence.py", "formula.py", "requirements.py", "runtime.py", "runtime.pyi",
+        "python_verifier.py", "source_types.py",
+        "nagini_stubs/dagcert/__init__.pyi", "nagini_stubs/dagcert/runtime.pyi",
     )
     manifest = {
         name: sha256((package / name).read_bytes()).hexdigest()
@@ -38,12 +42,15 @@ def type_enforcement_descriptor() -> dict[str, object]:
         manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
     ).encode("utf-8")
     return {
-        "provider": "dagcert.python/v2",
+        "provider": "dagcert.python/v5",
         "dagcert_version": VERSION,
         "static_analysis": "source-ast+strict-mypy/v1",
+        "mypy_import_surface": "sealed-type-preserving-dagcert-stub/v1",
         "decorator_provenance": "trusted-imports-and-shadow-rejection/v1",
-        "runtime_guard": "recursive-input-outcome-validation/v1",
-        "exception_outcome": "dagcert.runtime.UnhandledException/v1",
+        "operation_marker": "type-preserving/v1",
+        "exception_verification": "nagini-viper-total-no-axioms/v2",
+        "reachability": "typed-may-must/v1",
+        "chance_composition": "finite-union-bound-exact-path/v2",
         "kernel_manifest": manifest,
         "kernel_sha256": sha256(manifest_bytes).hexdigest(),
     }
@@ -59,13 +66,23 @@ class SourceSignature:
     line: int
 
 
-def check_python_sources(source_root: str | Path, signatures: Iterable[SourceSignature]) -> dict[str, object]:
-    """Run the Python type checker over the exact implementation files.
+def check_python_sources(
+    source_root: str | Path,
+    signatures: Iterable[SourceSignature],
+    *,
+    source_fingerprint: str | None = None,
+    prove_exceptions: bool = True,
+    proof_signatures: Iterable[SourceSignature] | None = None,
+) -> dict[str, object]:
+    """Run strict mypy and external exception verification over real implementation files.
 
     Dagcert invokes mypy itself.  A checker result supplied by the application or an LLM is not
     accepted as a substitute.
     """
     bound_signatures = tuple(signatures)
+    proof_bound_signatures = (
+        bound_signatures if proof_signatures is None else tuple(proof_signatures)
+    )
     files = tuple(sorted({item.path for item in bound_signatures if item.language == "python"}))
     if not files:
         raise SourceTypeError("source-typed contract contains no Python implementation files")
@@ -87,9 +104,10 @@ def check_python_sources(source_root: str | Path, signatures: Iterable[SourceSig
         sys.executable,
     ]
     package_root = str(Path(__file__).resolve().parent.parent)
+    verifier_stub_root = str(Path(__file__).resolve().parent / "nagini_stubs")
     previous_path = os.environ.get("MYPYPATH")
     os.environ["MYPYPATH"] = os.pathsep.join(
-        item for item in (str(root), package_root, previous_path) if item
+        item for item in (verifier_stub_root, str(root), package_root, previous_path) if item
     )
     try:
         stdout, stderr, status = mypy_api.run(arguments)
@@ -101,26 +119,68 @@ def check_python_sources(source_root: str | Path, signatures: Iterable[SourceSig
     if status != 0:
         detail = "\n".join(item for item in (stdout.strip(), stderr.strip()) if item)
         raise SourceTypeError("bound application source failed strict mypy checking:\n" + detail)
+    signatures_result = [
+        {
+            "path": item.path,
+            "symbol": item.symbol,
+            "line": item.line,
+            "input_type": item.input_type,
+            "outcome_types": list(item.outcome_types),
+        }
+        for item in sorted(bound_signatures, key=lambda value: (value.path, value.symbol))
+    ]
+    if not prove_exceptions:
+        return {
+            "checker": "mypy",
+            "version": mypy_version,
+            "mode": "strict",
+            "files": list(files),
+            "signatures": signatures_result,
+        }
+    if source_fingerprint is None:
+        raise SourceTypeError("source fingerprint is required for sealed exception verification")
+    proof_files = tuple(sorted({item.path for item in proof_bound_signatures}))
+    if proof_files:
+        symbols_by_file = {
+            path: tuple(item.symbol for item in proof_bound_signatures if item.path == path)
+            for path in proof_files
+        }
+        try:
+            exception_verification = verify_exception_freedom(
+                root,
+                proof_files,
+                symbols_by_file,
+                source_fingerprint=source_fingerprint,
+            )
+        except PythonVerificationError as exc:
+            raise SourceTypeError(str(exc)) from exc
+    else:
+        exception_verification = {
+            "checker": "nagini",
+            "version": None,
+            "proof_obligation": "no-undeclared-exceptional-exit",
+            "result": "not-applicable",
+            "reason": "contract contains no operation tasks; instrumentation is observational",
+            "source_fingerprint": source_fingerprint,
+            "files": [],
+        }
     return {
-        "checker": "mypy",
-        "version": mypy_version,
-        "mode": "strict",
-        "files": list(files),
-        "signatures": [
-            {
-                "path": item.path,
-                "symbol": item.symbol,
-                "line": item.line,
-                "input_type": item.input_type,
-                "outcome_types": list(item.outcome_types),
-            }
-            for item in sorted(bound_signatures, key=lambda value: (value.path, value.symbol))
-        ],
+        "provider": "dagcert.python-source-verification/v1",
+        "type_checker": {
+            "checker": "mypy",
+            "version": mypy_version,
+            "mode": "strict",
+            "dagcert_import_surface": "sealed-type-preserving-stub",
+            "files": list(files),
+        },
+        "exception_verifier": exception_verification,
+        "signatures": signatures_result,
     }
 
 
 def read_python_signature(
-    source_root: str | Path, relative_path: str, symbol: str,
+    source_root: str | Path, relative_path: str, symbol: str, *,
+    include_legacy_unhandled: bool = False,
 ) -> SourceSignature:
     """Read one closed, strongly annotated callable signature from Python source.
 
@@ -148,7 +208,7 @@ def read_python_signature(
     function = _find_function(tree, symbol)
     if isinstance(function, ast.AsyncFunctionDef):
         raise SourceTypeError(
-            f"operation {symbol} is async; the Python v4 provider currently certifies only "
+            f"operation {symbol} is async; the current Python provider certifies only "
             "synchronous guarded boundaries"
         )
     class_nodes = {
@@ -190,15 +250,101 @@ def read_python_signature(
             f"operation {symbol} return union must use explicit named outcomes, not None/object"
         )
     if _has_operation_decorator(function.decorator_list, operation_decorators):
-        outcomes = (*outcomes, "dagcert.runtime.UnhandledException")
+        _reject_nagini_proof_escape_hatches(
+            function, tree, relative_path, symbol, input_type,
+        )
+        _reject_operation_exsures(function, tree, symbol)
     else:
         raise SourceTypeError(
-            f"operation {symbol} must use @dagcert.runtime.operation so escaped exceptions are typed"
+            f"operation {symbol} must use @dagcert.runtime.operation so its real proof boundary "
+            "is source-visible"
         )
+    if include_legacy_unhandled:
+        outcomes = (*outcomes, "dagcert.runtime.UnhandledException")
     return SourceSignature(
         "python", Path(relative_path).as_posix(), symbol, input_type,
         tuple(dict.fromkeys(outcomes)), function.lineno,
     )
+
+
+def _reject_nagini_proof_escape_hatches(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    tree: ast.Module,
+    path: str,
+    symbol: str,
+    input_type: str,
+) -> None:
+    """Forbid verifier features that weaken totality over the declared input type.
+
+    Dagcert asks Nagini to prove the real implementation; it must not accept a proof obtained by
+    assuming an arbitrary fact, declaring the operation unreachable with a precondition, or using
+    a specification-only implementation in the bound module.
+    """
+
+    assume_names = _nagini_contract_names(tree, "Assume")
+    requires_names = _nagini_contract_names(tree, "Requires")
+    contract_only_names = _nagini_contract_names(tree, "ContractOnly")
+    for descendant in ast.walk(tree):
+        qualified = _qualified_name(descendant.func) if isinstance(descendant, ast.Call) else None
+        if qualified in assume_names:
+            raise SourceTypeError(
+                f"bound implementation {path} uses Nagini Assume; certificate proofs may not "
+                "introduce trusted axioms"
+            )
+        if isinstance(descendant, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            for decorator in descendant.decorator_list:
+                target = decorator.func if isinstance(decorator, ast.Call) else decorator
+                if _qualified_name(target) in contract_only_names:
+                    raise SourceTypeError(
+                        f"bound implementation {path} uses Nagini ContractOnly; every proved "
+                        "application implementation must have a verified executable body"
+                    )
+    for descendant in ast.walk(function):
+        if (
+            isinstance(descendant, ast.Call)
+            and _qualified_name(descendant.func) in requires_names
+        ):
+            raise SourceTypeError(
+                f"operation {symbol} declares Nagini Requires; Task<{input_type}> "
+                "must be total over its complete source-declared input type"
+            )
+
+
+def _nagini_contract_names(tree: ast.Module, name: str) -> set[str]:
+    names = {name, f"nagini_contracts.contracts.{name}"}
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "nagini_contracts.contracts":
+                    names.add(f"{alias.asname or alias.name}.{name}")
+        elif isinstance(node, ast.ImportFrom) and node.module == "nagini_contracts.contracts":
+            for alias in node.names:
+                if alias.name == name or alias.name == "*":
+                    names.add(alias.asname or name)
+    return names
+
+
+def _reject_operation_exsures(
+    function: ast.FunctionDef | ast.AsyncFunctionDef, tree: ast.Module, symbol: str,
+) -> None:
+    """Do not let a task operation declare an exceptional exit outside its outcome union."""
+
+    names = {"Exsures", "nagini_contracts.contracts.Exsures"}
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "nagini_contracts.contracts":
+                    names.add(f"{alias.asname or alias.name}.Exsures")
+        elif isinstance(node, ast.ImportFrom) and node.module == "nagini_contracts.contracts":
+            for alias in node.names:
+                if alias.name == "Exsures":
+                    names.add(alias.asname or alias.name)
+    for descendant in ast.walk(function):
+        if isinstance(descendant, ast.Call) and _qualified_name(descendant.func) in names:
+            raise SourceTypeError(
+                f"operation {symbol} declares Exsures; task failures must be explicit return "
+                "outcomes and the operation itself must prove exception-free"
+            )
 
 
 def _find_function(tree: ast.Module, symbol: str) -> ast.FunctionDef | ast.AsyncFunctionDef:

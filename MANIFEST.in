@@ -1,4 +1,5 @@
 include LIBRARY_SPEC.md
+recursive-include dagcert/nagini_stubs *.pyi
 recursive-include docs *.md *.txt
 recursive-include examples *.py *.js *.mjs *.css *.html *.md *.txt *.json *.png
 prune examples/certified_vote/artifacts
