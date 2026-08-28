@@ -21,7 +21,7 @@ from .source_types import check_python_sources
 
 
 CONTRACT_TEMPLATE = """{
-  "schema": "dagcert-contract/v5",
+  "schema": "dagcert-contract/v6",
   "workers": [
     {"id": "app", "concurrency": 1}
   ],
@@ -38,6 +38,7 @@ CONTRACT_TEMPLATE = """{
         {"type": "ReplaceMeCompleted", "resources": {"replace_me": {"acquire": 1}}, "metadata": {}}
       ],
       "error_budget": null,
+      "external_contract": null,
       "depends_on": [],
       "timings": {
         "replace_me": {"metric": "duration", "upper_ms": 1000, "minimum_samples": 10, "policy": "max", "safety_factor": 1.30}
@@ -164,8 +165,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "lint":
             contract = load_contract(args.contract)
             requirements = load_requirements(args.requirements)
-            if contract.schema != "dagcert-contract/v5":
-                raise ContractError("new certificate issuance requires dagcert-contract/v5")
+            if contract.schema != "dagcert-contract/v6":
+                raise ContractError("new certificate issuance requires dagcert-contract/v6")
             if requirements.schema != "dagcert-english-requirements/v2":
                 raise RequirementsError(
                     "new certificate issuance requires dagcert-english-requirements/v2"

@@ -9,7 +9,7 @@ from __future__ import annotations
 from hashlib import sha256
 from pathlib import Path
 from subprocess import CompletedProcess, TimeoutExpired, run
-from typing import Iterable
+from typing import Iterable, Mapping
 
 
 NAGINI_VERSION = "1.3.1"
@@ -26,7 +26,10 @@ class PythonVerificationError(ValueError):
     pass
 
 
-_CACHE: dict[tuple[str, tuple[str, ...], tuple[tuple[str, str], ...]], dict[str, object]] = {}
+_CACHE: dict[
+    tuple[str, tuple[str, ...], tuple[tuple[str, str], ...], tuple[tuple[str, str], ...]],
+    dict[str, object],
+] = {}
 
 
 def verify_exception_freedom(
@@ -35,6 +38,7 @@ def verify_exception_freedom(
     symbols_by_file: dict[str, tuple[str, ...]],
     *,
     source_fingerprint: str,
+    external_overlays: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     """Prove that bound Python modules have no undeclared exceptional exits.
 
@@ -53,7 +57,8 @@ def verify_exception_freedom(
         for path in normalized_files
         for symbol in sorted(symbols_by_file.get(path, ()))
     )
-    cache_key = (source_fingerprint, normalized_files, symbol_key)
+    overlays = tuple(sorted((external_overlays or {}).items()))
+    cache_key = (source_fingerprint, normalized_files, symbol_key, overlays)
     cached = _CACHE.get(cache_key)
     if cached is not None:
         return dict(cached)
@@ -69,6 +74,31 @@ def verify_exception_freedom(
         )
 
     verified_files: list[dict[str, object]] = []
+    verified_external_contracts: list[dict[str, object]] = []
+    overlay_mounts: list[str] = []
+    overlay_rows: list[dict[str, str]] = []
+    for adapter_relative, stub_relative in overlays:
+        adapter = (root / adapter_relative).resolve()
+        stub = (root / stub_relative).resolve()
+        for label, path in (("adapter", adapter), ("stub", stub)):
+            try:
+                path.relative_to(root)
+            except ValueError as exc:
+                raise PythonVerificationError(
+                    f"external {label} path escapes source root: {path}"
+                ) from exc
+        if not adapter.is_file() or not stub.is_file():
+            raise PythonVerificationError(
+                f"external ContractOnly overlay files are missing: {adapter_relative}, "
+                f"{stub_relative}"
+            )
+        overlay_mounts.extend(["-v", f"{stub}:/code/{Path(adapter_relative).as_posix()}:ro"])
+        overlay_rows.append({
+            "adapter_path": Path(adapter_relative).as_posix(),
+            "adapter_sha256": sha256(adapter.read_bytes()).hexdigest(),
+            "stub_path": Path(stub_relative).as_posix(),
+            "stub_sha256": sha256(stub.read_bytes()).hexdigest(),
+        })
     for relative in normalized_files:
         source = (root / relative).resolve()
         try:
@@ -87,6 +117,7 @@ def verify_exception_freedom(
             "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
             "-v", f"{root}:/code:ro",
             "-v", f"{stub_root}:/tmp/dagcert-stubs:ro",
+            *overlay_mounts,
             NAGINI_IMAGE,
             "--verifier", NAGINI_BACKEND,
             "--base-dir", "/tmp/dagcert-stubs",
@@ -109,6 +140,40 @@ def verify_exception_freedom(
             "result": "proved",
         })
 
+    for adapter_relative, stub_relative in overlays:
+        stub = (root / stub_relative).resolve()
+        container_path = "/code/" + Path(adapter_relative).as_posix()
+        command = [
+            "docker", "run", "--rm", "--pull", "never", "--network", "none", "--read-only",
+            "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+            "--pids-limit", "256", "--memory", "1g", "--cpus", "2",
+            "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
+            "-v", f"{root}:/code:ro",
+            "-v", f"{stub_root}:/tmp/dagcert-stubs:ro",
+            *overlay_mounts,
+            NAGINI_IMAGE,
+            "--verifier", NAGINI_BACKEND,
+            "--base-dir", "/tmp/dagcert-stubs",
+            container_path,
+        ]
+        completed = _run(
+            command, label=f"Nagini validation of external contract {stub_relative}",
+        )
+        output = "\n".join(
+            value.strip() for value in (completed.stdout, completed.stderr) if value.strip()
+        )
+        if completed.returncode != 0 or "Verification successful" not in output:
+            detail = output[-12000:] if output else f"exit status {completed.returncode}"
+            raise PythonVerificationError(
+                f"Nagini rejected external ContractOnly stub {stub_relative}:\n{detail}"
+            )
+        verified_external_contracts.append({
+            "adapter_path": Path(adapter_relative).as_posix(),
+            "stub_path": Path(stub_relative).as_posix(),
+            "stub_sha256": sha256(stub.read_bytes()).hexdigest(),
+            "result": "accepted-explicit-assumption",
+        })
+
     result: dict[str, object] = {
         "checker": "nagini",
         "version": version,
@@ -120,6 +185,8 @@ def verify_exception_freedom(
         "source_mount": "read-only",
         "timeout_seconds": NAGINI_TIMEOUT_SECONDS,
         "source_fingerprint": source_fingerprint,
+        "external_contract_overlays": overlay_rows,
+        "external_contract_files": verified_external_contracts,
         "files": verified_files,
     }
     _CACHE[cache_key] = dict(result)

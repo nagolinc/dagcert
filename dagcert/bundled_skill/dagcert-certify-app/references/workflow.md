@@ -16,7 +16,7 @@ Repeat `--exclude PATTERN` identically when project-specific source exclusions a
 
 ## Contract
 
-The hardened `dagcert-contract/v5` JSON or YAML object contains `workers`, `tasks`, `resources`,
+The hardened `dagcert-contract/v6` JSON or YAML object contains `workers`, `tasks`, `resources`,
 task-local `timings`, finite typed-path `compositions`, and metadata. Each composition step names
 the source outcome it traverses, and adjacent steps must match a real typed dependency edge.
 Each task has an `implementation` binding
@@ -40,15 +40,22 @@ formula uses the minimum effect across all variants. Resources contain
 `interval`, `wait`, or `age`. An `assumed` timing requires zero samples and makes results conditional.
 
 Task operations also may not declare `Requires`, because a task must be total over its complete
-source input type. Bound application modules may not use Nagini `Assume` or `ContractOnly`; these
-would introduce a trusted axiom or specification-only implementation instead of proving real code.
+source input type. Executable application modules may not use Nagini `Assume` or `ContractOnly`.
+V6 external tasks are the sole exception: they name a separate source-owned `ContractOnly` proof
+stub, a real executable adapter module, and the external provider module/symbols. Dagcert overlays
+only that adapter path during Nagini verification, seals both digests and the provider identity,
+and keeps `ContractOnly` out of production code. The adapter uses `external_boundary`, which checks
+the real return annotation with Typeguard and publishes success, raised-exception, or wrong-type
+events to `ExternalEvidenceMonitor`.
+The proof stub may state only the canonical `Ensures(Result() is not None)` postcondition. Dagcert
+rejects arbitrary axioms such as `Ensures(False)`; richer predicates belong in executable validators.
 
 Dagcert resolves decorator provenance from imports and rejects locally defined lookalikes or local
 modules shadowing `dagcert`/`dataclasses`. Strict mypy rejects `Any` at the source boundary. Keep all
 claim-relevant input construction and transformation inside bound operations; a verified leaf does
 not certify exception-producing glue that ran before the call.
 
-Each v5 dependency is `{"task": "UPSTREAM", "outcome_type": "Variant"}`. Dagcert verifies that the
+Each v6 dependency is `{"task": "UPSTREAM", "outcome_type": "Variant"}`. Dagcert verifies that the
 variant is in the upstream source return union and exactly equals the downstream source input type.
 This makes dependency arrows typed dataflow rather than documentation.
 
@@ -57,7 +64,7 @@ connected operation tasks and names the exact duration case and finite execution
 Instrumentation cannot be included. The kernel computes a conservative serial upper bound from
 the certified leaf bounds; a composition never declares its own measured timing.
 
-Each v5 task also contains `error_budget`, either null or an object with basis
+Each v6 task also contains `error_budget`, either null or an object with basis
 `engineering_assumption`, one canonical duration `evidence_case`, source-derived `good_outcomes`, a
 `bad_event_probability_upper` in `[0,1)`, and positive `minimum_observations`. A finite chance
 composition uses the union bound: sum `step.count` times each task
@@ -70,7 +77,7 @@ not already exceed the declared premise.
 
 ## Timing evidence
 
-Evidence is JSON Lines. Each v5 line contains `task_id`, `case`, `value_ms`, `worker_id`,
+Evidence is JSON Lines. Each v6 line contains `task_id`, `case`, `value_ms`, `worker_id`,
 `source_fingerprint`, `recorded_at`, and the actual runtime `outcome_type`. It may also contain
 `observed_worker_concurrency`,
 `resource_acquired`, `resource_consumed`, `resource_produced`, `resource_levels`, and `metadata`.
@@ -89,14 +96,15 @@ and cannot cite application checkers as proof. The certificate embeds both its n
 file digest. This is the source of truth for what the certificate means; it is not a separate audit
 input and cannot be reconstructed from checker output.
 
-Chance claims use a formula containing `composition_failure_probability_upper` or
-`composition_success_probability_lower`, cite the finite composition and every participating
-`error-budget:TASK`, and state the engineering probability assumptions in English.
+Chance claims use a finite composition operator or
+`external_failure_probability_upper`/`external_success_probability_lower`. They cite every
+participating `error-budget:TASK` and state the simplified engineering probability premises in
+English. These are conditional envelopes, not statistical estimates from the retained sample.
 
 `dagcert lint` and issuance run the mandatory deterministic translation audit. All formal tasks and
 timings must be covered by the English claims; primitive references must resolve; assumed timings
 must have explicit English assumptions; and issuance requires every checker named by a claim.
-`dagcert-certificate/v9` embeds source type extraction, strict-mypy result, the digest-pinned
+`dagcert-certificate/v10` embeds source type extraction, strict-mypy result, the digest-pinned
 Nagini/Viper proof result and scope, the exact source-verification descriptor plus its core-file
 manifest hash, that recomputable audit, and kernel claim
 analysis. The Luna workflow below is the optional,

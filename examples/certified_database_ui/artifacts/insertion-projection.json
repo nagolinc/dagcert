@@ -3,8 +3,8 @@
   "checker": "example.database-ui.insertion-projection/v1",
   "passed": true,
   "source_fingerprint": "c385804fa1402c6f5382b6334b77261b6d0844c934b0c8d5c9e62d7225e3e3f5",
-  "contract_sha256": "20fc60aecf93e3ab922147ca91497169adbbef37d47d301ecd1fb63f34849b3a",
-  "evidence_sha256": "02d7f9f4b733493f834b8fc393b468faddea1e490c7a56ea05701b13bbb28c2c",
+  "contract_sha256": "37e36cc3cd01dc884e9d94ad91ffa5e8aa82207f2dd8f69b2f196fa6819e106d",
+  "evidence_sha256": "f86fdb8c14d3d3877ae73da650986e58c272673f37831f293e829bf44bdfbf21",
   "requirements_sha256": "721b35e11709f245b564ed4d766f43b5d8a85660c5733b5a196ece5666e987d0",
   "primitive_refs": [
     "task:items.insert",

@@ -1,7 +1,7 @@
 # Reference example audit
 
 > Historical record: these responses predate the v3 contract/v2 claim-algebra migration and are
-> not attached to the current v5 vote certificate. A new independent audit must reconstruct the
+> not attached to the current v10 vote certificate. A new independent audit must reconstruct the
 > actual execution DAG under the strengthened prompt before it can be attached.
 
 The optional v3 audit requires separate claim reasoning, Rule 0 analysis, reviewed files,

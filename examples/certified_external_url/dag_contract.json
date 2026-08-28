@@ -1,0 +1,67 @@
+{
+  "schema": "dagcert-contract/v6",
+  "workers": [
+    {"id": "stdlib", "concurrency": 1},
+    {"id": "application", "concurrency": 1}
+  ],
+  "resources": [
+    {"id": "parsed-url", "capacity": 1, "initial": 0, "unit": "values"}
+  ],
+  "tasks": [
+    {
+      "id": "url.parse",
+      "role": "external",
+      "worker": "stdlib",
+      "implementation": {"language": "python", "path": "boundary.py", "symbol": "parse_url"},
+      "outcomes": [
+        {"type": "ParsedUrl", "resources": {"parsed-url": {"produce": 1}}, "metadata": {}},
+        {"type": "dagcert.runtime.ExternalRaised", "resources": {}, "metadata": {}},
+        {"type": "dagcert.runtime.ExternalTypeViolation", "resources": {}, "metadata": {}}
+      ],
+      "error_budget": {
+        "basis": "engineering_assumption",
+        "evidence_case": "call",
+        "good_outcomes": ["ParsedUrl"],
+        "bad_event_probability_upper": 0,
+        "minimum_observations": 3
+      },
+      "external_contract": {
+        "stub_path": "boundary_contract.py",
+        "assumption": "the sealed urllib.parse.urlsplit provider returns a value that the adapter converts to ParsedUrl without raising",
+        "provider": {"module": "urllib.parse", "symbols": ["urlsplit"]},
+        "success_outcome": "ParsedUrl",
+        "evidence_case": "call"
+      },
+      "depends_on": [],
+      "timings": {
+        "call": {"metric": "duration", "upper_ms": 10, "minimum_samples": 3}
+      }
+    },
+    {
+      "id": "url.accept",
+      "role": "operation",
+      "worker": "application",
+      "implementation": {"language": "python", "path": "app.py", "symbol": "accept_parsed_url"},
+      "outcomes": [
+        {"type": "ParsedUrl", "resources": {"parsed-url": {"consume": 1}}, "metadata": {}}
+      ],
+      "error_budget": null,
+      "external_contract": null,
+      "depends_on": [{"task": "url.parse", "outcome_type": "ParsedUrl"}],
+      "timings": {
+        "completion": {"metric": "duration", "upper_ms": 10, "minimum_samples": 3}
+      }
+    }
+  ],
+  "compositions": [
+    {
+      "id": "parse-and-accept",
+      "steps": [
+        {"task": "url.parse", "timing": "call", "count": 1, "outcome_type": "ParsedUrl"},
+        {"task": "url.accept", "timing": "completion", "count": 1, "outcome_type": "ParsedUrl"}
+      ],
+      "metadata": {"horizon": "one URL parse followed by one application acceptance"}
+    }
+  ],
+  "metadata": {"purpose": "Reference external-library contract with runtime conformance evidence"}
+}

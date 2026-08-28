@@ -6,9 +6,14 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from threading import Lock
 from time import time
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 import json
 from math import isfinite
+
+from .runtime import ExternalBoundaryEvent
+
+if TYPE_CHECKING:
+    from .contract import Contract
 
 
 class EvidenceError(ValueError):
@@ -85,6 +90,66 @@ class EvidenceRecorder:
         encoded = json.dumps(sample.to_mapping(), ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
         with self._lock, self.path.open("a", encoding="utf-8", newline="\n") as handle:
             handle.write(encoded)
+
+
+class ExternalEvidenceMonitor:
+    """Translate every real external-boundary call into retained Dagcert evidence."""
+
+    def __init__(
+        self,
+        contract: "Contract",
+        recorder: EvidenceRecorder,
+        *,
+        source_fingerprint: str,
+    ) -> None:
+        self._tasks = contract.task_by_id
+        self._recorder = recorder
+        self._source_fingerprint = source_fingerprint
+
+    def __call__(self, event: ExternalBoundaryEvent) -> None:
+        task = self._tasks.get(event.boundary_id)
+        if task is None or task.external_contract is None or task.role != "external":
+            raise EvidenceError(
+                f"runtime external boundary {event.boundary_id!r} is not a declared external task"
+            )
+        outcome = task.outcome_by_type.get(event.outcome_type)
+        if outcome is None:
+            raise EvidenceError(
+                f"runtime external boundary {event.boundary_id!r} produced undeclared outcome "
+                f"{event.outcome_type!r}"
+            )
+        resources = outcome.resources
+        metadata = {
+            "external_boundary": True,
+            "expected_type": event.expected_type,
+            "observed_type": event.observed_type,
+            "exception_type": event.exception_type,
+            "message": event.message,
+        }
+        self._recorder.append(TimingSample(
+            task_id=task.id,
+            case=task.external_contract.evidence_case,
+            value_ms=event.elapsed_ms,
+            worker_id=task.worker,
+            source_fingerprint=self._source_fingerprint,
+            succeeded=event.succeeded,
+            recorded_at=event.recorded_at,
+            observed_worker_concurrency=1,
+            outcome_type=event.outcome_type,
+            resource_acquired={
+                resource_id: effect.acquire
+                for resource_id, effect in resources.items() if effect.acquire > 0
+            },
+            resource_consumed={
+                resource_id: effect.consume
+                for resource_id, effect in resources.items() if effect.consume > 0
+            },
+            resource_produced={
+                resource_id: effect.produce
+                for resource_id, effect in resources.items() if effect.produce > 0
+            },
+            metadata=metadata,
+        ))
 
 
 def load_evidence(path: str | Path) -> tuple[TimingSample, ...]:

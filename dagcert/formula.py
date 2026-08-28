@@ -56,10 +56,19 @@ def evaluate_formula(
         composition = contract.composition_by_id.get(composition_ref.split(":", 1)[1])
         if composition is not None:
             references.update(f"error-budget:{step.task}" for step in composition.steps)
+    external_probability_refs = {
+        reference for reference in references
+        if reference.startswith("external-contract:")
+        and _formula_uses_external_probability(formula, reference)
+    }
+    references.update(
+        f"error-budget:{reference.split(':', 1)[1]}"
+        for reference in external_probability_refs
+    )
     composition_refs = {
         reference for reference in references if reference.startswith("composition:")
     }
-    if not composition_refs:
+    if not composition_refs and not external_probability_refs:
         _validate_dag_surface(references, contract)
     return FormulaEvaluation(
         value, value, tuple(sorted(composition_refs)), tuple(sorted(references))
@@ -78,6 +87,8 @@ def formula_references(formula: Mapping[str, Any]) -> tuple[str, ...]:
                     "worker_concurrency", "resource_capacity", "resource_initial",
                     "composition_failure_probability_upper",
                     "composition_success_probability_lower",
+                    "external_failure_probability_upper",
+                    "external_success_probability_lower",
                 } and isinstance(operand, str):
                     references.add(operand)
                 elif operator in {"task_guaranteed_produce", "task_guaranteed_consume"}:
@@ -103,6 +114,8 @@ def formula_uses_error_budgets(formula: Mapping[str, Any]) -> bool:
         operator in {
             "composition_failure_probability_upper",
             "composition_success_probability_lower",
+            "external_failure_probability_upper",
+            "external_success_probability_lower",
         }
         for operator in formula
     ):
@@ -140,25 +153,33 @@ def validate_claim_formula(formula: Mapping[str, Any], *, basis: str) -> None:
 def _validate_chance_claim_formula(formula: Mapping[str, Any]) -> None:
     row = _single_operator(formula, "formula")
     operator, operand = next(iter(row.items()))
-    expected_probability_operator = {
-        "gte": "composition_success_probability_lower",
-        "lte": "composition_failure_probability_upper",
+    expected_probability_operators = {
+        "gte": {
+            "composition_success_probability_lower",
+            "external_success_probability_lower",
+        },
+        "lte": {
+            "composition_failure_probability_upper",
+            "external_failure_probability_upper",
+        },
     }.get(operator)
-    if expected_probability_operator is None:
+    if expected_probability_operators is None:
         raise FormulaError(
-            "chance formula must directly compare a composition success lower bound with gte "
-            "or a composition failure upper bound with lte"
+            "chance formula must directly compare a composition or external-contract "
+            "probability bound with gte or lte"
         )
     left, right = _pair(operand, f"formula.{operator}")
     probability = _single_operator(left, f"formula.{operator}[0]")
-    if set(probability) != {expected_probability_operator}:
+    if len(probability) != 1 or next(iter(probability)) not in expected_probability_operators:
         raise FormulaError(
-            f"chance formula {operator} left operand must be exactly "
-            f"{expected_probability_operator}"
+            f"chance formula {operator} left operand must be exactly one of "
+            f"{sorted(expected_probability_operators)}"
         )
+    expected_probability_operator = next(iter(probability))
     _reference(
         probability[expected_probability_operator],
-        "composition",
+        "external-contract" if expected_probability_operator.startswith("external_")
+        else "composition",
         f"formula.{operator}[0].{expected_probability_operator}",
     )
     if isinstance(right, bool) or not isinstance(right, (int, float)):
@@ -214,6 +235,24 @@ def _formula_uses_probability_composition(
     return False
 
 
+def _formula_uses_external_probability(
+    formula: Mapping[str, Any], external_ref: str,
+) -> bool:
+    for operator, operand in formula.items():
+        if operator in {
+            "external_failure_probability_upper",
+            "external_success_probability_lower",
+        } and operand == external_ref:
+            return True
+        children = (
+            value for value in (operand if isinstance(operand, list) else [operand])
+            if isinstance(value, Mapping)
+        )
+        if any(_formula_uses_external_probability(child, external_ref) for child in children):
+            return True
+    return False
+
+
 def _validate_dag_surface(references: set[str], contract: Contract) -> None:
     timing_tasks = {
         reference.split(":", 1)[1].split("/", 1)[0]
@@ -223,7 +262,7 @@ def _validate_dag_surface(references: set[str], contract: Contract) -> None:
         reference for reference in references
         if reference.startswith("worker:") or reference.startswith("resource:")
     }
-    if contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5"}:
+    if contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"}:
         resource_ids = {
             reference.split(":", 1)[1]
             for reference in references if reference.startswith("resource:")
@@ -360,6 +399,13 @@ def _number(value: Any, state: _EvaluationState, label: str) -> float:
             if operator == "composition_failure_probability_upper"
             else max(0.0, 1.0 - failure_upper)
         )
+    if operator in {
+        "external_failure_probability_upper",
+        "external_success_probability_lower",
+    }:
+        reference = _reference(operand, "external-contract", f"{label}.{operator}")
+        failure_upper = _external_failure_probability_upper(reference, state)
+        return failure_upper if operator.startswith("external_failure") else 1.0 - failure_upper
     if operator in {"timing_upper_ms", "timing_lower_ms"}:
         reference = _reference(operand, "timing", f"{label}.{operator}")
         timing = next(
@@ -401,8 +447,8 @@ def _number(value: Any, state: _EvaluationState, label: str) -> float:
 def _composition_failure_probability_upper(
     composition_id: str, state: _EvaluationState,
 ) -> float:
-    if state.contract.schema != "dagcert-contract/v5":
-        raise FormulaError("error-budget formulas require dagcert-contract/v5")
+    if state.contract.schema not in {"dagcert-contract/v5", "dagcert-contract/v6"}:
+        raise FormulaError("error-budget formulas require dagcert-contract/v5 or v6")
     composition = state.contract.composition_by_id.get(composition_id)
     if composition is None:
         raise FormulaError(f"formula cites unknown composition {composition_id!r}")
@@ -440,6 +486,27 @@ def _composition_failure_probability_upper(
             )
         total += step.count * budget.bad_event_probability_upper
     return min(1.0, total)
+
+
+def _external_failure_probability_upper(
+    task_id: str, state: _EvaluationState,
+) -> float:
+    if state.contract.schema != "dagcert-contract/v6":
+        raise FormulaError("external-contract formulas require dagcert-contract/v6")
+    task = state.contract.task_by_id.get(task_id)
+    if task is None or task.external_contract is None:
+        raise FormulaError(f"formula cites unknown external contract {task_id!r}")
+    budget = task.error_budget
+    if budget is None:
+        raise FormulaError(f"external task {task_id} has no error budget")
+    result = next(
+        (item for item in state.analysis.error_budgets if item.task_id == task_id), None,
+    )
+    if result is None or not result.passed:
+        raise FormulaError(
+            f"external contract {task_id} lacks a passing error-budget analysis"
+        )
+    return budget.bad_event_probability_upper
 
 
 def _single_operator(value: Any, label: str) -> Mapping[str, Any]:

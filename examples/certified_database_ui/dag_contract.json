@@ -1,5 +1,5 @@
 {
-  "schema": "dagcert-contract/v5",
+  "schema": "dagcert-contract/v6",
   "metadata": {
     "application": "certified-database-ui",
     "scope": "Sequential reference workload through real SQLite, HTTP, and browser boundaries"
@@ -21,6 +21,7 @@
         {"type": "ItemsListFailed", "resources": {}, "metadata": {}}
       ],
       "error_budget": null,
+      "external_contract": null,
       "depends_on": [],
       "timings": {
         "http": {
@@ -43,6 +44,7 @@
         {"type": "ItemInsertFailed", "resources": {}, "metadata": {}}
       ],
       "error_budget": null,
+      "external_contract": null,
       "depends_on": [],
       "timings": {
         "http": {
@@ -64,6 +66,7 @@
         {"type": "ItemDeleteFailed", "resources": {}, "metadata": {}}
       ],
       "error_budget": null,
+      "external_contract": null,
       "depends_on": [],
       "timings": {
         "http": {
@@ -84,6 +87,7 @@
         {"type": "BrowserFeedbackObserved", "resources": {}, "metadata": {}}
       ],
       "error_budget": null,
+      "external_contract": null,
       "depends_on": [],
       "timings": {
         "visible": {
@@ -104,6 +108,7 @@
         {"type": "BrowserRenderObserved", "resources": {}, "metadata": {}}
       ],
       "error_budget": null,
+      "external_contract": null,
       "depends_on": [],
       "timings": {
         "visible": {

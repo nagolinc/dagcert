@@ -23,7 +23,7 @@ Required review
 2. Trace the actual implementation paths relevant to this claim. Compare them
    with the declared workers, tasks, resources, types, dependencies, and
    timings.
-   For every operation, start at its v5 implementation binding and verify that
+   For every operation or external task, start at its v6 implementation binding and verify that
    the named source symbol is the boundary the production worker actually
    invokes. Reject a typed adapter, wrapper, or certification-only function
    that the real execution path bypasses.
@@ -95,9 +95,21 @@ internal verifier error, skipped function, declared `Exsures` exit on the task o
 `not-applicable` result as failure. Instrumentation may be Nagini-not-applicable only for an
 `observed` claim and must not participate in a derived composition.
 
-Reject an operation-level Nagini `Requires`, any bound-module `Assume`, or `ContractOnly`
-application implementation. They can make totality over the declared input type vacuous rather
-than proving the executable task.
+Reject an operation-level Nagini `Requires`, any executable-module `Assume`, or any executable
+application implementation marked `ContractOnly`. A `ContractOnly` declaration is permitted only
+in the separate stub named by a v6 `external_contract`. Confirm that the real adapter is executable,
+directly calls the sealed external provider symbol, uses the trusted `external_boundary` decorator,
+and has source types exactly matching the proof-only overlay. Reject a stub that replaces app-owned
+code, shares a module with a proved operation, changes the input/success dataclass shape, or is not
+listed and digest-bound in `source_verification.external_contracts` and
+`exception_verifier.external_contract_overlays`.
+
+For each external task, trace production calls through the monitored adapter. Confirm that success,
+provider exception, and wrong-return-type events become respectively the declared success outcome,
+`dagcert.runtime.ExternalRaised`, and `dagcert.runtime.ExternalTypeViolation`; that the canonical
+evidence stream retains every event; and that the task's engineering budget counts both violation
+outcomes as bad. Reject a claimed p=1 contract if any retained violation exists, if production can
+bypass the decorator or evidence monitor, or if a broad catch converts a violation into success.
 
 This release has no approved JavaScript or TypeScript operation verifier. Reject any derived claim
 that treats `tsc --strict`, runtime browser evidence, or a Python wrapper as proof of exception
@@ -126,11 +138,12 @@ source outcome, while success-conditioned claims name the exact typed outcome
 path. Reject either extreme: calling every success-only branch structurally
 impossible, or silently promoting that branch into an unconditional guarantee.
 
-For a chance claim, verify that it covers a finite composition of real operation
-tasks and that every selected step outcome is explicitly classified as good by
-that task's error budget. The complete good-outcome set must equal that exact selected typed
-outcome. Do not require or invent a failure branch merely to make a budget nontrivial. Confirm the
-invocation counts and horizon,
+For a chance claim, verify that it covers either a finite composition of real operation/external
+tasks or one explicitly declared external contract. For a composition, every selected step outcome
+must be explicitly classified as good by that task's error budget; the complete good-outcome set must equal
+that exact selected typed outcome. For a standalone external claim, recompute success as
+one minus its declared engineering bad-event upper bound. Do not require or invent a failure branch
+merely to make a budget nontrivial. Confirm the invocation counts and horizon,
 require one direct probability-bound comparison rather than an `or`/`not`/implication escape, then
 recompute the system bad-event upper bound by summing count times leaf budget
 and capping the result at one. This union-bound calculation must not multiply

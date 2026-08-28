@@ -101,6 +101,10 @@ def audit_translation(
         if task.error_budget is not None
     )
     valid_primitives.update(
+        f"external-contract:{task.id}" for task in contract.tasks
+        if task.external_contract is not None
+    )
+    valid_primitives.update(
         f"guarantee:{task.id}/{kind}/{resource.id}"
         for task in contract.tasks
         for kind in ("produce", "consume")
@@ -142,6 +146,14 @@ def audit_translation(
         coverage_primitives.update(
             f"timing:{step.task}/{step.timing}" for step in composition.steps
         )
+    for task in contract.tasks:
+        if f"external-contract:{task.id}" not in coverage_primitives:
+            continue
+        coverage_primitives.add(f"task:{task.id}")
+        if task.external_contract is not None:
+            coverage_primitives.add(
+                f"timing:{task.id}/{task.external_contract.evidence_case}"
+            )
     required_checkers = {
         reference for claim in requirements.claims for reference in claim.checker_refs
     }
@@ -218,6 +230,11 @@ def audit_translation(
                                 f"error-budget:{step.task}"
                                 for step in referenced_composition.steps
                             )
+                    budget_refs.update(
+                        f"error-budget:{reference.split(':', 1)[1]}"
+                        for reference in formula_refs
+                        if reference.startswith("external-contract:")
+                    )
                     missing_budgets = budget_refs - set(claim.primitive_refs)
                     if missing_budgets:
                         findings.append(
@@ -239,6 +256,20 @@ def audit_translation(
     if assumption_gaps:
         findings.append(
             f"assumed timings lack explicit English assumptions: {assumption_gaps}"
+        )
+    external_assumption_gaps = [
+        f"external-contract:{task.id}"
+        for task in contract.tasks
+        if task.external_contract is not None
+        and not any(
+            f"external-contract:{task.id}" in claim.primitive_refs and claim.assumptions
+            for claim in requirements.claims
+        )
+    ]
+    if external_assumption_gaps:
+        findings.append(
+            "external contracts lack explicit English assumptions: "
+            f"{external_assumption_gaps}"
         )
 
     supplementary = () if selected is None else tuple(sorted(selected - required_checkers))

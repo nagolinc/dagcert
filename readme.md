@@ -78,15 +78,15 @@ Those primitives are enough to express conditional statements such as:
 - model X is never more than G generations out of date; and
 - a handler or visible action completes within its declared deadline.
 
-New v9 issuance separates real `operation` tasks from `instrumentation` and supports finite,
-source-typed multi-operation paths. Every v5 composition step names the source outcome traversed,
+New v10 issuance separates real `operation`, `external`, and `instrumentation` tasks and supports finite,
+source-typed multi-operation paths. Every v6 composition step names the source outcome traversed,
 and consecutive steps must match a real typed dependency edge. A composition has no stopwatch of its own: Dagcert computes its
 bound from exact leaf duration cases. Claims are `observed` (retained executions only), `derived`
 (a fixed-algebra deterministic formula), or `chance` (a finite-composition union bound over explicit
 engineering error budgets). Derived and chance claims cannot delegate proof to an arbitrary checker
 boolean.
 
-For Python, each v5 task points to the production source file and symbol. Dagcert reads the real
+For Python, each v6 task points to the production source file and symbol. Dagcert reads the real
 one-input annotation and closed return union, rejects `Any` throughout those boundary variants,
 runs strict mypy over the real implementation body itself, and requires a digest-pinned
 Nagini/Viper container to prove the complete bound file has no undeclared exceptional exit. The
@@ -94,9 +94,15 @@ JSON contract cannot invent `input_type` or `output_type` labels.
 Decorator provenance is resolved from imports: a same-named local decorator or a shadowing local
 `dagcert`/`dataclasses` module is rejected. The operation marker preserves the callable's exact
 type; expected failures must be explicit return variants and unexpected exceptions fail proof.
-Task operations cannot narrow their declared input with Nagini `Requires`, and bound application
-modules cannot use `Assume` or `ContractOnly` to make verification vacuous.
-The v9 certificate seals strict-mypy output, the pinned verifier image digest and proof scope, and
+Task operations cannot narrow their declared input with Nagini `Requires`, and executable application
+modules cannot use `Assume` or `ContractOnly` to make verification vacuous. An external task may
+name a separate, source-owned `ContractOnly` proof stub for a real adapter. Dagcert overlays only
+that file during proof, seals the adapter/stub/provider identities, and checks every production
+return or exception through a Typeguard-backed runtime boundary. Wrong types and exceptions are
+retained violation outcomes, not silently trusted successes.
+The proof-only stub is restricted to the canonical `Ensures(Result() is not None)` contract, so it
+cannot inject an impossible postcondition to make an application proof vacuous.
+The v10 certificate seals strict-mypy output, the pinned verifier image digest and proof scope, and
 a manifest hash of the source-verification kernel and typing stubs,
 so verification also detects a changed type-enforcement kernel rather than trusting a version label.
 Every dependency names an upstream outcome that must exactly match the downstream callable's source
@@ -252,7 +258,7 @@ review material but are not proof for changed requirements.
 [`examples/certified_vote`](examples/certified_vote/README.md) is a deliberately narrow in-process
 example showing how the core primitives express performance and conditional flow guarantees.
 
-Its checked-in v9 certificate establishes:
+Its checked-in v10 certificate establishes:
 
 - ten successful measured executions for every declared task;
 - no structural blocked state under the stated scheduling/resource assumptions;
@@ -289,7 +295,7 @@ Its workflow checks:
 
 Its first rollback-journal hardened run retained a safety-adjusted HTTP timing failure. After the
 application changed to use SQLite WAL mode, the first new exact-source run passed the unchanged
-bounds; the current artifacts are reissued as a verified [v9 certificate](examples/certified_database_ui/artifacts/certificate.json).
+bounds; the current artifacts are reissued as a verified [v10 certificate](examples/certified_database_ui/artifacts/certificate.json).
 This example's tasks are observational instrumentation: strict mypy checks their source types, but
 the certificate does not misstate SQLite, browser JavaScript, or Selenium behavior as Nagini-proved.
 See the complete [status record](examples/certified_database_ui/artifacts/STATUS.md),

@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 import json
 
-from .source_types import SourceSignature, SourceTypeError, read_python_signature
+from .source_types import (
+    SourceSignature, SourceTypeError, read_python_signature, validate_external_contract_stub,
+)
 
 
 class ContractError(ValueError):
@@ -76,6 +78,25 @@ class TaskErrorBudget:
 
 
 @dataclass(frozen=True, slots=True)
+class ExternalProvider:
+    """The real library surface assumed by an external task."""
+
+    module: str
+    symbols: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalContract:
+    """A visible Nagini assumption plus runtime conformance boundary."""
+
+    stub_path: str
+    assumption: str
+    provider: ExternalProvider
+    success_outcome: str
+    evidence_case: str
+
+
+@dataclass(frozen=True, slots=True)
 class TypedDependency:
     task: str
     outcome_type: str
@@ -97,6 +118,7 @@ class Task:
     source_signature: SourceSignature | None = None
     typed_dependencies: tuple[TypedDependency, ...] = ()
     error_budget: TaskErrorBudget | None = None
+    external_contract: ExternalContract | None = None
 
     @property
     def outcome_by_type(self) -> Mapping[str, TaskOutcome]:
@@ -243,10 +265,10 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
     schema = raw.get("schema")
     if schema not in {
         "dagcert-contract/v2", "dagcert-contract/v3", "dagcert-contract/v4",
-        "dagcert-contract/v5",
+        "dagcert-contract/v5", "dagcert-contract/v6",
     }:
-        raise ContractError("contract schema must be dagcert-contract/v2, v3, v4, or v5")
-    if schema in {"dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5"} and set(raw) != {
+        raise ContractError("contract schema must be dagcert-contract/v2, v3, v4, v5, or v6")
+    if schema in {"dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"} and set(raw) != {
         "schema", "workers", "resources", "tasks", "compositions", "metadata",
     }:
         raise ContractError(
@@ -288,8 +310,10 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             "id", "role", "worker", "implementation", "outcomes", "depends_on", "timings",
         }
         v5_task_fields = v4_task_fields | {"error_budget"}
+        v6_task_fields = v5_task_fields | {"external_contract"}
         allowed_task_fields = (
-            v5_task_fields if schema == "dagcert-contract/v5"
+            v6_task_fields if schema == "dagcert-contract/v6"
+            else v5_task_fields if schema == "dagcert-contract/v5"
             else v4_task_fields if schema == "dagcert-contract/v4"
             else legacy_task_fields
         )
@@ -308,13 +332,21 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             raise ContractError(
                 f"v5 task fields mismatch: unexpected={sorted(unexpected_task_fields)}, missing={missing}"
             )
+        if schema == "dagcert-contract/v6" and (unexpected_task_fields or set(row) - {"metadata"} != v6_task_fields):
+            missing = sorted(v6_task_fields - set(row))
+            raise ContractError(
+                f"v6 task fields mismatch: unexpected={sorted(unexpected_task_fields)}, missing={missing}"
+            )
         task_id = _identifier(row.get("id"), "task.id")
         role = _identifier(
-            row.get("role") if schema in {"dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5"} else row.get("role", "operation"),
+            row.get("role") if schema in {"dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"} else row.get("role", "operation"),
             f"task {task_id}.role",
         )
-        if schema in {"dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5"} and role not in {"operation", "instrumentation"}:
-            raise ContractError(f"task {task_id}.role must be operation or instrumentation")
+        allowed_roles = {"operation", "instrumentation", "external"} if schema == "dagcert-contract/v6" else {"operation", "instrumentation"}
+        if schema in {"dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"} and role not in allowed_roles:
+            raise ContractError(
+                f"task {task_id}.role must be one of {sorted(allowed_roles)}"
+            )
         timing_rows = _object(row.get("timings", {}), f"task {task_id}.timings")
         timings: dict[str, Timing] = {}
         for case, timing_value in timing_rows.items():
@@ -384,7 +416,68 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
         implementation: Implementation | None = None
         outcomes: tuple[TaskOutcome, ...] = ()
         source_signature: SourceSignature | None = None
-        if schema in {"dagcert-contract/v4", "dagcert-contract/v5"}:
+        external_contract: ExternalContract | None = None
+        if schema == "dagcert-contract/v6" and row.get("external_contract") is not None:
+            external = _object(
+                row.get("external_contract"), f"task {task_id}.external_contract"
+            )
+            if set(external) != {
+                "stub_path", "assumption", "provider", "success_outcome", "evidence_case",
+            }:
+                raise ContractError(
+                    f"task {task_id}.external_contract must contain exactly assumption, "
+                    "evidence_case, provider, stub_path, and success_outcome"
+                )
+            provider = _object(
+                external.get("provider"), f"task {task_id}.external_contract.provider"
+            )
+            if set(provider) != {"module", "symbols"}:
+                raise ContractError(
+                    f"task {task_id}.external_contract.provider must contain module and symbols"
+                )
+            provider_symbols = tuple(
+                _identifier(item, f"task {task_id}.external_contract.provider.symbols")
+                for item in _array(
+                    provider.get("symbols"),
+                    f"task {task_id}.external_contract.provider.symbols",
+                )
+            )
+            if not provider_symbols or len(provider_symbols) != len(set(provider_symbols)):
+                raise ContractError(
+                    f"task {task_id}.external_contract.provider.symbols must be nonempty and unique"
+                )
+            external_contract = ExternalContract(
+                _identifier(
+                    external.get("stub_path"),
+                    f"task {task_id}.external_contract.stub_path",
+                ),
+                _identifier(
+                    external.get("assumption"),
+                    f"task {task_id}.external_contract.assumption",
+                ),
+                ExternalProvider(
+                    _identifier(
+                        provider.get("module"),
+                        f"task {task_id}.external_contract.provider.module",
+                    ),
+                    provider_symbols,
+                ),
+                _identifier(
+                    external.get("success_outcome"),
+                    f"task {task_id}.external_contract.success_outcome",
+                ),
+                _identifier(
+                    external.get("evidence_case"),
+                    f"task {task_id}.external_contract.evidence_case",
+                ),
+            )
+        if role == "external" and external_contract is None:
+            raise ContractError(f"external task {task_id} requires external_contract")
+        if role != "external" and external_contract is not None:
+            raise ContractError(
+                f"non-external task {task_id} must set external_contract to null"
+            )
+        if schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"}:
             binding = _object(row.get("implementation"), f"task {task_id}.implementation")
             if set(binding) != {"language", "path", "symbol"}:
                 raise ContractError(
@@ -403,7 +496,21 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
                 source_signature = read_python_signature(
                     implementation_root, implementation.path, implementation.symbol,
                     include_legacy_unhandled=schema == "dagcert-contract/v4",
+                    external_boundary_id=task_id if role == "external" else None,
                 )
+                if external_contract is not None:
+                    if source_signature.outcome_types[0] != external_contract.success_outcome:
+                        raise SourceTypeError(
+                            f"external contract success outcome "
+                            f"{external_contract.success_outcome!r} does not match adapter return "
+                            f"{source_signature.outcome_types[0]!r}"
+                        )
+                    validate_external_contract_stub(
+                        implementation_root,
+                        external_contract.stub_path,
+                        implementation.symbol,
+                        source_signature,
+                    )
             except SourceTypeError as exc:
                 raise ContractError(f"task {task_id} source type error: {exc}") from exc
             outcome_rows = _array(row.get("outcomes"), f"task {task_id}.outcomes")
@@ -455,7 +562,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             input_type = _identifier(row.get("input_type"), f"task {task_id}.input_type")
             output_type = _identifier(row.get("output_type"), f"task {task_id}.output_type")
         error_budget: TaskErrorBudget | None = None
-        if schema == "dagcert-contract/v5" and row.get("error_budget") is not None:
+        if schema in {"dagcert-contract/v5", "dagcert-contract/v6"} and row.get("error_budget") is not None:
             budget = _object(row.get("error_budget"), f"task {task_id}.error_budget")
             required_budget_fields = {
                 "basis", "evidence_case", "good_outcomes",
@@ -505,7 +612,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             )
         typed_dependencies: tuple[TypedDependency, ...] = ()
         dependency_values = _array(row.get("depends_on", ()), f"task {task_id}.depends_on")
-        if schema in {"dagcert-contract/v4", "dagcert-contract/v5"}:
+        if schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"}:
             parsed_dependencies: list[TypedDependency] = []
             for dependency_value in dependency_values:
                 dependency = _object(dependency_value, f"task {task_id}.dependency")
@@ -544,6 +651,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             source_signature,
             typed_dependencies,
             error_budget,
+            external_contract,
         ))
 
     compositions: list[Composition] = []
@@ -557,11 +665,11 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             step = _object(step_value, f"composition {composition_id}.step")
             required_step_fields = (
                 {"task", "timing", "count", "outcome_type"}
-                if schema in {"dagcert-contract/v4", "dagcert-contract/v5"}
+                if schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"}
                 else {"task", "timing", "count"}
             )
             if set(step) != required_step_fields:
-                suffix = ", and outcome_type" if schema in {"dagcert-contract/v4", "dagcert-contract/v5"} else ""
+                suffix = ", and outcome_type" if schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"} else ""
                 raise ContractError(
                     "composition step must contain exactly task, timing, count" + suffix
                 )
@@ -575,11 +683,13 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
                 _identifier(
                     step.get("outcome_type"),
                     f"composition {composition_id}.step.outcome_type",
-                ) if schema in {"dagcert-contract/v4", "dagcert-contract/v5"} else None,
+                ) if schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"} else None,
             ))
         task_refs = tuple(step.task for step in steps)
         if len(set(task_refs)) < 2:
-            raise ContractError(f"composition {composition_id} must contain at least two operation tasks")
+            raise ContractError(
+                f"composition {composition_id} must contain at least two operation/external tasks"
+            )
         if len(task_refs) != len(set(task_refs)):
             raise ContractError(
                 f"composition {composition_id} must combine repeated executions with step.count"
@@ -613,6 +723,36 @@ def _validate(contract: Contract) -> None:
     workers = contract.worker_by_id
     tasks = contract.task_by_id
     resources = contract.resource_by_id
+    if contract.schema == "dagcert-contract/v6":
+        external_paths = {
+            task.implementation.path
+            for task in contract.tasks
+            if task.role == "external" and task.implementation is not None
+        }
+        proved_paths = {
+            task.implementation.path
+            for task in contract.tasks
+            if task.role == "operation" and task.implementation is not None
+        }
+        shared_paths = external_paths & proved_paths
+        if shared_paths:
+            raise ContractError(
+                "external adapters must be in separate modules from proved operations so Nagini "
+                f"can overlay only the declared ContractOnly boundary: {sorted(shared_paths)}"
+            )
+        implementation_paths = {
+            task.implementation.path
+            for task in contract.tasks if task.implementation is not None
+        }
+        for task in contract.tasks:
+            if (
+                task.external_contract is not None
+                and task.external_contract.stub_path in implementation_paths
+            ):
+                raise ContractError(
+                    f"external task {task.id} ContractOnly stub must be separate from every real "
+                    "implementation module"
+                )
     for task in contract.tasks:
         if not task.timings:
             raise ContractError(f"task {task.id} must declare at least one timing")
@@ -625,7 +765,7 @@ def _validate(contract: Contract) -> None:
             raise ContractError(f"task {task.id} has unknown dependencies {sorted(missing_dependencies)}")
         if task.id in task.depends_on:
             raise ContractError(f"task {task.id} depends on itself")
-        if contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5"}:
+        if contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"}:
             for dependency in task.typed_dependencies:
                 upstream = tasks.get(dependency.task)
                 if upstream is None:
@@ -640,7 +780,7 @@ def _validate(contract: Contract) -> None:
                         f"task {task.id} source input {task.input_type!r} does not accept typed edge "
                         f"{dependency.task}/{dependency.outcome_type}"
                     )
-            if contract.schema == "dagcert-contract/v5" and task.error_budget is not None:
+            if contract.schema in {"dagcert-contract/v5", "dagcert-contract/v6"} and task.error_budget is not None:
                 budget = task.error_budget
                 unknown_good = set(budget.good_outcomes) - set(task.outcome_by_type)
                 if unknown_good:
@@ -656,6 +796,36 @@ def _validate(contract: Contract) -> None:
                 if task.timings[budget.evidence_case].metric != "duration":
                     raise ContractError(
                         f"task {task.id}.error_budget evidence case must be a duration timing"
+                    )
+            if task.role == "external":
+                external = task.external_contract
+                if external is None:
+                    raise ContractError(f"external task {task.id} lacks an external contract")
+                if task.error_budget is None:
+                    raise ContractError(
+                        f"external task {task.id} requires an engineering error budget; use "
+                        "bad_event_probability_upper 0 for a p=1 premise"
+                    )
+                if task.error_budget.bad_event_probability_upper != 0:
+                    raise ContractError(
+                        f"external task {task.id} ContractOnly proof is a p=1 premise and therefore "
+                        "requires bad_event_probability_upper 0; model nonzero provider failure "
+                        "inside executable typed operations instead"
+                    )
+                if task.error_budget.good_outcomes != (external.success_outcome,):
+                    raise ContractError(
+                        f"external task {task.id} error budget must classify exactly its success "
+                        f"outcome {external.success_outcome!r} as good"
+                    )
+                if task.error_budget.evidence_case != external.evidence_case:
+                    raise ContractError(
+                        f"external task {task.id} error-budget evidence case must equal external "
+                        f"contract case {external.evidence_case!r}"
+                    )
+                if external.evidence_case not in task.timings:
+                    raise ContractError(
+                        f"external task {task.id} cites unknown conformance evidence case "
+                        f"{external.evidence_case!r}"
                     )
         for resource_id, effect in task.resources.items():
             if resource_id not in resources:
@@ -676,7 +846,7 @@ def _validate(contract: Contract) -> None:
             )
         instrumentation = sorted(
             task_id for task_id in composition.task_refs
-            if tasks[task_id].role != "operation"
+            if tasks[task_id].role not in {"operation", "external"}
         )
         if instrumentation:
             raise ContractError(
@@ -693,7 +863,7 @@ def _validate(contract: Contract) -> None:
                 raise ContractError(
                     f"composition {composition.id} step {step.task}/{step.timing} must be a duration"
                 )
-            if contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5"}:
+            if contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"}:
                 if step.outcome_type not in task.outcome_by_type:
                     raise ContractError(
                         f"composition {composition.id} step {step.task} cites outcome "
@@ -704,7 +874,7 @@ def _validate(contract: Contract) -> None:
                         f"composition {composition.id} repeats {step.task}, but outcome "
                         f"{step.outcome_type!r} is not the task input {task.input_type!r}"
                     )
-        if contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5"}:
+        if contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"}:
             for upstream_step, downstream_step in zip(
                 composition.steps, composition.steps[1:], strict=False,
             ):

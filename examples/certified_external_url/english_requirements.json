@@ -1,0 +1,24 @@
+{
+  "schema": "dagcert-english-requirements/v2",
+  "claims": [
+    {
+      "id": "urllib-contract",
+      "statement": "Conditional on the explicit p=1 engineering premise, every call through the bound urllib adapter returns the declared ParsedUrl value; every raised exception or wrong return type is retained as a Dagcert violation and invalidates the zero-failure budget.",
+      "primitive_refs": ["task:url.parse", "timing:url.parse/call", "external-contract:url.parse", "error-budget:url.parse"],
+      "checker_refs": [],
+      "assumptions": ["The sealed urllib.parse.urlsplit implementation meets the source-owned ContractOnly specification for this adapter; retained runtime calls check that premise but do not statistically establish it."],
+      "basis": "chance",
+      "formula": {"gte": [{"external_success_probability_lower": "external-contract:url.parse"}, 1.0]}
+    },
+    {
+      "id": "parse-and-accept-time",
+      "statement": "On the exact typed ParsedUrl success path, the composed certified duration of parsing and application acceptance is below 20 ms.",
+      "primitive_refs": ["composition:parse-and-accept", "timing:url.parse/call", "timing:url.accept/completion"],
+      "checker_refs": [],
+      "assumptions": ["This is conditional on traversing the ParsedUrl outcome named by the composition."],
+      "basis": "derived",
+      "formula": {"lt": [{"composition_upper_ms": "composition:parse-and-accept"}, 20.0]}
+    }
+  ],
+  "metadata": {"purpose": "Reference external-provider and downstream typed-DAG claims"}
+}

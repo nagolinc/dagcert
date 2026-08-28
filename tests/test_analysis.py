@@ -73,7 +73,8 @@ def test_source_outcome_pipeline_is_may_reachable_but_not_must_reachable(
         "outcomes": [
             {"type": "FollowupCompleted", "resources": {"state": {"consume": 1}}, "metadata": {}},
         ],
-        "error_budget": None,
+            "error_budget": None,
+            "external_contract": None,
         "depends_on": [{"task": "work", "outcome_type": "WorkCompleted"}],
         "timings": {"normal": {
             "metric": "duration", "upper_ms": 10, "minimum_samples": 3,

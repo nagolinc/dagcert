@@ -25,12 +25,18 @@ from .checks import (
     write_check_result,
 )
 from .contract import (
-    Composition, CompositionStep, Contract, ContractError, Implementation, Resource, ResourceEffect,
+    Composition, CompositionStep, Contract, ContractError, ExternalContract, ExternalProvider,
+    Implementation, Resource, ResourceEffect,
     Task, TaskErrorBudget, TaskOutcome, Timing, TypedDependency, Worker, load_contract,
 )
-from .evidence import EvidenceError, EvidenceRecorder, TimingSample, load_evidence
-from .runtime import OperationTypeViolation, UnhandledException, operation, outcome_type
-from .source_types import SourceSignature, SourceTypeError
+from .evidence import ExternalEvidenceMonitor, EvidenceError, EvidenceRecorder, TimingSample, load_evidence
+from .runtime import (
+    ExternalBoundaryEvent, ExternalMonitorError, ExternalRaised, ExternalSuccess,
+    ExternalTypeViolation, OperationTypeViolation, UnhandledException,
+    clear_runtime_violations, external_boundary, monitor_external_boundaries, operation,
+    outcome_type, runtime_violations,
+)
+from .source_types import SourceSignature, SourceTypeError, check_python_sources
 from .requirements import (
     EnglishClaim,
     EnglishRequirements,
@@ -43,13 +49,14 @@ from .requirements import (
 __all__ = [
     "AnalysisReport", "CertificateError", "CertificateVerification", "CheckContext",
     "CheckFinding", "Checker", "CheckResult", "Composition", "CompositionStep",
-    "Contract", "ContractError", "Implementation",
-    "EnglishClaim", "EnglishRequirements", "ErrorBudgetResult", "EvidenceError", "EvidenceRecorder", "Finding",
+    "Contract", "ContractError", "ExternalContract", "ExternalProvider", "Implementation",
+    "EnglishClaim", "EnglishRequirements", "ErrorBudgetResult", "EvidenceError", "EvidenceRecorder", "ExternalEvidenceMonitor", "Finding",
     "RequirementsError", "Resource", "ResourceEffect",
     "StructuralProgress", "Task", "TaskErrorBudget", "TaskOutcome", "Timing", "TimingResult", "TimingSample", "TranslationAudit", "TypedDependency",
+    "ExternalBoundaryEvent", "ExternalMonitorError", "ExternalRaised", "ExternalSuccess", "ExternalTypeViolation",
     "OperationTypeViolation", "SourceSignature", "SourceTypeError", "UnhandledException", "Worker", "analyze_contract", "audit_translation", "issue_certificate",
     "load_check_result", "load_contract", "load_evidence", "load_requirements", "run_checker", "sha256_file",
-    "operation", "outcome_type", "source_fingerprint", "source_manifest", "verify_certificate", "write_check_result",
+    "check_python_sources", "clear_runtime_violations", "external_boundary", "monitor_external_boundaries", "operation", "outcome_type", "runtime_violations", "source_fingerprint", "source_manifest", "verify_certificate", "write_check_result",
 ]
 
 __version__ = VERSION

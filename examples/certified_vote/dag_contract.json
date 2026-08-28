@@ -1,5 +1,5 @@
 {
-  "schema": "dagcert-contract/v5",
+  "schema": "dagcert-contract/v6",
   "workers": [
     {"id": "interface", "concurrency": 1},
     {"id": "ledger", "concurrency": 1},
@@ -27,6 +27,7 @@
         "bad_event_probability_upper": 0.01,
         "minimum_observations": 10
       },
+      "external_contract": null,
       "depends_on": [],
       "timings": {
         "completion": {
@@ -53,6 +54,7 @@
         "bad_event_probability_upper": 0.01,
         "minimum_observations": 10
       },
+      "external_contract": null,
       "depends_on": [{"task": "vote.preview", "outcome_type": "PreviewTotal"}],
       "timings": {
         "completion": {
@@ -72,6 +74,7 @@
         {"type": "SummaryGeneration", "resources": {"summary-lag": {"consume": 1}}, "metadata": {}}
       ],
       "error_budget": null,
+      "external_contract": null,
       "depends_on": [{"task": "vote.commit", "outcome_type": "CommittedTotal"}],
       "timings": {
         "completion": {
@@ -90,6 +93,7 @@
         {"type": "TextSnapshot", "resources": {"snapshot-work": {"consume": 1}}, "metadata": {}}
       ],
       "error_budget": null,
+      "external_contract": null,
       "depends_on": [{"task": "vote.commit", "outcome_type": "CommittedTotal"}],
       "timings": {
         "completion": {

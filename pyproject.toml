@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dagcert"
-version = "0.11.0"
+version = "0.12.0"
 description = "Plain-English certificates over workers, tasks, resources, and timings"
 readme = "readme.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{name = "dagcert contributors"}]
-dependencies = ["mypy>=1.11"]
+dependencies = ["mypy>=1.11", "typeguard>=4.4,<5"]
 
 [project.urls]
 Repository = "https://github.com/nagolinc/dagcert"
@@ -31,7 +31,7 @@ include-package-data = true
 include = ["dagcert*", "examples*"]
 
 [tool.setuptools.package-data]
-dagcert = ["py.typed", "*.pyi", "nagini_stubs/**/*.pyi", "bundled_skill/**/*.md", "bundled_skill/**/*.yaml", "docs/*.md"]
+dagcert = ["py.typed", "*.pyi", "mypy_stubs/**/*.pyi", "nagini_stubs/**/*.pyi", "bundled_skill/**/*.md", "bundled_skill/**/*.yaml", "docs/*.md"]
 examples = [
     "*.txt",
     "*.js",
@@ -54,6 +54,11 @@ examples = [
     "certified_database_ui/artifacts/*.png",
     "certified_database_ui/artifacts/independent-audit/**/*.json",
     "certified_database_ui/artifacts/independent-audit/**/*.txt",
+    "certified_external_url/*.py",
+    "certified_external_url/*.json",
+    "certified_external_url/*.md",
+    "certified_external_url/artifacts/*.json",
+    "certified_external_url/artifacts/*.jsonl",
     "stats_viewer/*.html",
     "stats_viewer/*.css",
     "stats_viewer/*.js",

@@ -16,7 +16,9 @@ from .contract import Contract, load_contract
 from .evidence import load_evidence
 from .formula import FormulaError, evaluate_formula
 from .requirements import EnglishRequirements, audit_translation, load_requirements
-from .source_types import SourceTypeError, check_python_sources, type_enforcement_descriptor
+from .source_types import (
+    ExternalSourceContract, SourceTypeError, check_python_sources, type_enforcement_descriptor,
+)
 
 
 class CertificateError(RuntimeError):
@@ -126,6 +128,10 @@ def _primitive_refs(contract: Contract) -> set[str]:
         if task.error_budget is not None
     )
     refs.update(
+        f"external-contract:{task.id}" for task in contract.tasks
+        if task.external_contract is not None
+    )
+    refs.update(
         f"guarantee:{task.id}/{kind}/{resource.id}"
         for task in contract.tasks
         for kind in ("produce", "consume")
@@ -137,6 +143,9 @@ def _primitive_refs(contract: Contract) -> set[str]:
 def _serialized_primitives(contract: Contract, analysis_mapping: dict[str, Any]) -> dict[str, Any]:
     """Return the exact JSON shape stored in a certificate (tuples become arrays)."""
     tasks = [asdict(item) for item in contract.tasks]
+    if contract.schema != "dagcert-contract/v6":
+        for task in tasks:
+            task.pop("external_contract", None)
     if contract.schema in {"dagcert-contract/v2", "dagcert-contract/v3"}:
         for task in tasks:
             task.pop("implementation", None)
@@ -152,14 +161,37 @@ def _serialized_primitives(contract: Contract, analysis_mapping: dict[str, Any])
         "resources": [asdict(item) for item in contract.resources],
         "timings": analysis_mapping["timings"],
     }
-    if contract.schema in {"dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5"}:
+    if contract.schema in {"dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"}:
         compositions = [asdict(item) for item in contract.compositions]
-        if contract.schema not in {"dagcert-contract/v4", "dagcert-contract/v5"}:
+        if contract.schema not in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"}:
             for composition in compositions:
                 for step in composition["steps"]:
                     step.pop("outcome_type", None)
         value["compositions"] = compositions
     return cast(dict[str, Any], json.loads(canonical_json(value)))
+
+
+def _external_source_contracts(contract: Contract) -> tuple[ExternalSourceContract, ...]:
+    result: list[ExternalSourceContract] = []
+    for task in contract.tasks:
+        external = task.external_contract
+        implementation = task.implementation
+        signature = task.source_signature
+        if external is None:
+            continue
+        if implementation is None or signature is None:
+            raise CertificateError(f"external task {task.id} lacks a source binding")
+        result.append(ExternalSourceContract(
+            task.id,
+            implementation.path,
+            implementation.symbol,
+            external.stub_path,
+            external.provider.module,
+            external.provider.symbols,
+            external.assumption,
+            signature,
+        ))
+    return tuple(result)
 
 
 def _claim_analysis(
@@ -193,7 +225,11 @@ def _claim_analysis(
             "basis": claim.basis,
             "passed": True,
             "scope": (
-                "finite DAG composition with correlation-safe union-bound error budgets"
+                (
+                    "finite DAG composition under explicit engineering error-budget premises"
+                    if evaluation.composition_refs
+                    else "declared external contract under an explicit engineering probability premise"
+                )
                 if claim.basis == "chance"
                 else "declared finite DAG composition" if evaluation.composition_refs
                 else "declared connected task/resource DAG"
@@ -254,10 +290,10 @@ def issue_certificate(
     fingerprint = sha256(canonical_json(manifest)).hexdigest()
     contract = load_contract(contract_path, source_root=root)
     requirements = load_requirements(requirements_path)
-    if contract.schema != "dagcert-contract/v5":
+    if contract.schema != "dagcert-contract/v6":
         raise CertificateError(
-            "new certificate issuance requires dagcert-contract/v5 with source-owned task "
-            "types and explicit error-budget slots"
+            "new certificate issuance requires dagcert-contract/v6 with source-owned operation "
+            "types and explicit external-contract boundaries"
         )
     if requirements.schema != "dagcert-english-requirements/v2":
         raise CertificateError(
@@ -272,6 +308,7 @@ def issue_certificate(
                 task.source_signature for task in contract.tasks
                 if task.role == "operation" and task.source_signature is not None
             ),
+            external_contracts=_external_source_contracts(contract),
         )
     except SourceTypeError as exc:
         raise CertificateError(f"certificate refused: {exc}") from exc
@@ -296,7 +333,7 @@ def issue_certificate(
         raise CertificateError("certificate refused: " + "; ".join(check_problems))
     claim_analysis = _claim_analysis(requirements, contract, analysis)
     document: dict[str, Any] = {
-        "schema": "dagcert-certificate/v9",
+        "schema": "dagcert-certificate/v10",
         "issued_at": time(),
         "source_manifest": manifest,
         "source_fingerprint": fingerprint,
@@ -341,9 +378,10 @@ def verify_certificate(
     if not isinstance(raw, dict) or raw.get("schema") not in {
         "dagcert-certificate/v4", "dagcert-certificate/v5", "dagcert-certificate/v6",
         "dagcert-certificate/v7", "dagcert-certificate/v8", "dagcert-certificate/v9",
+        "dagcert-certificate/v10",
     }:
         return CertificateVerification(False, (
-            "certificate schema must be dagcert-certificate/v4, v5, v6, v7, v8, or v9",
+            "certificate schema must be dagcert-certificate/v4 through v10",
         ))
     certificate_schema = raw["schema"]
     expected_fields = {
@@ -352,13 +390,13 @@ def verify_certificate(
         "english_requirements", "translation_audit", "primitives", "analysis", "checks",
         "check_result_sha256", "certificate_sha256",
     }
-    if certificate_schema in {"dagcert-certificate/v5", "dagcert-certificate/v6", "dagcert-certificate/v7", "dagcert-certificate/v8", "dagcert-certificate/v9"}:
+    if certificate_schema in {"dagcert-certificate/v5", "dagcert-certificate/v6", "dagcert-certificate/v7", "dagcert-certificate/v8", "dagcert-certificate/v9", "dagcert-certificate/v10"}:
         expected_fields.add("claim_analysis")
     if certificate_schema in {"dagcert-certificate/v6", "dagcert-certificate/v7", "dagcert-certificate/v8"}:
         expected_fields.add("source_typing")
-    if certificate_schema == "dagcert-certificate/v9":
+    if certificate_schema in {"dagcert-certificate/v9", "dagcert-certificate/v10"}:
         expected_fields.add("source_verification")
-    if certificate_schema in {"dagcert-certificate/v7", "dagcert-certificate/v8", "dagcert-certificate/v9"}:
+    if certificate_schema in {"dagcert-certificate/v7", "dagcert-certificate/v8", "dagcert-certificate/v9", "dagcert-certificate/v10"}:
         expected_fields.add("type_enforcement")
     if set(raw) != expected_fields:
         unexpected = sorted(set(raw) - expected_fields)
@@ -404,7 +442,7 @@ def verify_certificate(
                     problems.append("source type analysis no longer matches")
             except SourceTypeError as exc:
                 problems.append(f"current source type analysis failed: {exc}")
-        if certificate_schema == "dagcert-certificate/v9":
+        if certificate_schema in {"dagcert-certificate/v9", "dagcert-certificate/v10"}:
             try:
                 source_verification = check_python_sources(
                     root,
@@ -414,13 +452,14 @@ def verify_certificate(
                         task.source_signature for task in contract.tasks
                         if task.role == "operation" and task.source_signature is not None
                     ),
+                    external_contracts=_external_source_contracts(contract),
                 )
                 if raw.get("source_verification") != source_verification:
                     problems.append("source verification no longer matches")
             except SourceTypeError as exc:
                 problems.append(f"current source verification failed: {exc}")
         if (
-            certificate_schema in {"dagcert-certificate/v7", "dagcert-certificate/v8", "dagcert-certificate/v9"}
+            certificate_schema in {"dagcert-certificate/v7", "dagcert-certificate/v8", "dagcert-certificate/v9", "dagcert-certificate/v10"}
             and raw.get("type_enforcement") != type_enforcement_descriptor()
         ):
             problems.append("source/runtime type enforcement kernel no longer matches")
@@ -446,9 +485,10 @@ def verify_certificate(
         problems.extend(translation_audit.findings)
         if raw.get("translation_audit") != translation_audit.to_mapping():
             problems.append("English-to-formal translation audit no longer matches")
-        if certificate_schema in {"dagcert-certificate/v5", "dagcert-certificate/v6", "dagcert-certificate/v7", "dagcert-certificate/v8", "dagcert-certificate/v9"}:
+        if certificate_schema in {"dagcert-certificate/v5", "dagcert-certificate/v6", "dagcert-certificate/v7", "dagcert-certificate/v8", "dagcert-certificate/v9", "dagcert-certificate/v10"}:
             expected_contract_schema = (
-                "dagcert-contract/v5" if certificate_schema in {"dagcert-certificate/v8", "dagcert-certificate/v9"}
+                "dagcert-contract/v6" if certificate_schema == "dagcert-certificate/v10"
+                else "dagcert-contract/v5" if certificate_schema in {"dagcert-certificate/v8", "dagcert-certificate/v9"}
                 else "dagcert-contract/v4" if certificate_schema in {"dagcert-certificate/v6", "dagcert-certificate/v7"}
                 else "dagcert-contract/v3"
             )

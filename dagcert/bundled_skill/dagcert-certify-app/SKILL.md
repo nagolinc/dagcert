@@ -20,18 +20,18 @@ Dagcert's primitives remain workers, tasks, resources, and timings. A hardened c
 declares finite source-outcome paths over those primitives.
 
 - `operation` tasks are real executable leaf boundaries and may have measured timings.
-- In a v5 contract, an operation binds a real source file and symbol. Dagcert extracts its one-input
+- In a v6 contract, an operation binds a real source file and symbol. Dagcert extracts its one-input
   type and closed return union and runs strict mypy itself. It then requires the digest-pinned
   Nagini/Viper container to prove the complete bound Python file has no undeclared exceptional
   exit. Contract JSON cannot declare or override task types.
 - Dagcert verifies the provenance of `operation` and `dataclass`; local lookalike decorators and
   source-tree modules shadowing `dagcert` or `dataclasses` fail. The marker preserves the exact
   callable type; it does not catch exceptions or widen the outcome union.
-- A v9 certificate seals strict-mypy output, the pinned Nagini image digest and proof scope, and the
+- A v10 certificate seals strict-mypy output, the pinned Nagini image digest and proof scope, and the
   exact type-enforcement core-file manifest—not only a claimed Dagcert version or compiler result.
 - `instrumentation` tasks may record aggregate observations but cannot participate in a derived
   composition.
-- A v5 composition names the source outcome at every step, and adjacent steps must be a real typed
+- A v6 composition names the source outcome at every step, and adjacent steps must be a real typed
   dependency edge. Dagcert computes its conservative bound from those leaves; it never accepts a
   direct aggregate stopwatch as the derivation.
 
@@ -43,13 +43,25 @@ names.
 
 Write the production operation boundary in its strongly typed form before modeling it. For Python,
 use an explicit input class, explicit named outcome classes, an inline closed return union, and
-`@dagcert.runtime.operation`. Every v5 dependency names an upstream outcome type and must feed a downstream
+`@dagcert.runtime.operation`. Every v6 dependency names an upstream outcome type and must feed a downstream
 callable that accepts that exact source type. Model effects for every explicit source outcome.
 Expected failures must be return variants; an unexpected exception invalidates the proof. Keep
 parsing, normalization, lookup, reservation, and other claim-relevant argument preparation inside
 the verified boundary. Never create a typed certification wrapper that production bypasses.
-Do not use operation-level Nagini `Requires`, bound-module `Assume`, or `ContractOnly`; Dagcert
+Do not use operation-level Nagini `Requires` or executable-module `Assume`/`ContractOnly`; Dagcert
 must prove executable behavior for the complete declared input type without trusted axioms.
+
+For a real third-party or standard-library boundary that Nagini cannot translate, declare a v6
+`external` task. Put the executable adapter in its own module, mark it with
+`@dagcert.runtime.external_boundary(TASK_ID)`, and put the Nagini `ContractOnly` specification in a
+different source-owned stub named by `external_contract.stub_path`. The stub is a proof overlay, not
+production code. Its input and success dataclass shapes must exactly match the adapter. Declare the
+real provider module/symbols and the precise engineering assumption. Run production calls under
+`monitor_external_boundaries(ExternalEvidenceMonitor(...))`; exceptions and wrong return types are
+typed violation outcomes and retained evidence, never success. Use a zero bad-event upper bound for
+a p=1 premise; any observed violation then refuses issuance.
+The stub body is intentionally limited to `Ensures(Result() is not None)`; arbitrary postconditions
+could make the proof vacuous and are rejected. Put richer value validation in executable code.
 
 Do not claim a JavaScript or TypeScript task is a proved operation. This release has no approved
 exception/totality verifier for those languages; `tsc --strict` is not a substitute. Represent such
@@ -64,7 +76,8 @@ Classify every claim before collecting evidence:
 - `derived` contains a formula in Dagcert's fixed kernel algebra. It cannot cite a checker as proof.
   The formula must use a declared multi-operation composition or bounds from at least two connected
   tasks plus relevant worker/resource state.
-- `chance` contains a finite-composition union-bound formula. Every step must use a task-local
+- `chance` contains either a finite-composition engineering-envelope formula or one external-contract
+  probability premise. Every composition step must use a task-local
   engineering error budget, select a source-typed good outcome, and cite that budget as an explicit
   assumption. The budget's complete good set must equal the exact selected outcome. Do not invent
   failure outcomes: a total task can use `error_budget: null`, and an optional budget may classify
@@ -91,8 +104,9 @@ composed latency with a summary task whose measured output is the desired conclu
 4. Declare real workers, operation tasks, instrumentation, resources, and finite compositions.
    Bind each task to the source symbol actually called by its production worker; do not write
    `input_type` or `output_type` labels in the contract.
-5. Put external premises in `assumed` leaf timings. Do not infer worst-case gaps from averages or a
-   few favorable samples.
+5. Put timing premises in `assumed` leaf timings. Model external-library behavior with a declared
+   `external_contract`, proof-only stub, typed runtime boundary, and canonical evidence stream. Do
+   not infer worst-case gaps or probabilities from a few favorable samples.
 6. Record every exact-source attempt, including failures. Exercise representative and adversarial
    cases. Never retry to replace a failed observation.
 7. Run `dagcert lint`, application tests, and `dagcert analyze`. Resolve every coverage, binding,
