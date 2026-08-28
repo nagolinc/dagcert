@@ -28,6 +28,26 @@ def test_cli_lint_rejects_incomplete_translation(project, capsys):
     assert "formal timings lack an English claim" in capsys.readouterr().err
 
 
+def test_cli_lint_checks_external_contracts_with_the_exact_manifest(
+    monkeypatch, capsys,
+):
+    root = Path(__file__).parents[1] / "examples" / "certified_external_url"
+    captured = {}
+
+    def fake_source_verification(_root, _signatures, **kwargs):
+        captured.update(kwargs)
+        return {"exception_verifier": {"result": "not-applicable"}}
+
+    monkeypatch.setattr("dagcert.cli.check_python_sources", fake_source_verification)
+    assert main([
+        "lint", str(root / "dag_contract.json"),
+        "--requirements", str(root / "english_requirements.json"),
+    ]) == 0
+    assert captured["source_manifest_paths"]
+    assert len(captured["external_contracts"]) == 1
+    assert "source verification" in capsys.readouterr().out
+
+
 def test_init_is_non_destructive(tmp_path: Path):
     root = tmp_path / "new-app"
     assert main(["init", str(root)]) == 0

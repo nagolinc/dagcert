@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib.machinery import ModuleSpec
 from pathlib import Path
 import json
 import pytest
@@ -35,7 +36,9 @@ from dagcert import (
     runtime_violations,
 )
 from dagcert.formula import evaluate_formula
-from dagcert.source_types import ExternalSourceContract
+from dagcert.source_types import (
+    ExternalSourceContract, SourceTypeError, _resolve_external_provider,
+)
 
 
 @dataclass(frozen=True)
@@ -270,3 +273,60 @@ def test_v6_external_adapter_and_contractonly_stub_are_separate_and_exact(
     )
     with pytest.raises(ContractError, match="Arbitrary proof axioms"):
         load_contract(contract_path, source_root=tmp_path)
+
+
+def test_environment_provider_is_external_even_when_environment_is_under_source_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = tmp_path / ".venv" / "Lib" / "site-packages" / "sample_files.py"
+    provider.parent.mkdir(parents=True)
+    provider.write_text("def load() -> str:\n    return 'sample'\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "dagcert.source_types.importlib.util.find_spec",
+        lambda _module: ModuleSpec("sample_files", loader=None, origin=str(provider)),
+    )
+    monkeypatch.setattr(
+        "dagcert.source_types._python_environment_schemes",
+        lambda path: ["purelib"] if path == provider.resolve() else [],
+    )
+
+    resolved = _resolve_external_provider(tmp_path, "sample_files", None)
+
+    assert resolved["ownership"] == "python-environment"
+    assert resolved["environment_schemes"] == ["purelib"]
+    assert resolved["distributions"] == []
+
+
+def test_app_provider_cannot_be_relabelled_external(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = tmp_path / "sample_files.py"
+    provider.write_text("def load() -> str:\n    return 'sample'\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "dagcert.source_types.importlib.util.find_spec",
+        lambda _module: ModuleSpec("sample_files", loader=None, origin=str(provider)),
+    )
+    monkeypatch.setattr(
+        "dagcert.source_types._python_environment_schemes", lambda _path: [],
+    )
+
+    with pytest.raises(SourceTypeError, match="part of the certified source manifest"):
+        _resolve_external_provider(tmp_path, "sample_files", frozenset({"sample_files.py"}))
+
+
+def test_excluding_an_app_provider_does_not_make_it_external(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = tmp_path / "ignored" / "sample_files.py"
+    provider.parent.mkdir()
+    provider.write_text("def load() -> str:\n    return 'sample'\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "dagcert.source_types.importlib.util.find_spec",
+        lambda _module: ModuleSpec("sample_files", loader=None, origin=str(provider)),
+    )
+    monkeypatch.setattr(
+        "dagcert.source_types._python_environment_schemes", lambda _path: [],
+    )
+
+    with pytest.raises(SourceTypeError, match="merely excluded beneath the source root"):
+        _resolve_external_provider(tmp_path, "sample_files", frozenset())

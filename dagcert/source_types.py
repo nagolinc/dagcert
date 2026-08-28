@@ -17,6 +17,7 @@ import json
 import os
 import re
 import sys
+import sysconfig
 
 from .python_verifier import PythonVerificationError, verify_exception_freedom
 
@@ -45,14 +46,14 @@ def type_enforcement_descriptor() -> dict[str, object]:
         manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
     ).encode("utf-8")
     return {
-        "provider": "dagcert.python/v6",
+        "provider": "dagcert.python/v7",
         "dagcert_version": VERSION,
         "static_analysis": "source-ast+strict-mypy/v1",
         "mypy_import_surface": "sealed-type-preserving-dagcert-stub/v1",
         "decorator_provenance": "trusted-imports-and-shadow-rejection/v1",
         "operation_marker": "type-preserving/v1",
         "exception_verification": "nagini-viper-external-contract-overlays/v3",
-        "external_contracts": "p1-contract-only+typeguard-runtime/v2",
+        "external_contracts": "environment-resolved+p1-contract-only+typeguard-runtime/v3",
         "reachability": "typed-may-must/v1",
         "chance_composition": "engineering-envelope-exact-path+external/v3",
         "kernel_manifest": manifest,
@@ -87,6 +88,7 @@ def check_python_sources(
     signatures: Iterable[SourceSignature],
     *,
     source_fingerprint: str | None = None,
+    source_manifest_paths: Iterable[str] | None = None,
     prove_exceptions: bool = True,
     proof_signatures: Iterable[SourceSignature] | None = None,
     external_contracts: Iterable[ExternalSourceContract] = (),
@@ -157,8 +159,12 @@ def check_python_sources(
         }
     if source_fingerprint is None:
         raise SourceTypeError("source fingerprint is required for sealed exception verification")
+    manifest_paths = (
+        None if source_manifest_paths is None
+        else frozenset(Path(item).as_posix() for item in source_manifest_paths)
+    )
     external_results = [
-        _validate_external_source_contract(root, item)
+        _validate_external_source_contract(root, item, manifest_paths)
         for item in external_boundaries
     ]
     overlays = {item.adapter_path: item.stub_path for item in external_boundaries}
@@ -193,7 +199,7 @@ def check_python_sources(
             "files": [],
         }
     return {
-        "provider": "dagcert.python-source-verification/v1",
+        "provider": "dagcert.python-source-verification/v2",
         "type_checker": {
             "checker": "mypy",
             "version": mypy_version,
@@ -381,7 +387,9 @@ def validate_external_contract_stub(
 
 
 def _validate_external_source_contract(
-    root: Path, contract: ExternalSourceContract,
+    root: Path,
+    contract: ExternalSourceContract,
+    source_manifest_paths: frozenset[str] | None,
 ) -> dict[str, object]:
     stub = validate_external_contract_stub(
         root, contract.stub_path, contract.symbol, contract.signature,
@@ -442,44 +450,9 @@ def _validate_external_source_contract(
             f"declared provider symbols {sorted(missing)} from {contract.provider_module}"
         )
 
-    try:
-        spec = importlib.util.find_spec(contract.provider_module)
-    except (ImportError, AttributeError, ValueError) as exc:
-        raise SourceTypeError(
-            f"cannot resolve external provider module {contract.provider_module!r}: {exc}"
-        ) from exc
-    if spec is None:
-        raise SourceTypeError(
-            f"cannot resolve external provider module {contract.provider_module!r}"
-        )
-    origin = spec.origin
-    origin_digest: str | None = None
-    origin_kind = "built-in" if origin in {None, "built-in", "frozen"} else "file"
-    if origin_kind == "file":
-        provider_path = Path(str(origin)).resolve()
-        try:
-            provider_path.relative_to(root)
-        except ValueError:
-            pass
-        else:
-            raise SourceTypeError(
-                f"external provider {contract.provider_module!r} resolves inside the certified "
-                "source tree; app-owned code cannot be relabeled external"
-            )
-        if not provider_path.is_file():
-            raise SourceTypeError(
-                f"external provider origin is not a file: {contract.provider_module!r}"
-            )
-        origin_digest = sha256(provider_path.read_bytes()).hexdigest()
-
-    top_level = contract.provider_module.split(".", 1)[0]
-    distributions: list[dict[str, str]] = []
-    for distribution in sorted(importlib.metadata.packages_distributions().get(top_level, ())):
-        try:
-            version = importlib.metadata.version(distribution)
-        except importlib.metadata.PackageNotFoundError:
-            continue
-        distributions.append({"name": distribution, "version": version})
+    provider = _resolve_external_provider(
+        root, contract.provider_module, source_manifest_paths,
+    )
     return {
         "boundary_id": contract.boundary_id,
         "assumption": contract.assumption,
@@ -492,15 +465,117 @@ def _validate_external_source_contract(
         "provider": {
             "module": contract.provider_module,
             "symbols": list(contract.provider_symbols),
-            "origin_kind": origin_kind,
-            "origin_sha256": origin_digest,
-            "distributions": distributions,
+            **provider,
             "python_implementation": sys.implementation.name,
             "python_version": list(sys.version_info[:3]),
             "python_cache_tag": sys.implementation.cache_tag,
         },
         "runtime_validation": "typeguard-return-annotation/v1",
     }
+
+
+def _resolve_external_provider(
+    root: Path,
+    provider_module: str,
+    source_manifest_paths: frozenset[str] | None,
+) -> dict[str, object]:
+    """Classify a provider by import environment first, then certified source ownership."""
+
+    try:
+        spec = importlib.util.find_spec(provider_module)
+    except (ImportError, AttributeError, ValueError) as exc:
+        raise SourceTypeError(
+            f"cannot resolve external provider module {provider_module!r}: {exc}"
+        ) from exc
+    if spec is None:
+        raise SourceTypeError(f"cannot resolve external provider module {provider_module!r}")
+    origin = spec.origin
+    if origin in {None, "built-in", "frozen"}:
+        return {
+            "origin_kind": "built-in",
+            "ownership": "python-runtime",
+            "environment_schemes": [],
+            "origin_sha256": None,
+            "distributions": [],
+        }
+
+    provider_path = Path(str(origin)).resolve()
+    if not provider_path.is_file():
+        raise SourceTypeError(f"external provider origin is not a file: {provider_module!r}")
+
+    environment_schemes = _python_environment_schemes(provider_path)
+    if environment_schemes:
+        ownership = "python-environment"
+    else:
+        try:
+            relative = provider_path.relative_to(root).as_posix()
+        except ValueError:
+            ownership = "outside-source-root"
+        else:
+            if source_manifest_paths is None:
+                raise SourceTypeError(
+                    f"external provider {provider_module!r} resolves inside the source root; "
+                    "classification requires the exact certified source manifest"
+                )
+            if relative in source_manifest_paths:
+                raise SourceTypeError(
+                    f"external provider {provider_module!r} is part of the certified source "
+                    "manifest; app-owned code cannot be relabeled external"
+                )
+            raise SourceTypeError(
+                f"external provider {provider_module!r} is merely excluded beneath the source "
+                "root and is not installed in the active Python environment; exclusion alone "
+                "cannot relabel app-owned code as external"
+            )
+
+    return {
+        "origin_kind": "file",
+        "ownership": ownership,
+        "environment_schemes": environment_schemes,
+        "origin_sha256": sha256(provider_path.read_bytes()).hexdigest(),
+        "distributions": _installed_distribution_owners(provider_module, provider_path),
+    }
+
+
+def _python_environment_schemes(provider_path: Path) -> list[str]:
+    paths = sysconfig.get_paths()
+    schemes: list[str] = []
+    for name in ("purelib", "platlib", "stdlib", "platstdlib"):
+        raw = paths.get(name)
+        if not raw:
+            continue
+        try:
+            provider_path.relative_to(Path(raw).resolve())
+        except ValueError:
+            continue
+        schemes.append(name)
+    return sorted(set(schemes))
+
+
+def _installed_distribution_owners(
+    provider_module: str, provider_path: Path,
+) -> list[dict[str, str]]:
+    """Return optional package provenance; this does not decide external ownership."""
+
+    top_level = provider_module.split(".", 1)[0]
+    owners: list[dict[str, str]] = []
+    candidates = importlib.metadata.packages_distributions().get(top_level, ())
+    for candidate in sorted(set(candidates), key=str.casefold):
+        try:
+            distribution = importlib.metadata.distribution(candidate)
+        except importlib.metadata.PackageNotFoundError:
+            continue
+        files = distribution.files
+        if files is None or not any(
+            Path(str(distribution.locate_file(item))).resolve() == provider_path
+            for item in files
+        ):
+            continue
+        owners.append({
+            "name": distribution.metadata["Name"] or candidate,
+            "version": distribution.version,
+        })
+    return owners
 
 
 def _external_provider_call_names(

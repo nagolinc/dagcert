@@ -103,6 +103,11 @@ and has source types exactly matching the proof-only overlay. Reject a stub that
 code, shares a module with a proved operation, changes the input/success dataclass shape, or is not
 listed and digest-bound in `source_verification.external_contracts` and
 `exception_verifier.external_contract_overlays`.
+Classify the resolved provider using the certification interpreter, not physical containment in the
+workspace: standard-library, `purelib`, and `platlib` modules are external environment code even if
+the virtualenv lies beneath `source_root`. Distribution metadata is optional provenance. For a
+provider outside those interpreter paths, confirm that an ignored app file was not relabeled
+external merely by excluding it from the source manifest.
 
 For each external task, trace production calls through the monitored adapter. Confirm that success,
 provider exception, and wrong-return-type events become respectively the declared success outcome,

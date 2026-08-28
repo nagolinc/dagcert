@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from argparse import ArgumentParser, Namespace
+from hashlib import sha256
 from importlib.resources import files
 from pathlib import Path
 from shutil import copytree, rmtree
@@ -12,7 +13,10 @@ from typing import cast
 
 from . import __version__
 from .analysis import analyze_contract
-from .certificate import CertificateError, issue_certificate, source_fingerprint, verify_certificate
+from .certificate import (
+    CertificateError, canonical_json, external_source_contracts, issue_certificate,
+    source_fingerprint, source_manifest, verify_certificate,
+)
 from .checks import load_check_result
 from .contract import ContractError, load_contract
 from .evidence import EvidenceError, load_evidence
@@ -118,6 +122,8 @@ def parser() -> ArgumentParser:
     lint = commands.add_parser("lint", help="validate the contract and mandatory English claims")
     lint.add_argument("contract")
     lint.add_argument("--requirements", required=True)
+    lint.add_argument("--source-root")
+    lint.add_argument("--exclude", action="append", default=[])
 
     fingerprint = commands.add_parser("fingerprint", help="print exact application source identity")
     fingerprint.add_argument("source_root", nargs="?", default=".")
@@ -163,7 +169,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "help":
             return _help(args)
         if args.command == "lint":
-            contract = load_contract(args.contract)
+            lint_root = (
+                Path(args.source_root).resolve()
+                if args.source_root is not None
+                else Path(args.contract).resolve().parent
+            )
+            contract = load_contract(args.contract, source_root=lint_root)
             requirements = load_requirements(args.requirements)
             if contract.schema != "dagcert-contract/v6":
                 raise ContractError("new certificate issuance requires dagcert-contract/v6")
@@ -171,22 +182,23 @@ def main(argv: list[str] | None = None) -> int:
                 raise RequirementsError(
                     "new certificate issuance requires dagcert-english-requirements/v2"
                 )
-            lint_root = Path(args.contract).resolve().parent
-            lint_fingerprint = source_fingerprint(
-                lint_root,
-                exclude=[
-                    Path(args.contract).resolve().relative_to(lint_root).as_posix(),
-                    Path(args.requirements).resolve().relative_to(lint_root).as_posix(),
-                ],
+            lint_exclusions = _relative_inputs(
+                lint_root, [args.contract, args.requirements]
+            ) + list(args.exclude)
+            lint_manifest = source_manifest(
+                lint_root, exclude=lint_exclusions,
             )
+            lint_fingerprint = sha256(canonical_json(lint_manifest)).hexdigest()
             source_verification = check_python_sources(
                 lint_root,
                 (task.source_signature for task in contract.tasks if task.source_signature is not None),
                 source_fingerprint=lint_fingerprint,
+                source_manifest_paths=lint_manifest,
                 proof_signatures=(
                     task.source_signature for task in contract.tasks
                     if task.role == "operation" and task.source_signature is not None
                 ),
+                external_contracts=external_source_contracts(contract),
             )
             translation_audit = audit_translation(requirements, contract)
             if not translation_audit.passed:

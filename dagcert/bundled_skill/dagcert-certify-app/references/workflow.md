@@ -47,6 +47,10 @@ only that adapter path during Nagini verification, seals both digests and the pr
 and keeps `ContractOnly` out of production code. The adapter uses `external_boundary`, which checks
 the real return annotation with Typeguard and publishes success, raised-exception, or wrong-type
 events to `ExternalEvidenceMonitor`.
+Resolve provider ownership with the active certification interpreter. Its standard-library,
+`purelib`, and `platlib` modules are external even when a project virtualenv sits beneath the source
+root. Seal distribution metadata when it exists, but do not require it. For non-environment code,
+an ignore/exclusion does not by itself turn an application module into an external provider.
 The proof stub may state only the canonical `Ensures(Result() is not None)` postcondition. Dagcert
 rejects arbitrary axioms such as `Ensures(False)`; richer predicates belong in executable validators.
 

@@ -171,7 +171,7 @@ def _serialized_primitives(contract: Contract, analysis_mapping: dict[str, Any])
     return cast(dict[str, Any], json.loads(canonical_json(value)))
 
 
-def _external_source_contracts(contract: Contract) -> tuple[ExternalSourceContract, ...]:
+def external_source_contracts(contract: Contract) -> tuple[ExternalSourceContract, ...]:
     result: list[ExternalSourceContract] = []
     for task in contract.tasks:
         external = task.external_contract
@@ -304,11 +304,12 @@ def issue_certificate(
             root,
             (task.source_signature for task in contract.tasks if task.source_signature is not None),
             source_fingerprint=fingerprint,
+            source_manifest_paths=manifest,
             proof_signatures=(
                 task.source_signature for task in contract.tasks
                 if task.role == "operation" and task.source_signature is not None
             ),
-            external_contracts=_external_source_contracts(contract),
+            external_contracts=external_source_contracts(contract),
         )
     except SourceTypeError as exc:
         raise CertificateError(f"certificate refused: {exc}") from exc
@@ -448,11 +449,12 @@ def verify_certificate(
                     root,
                     (task.source_signature for task in contract.tasks if task.source_signature is not None),
                     source_fingerprint=fingerprint,
+                    source_manifest_paths=manifest,
                     proof_signatures=(
                         task.source_signature for task in contract.tasks
                         if task.role == "operation" and task.source_signature is not None
                     ),
-                    external_contracts=_external_source_contracts(contract),
+                    external_contracts=external_source_contracts(contract),
                 )
                 if raw.get("source_verification") != source_verification:
                     problems.append("source verification no longer matches")

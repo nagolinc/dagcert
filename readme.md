@@ -100,6 +100,11 @@ name a separate, source-owned `ContractOnly` proof stub for a real adapter. Dagc
 that file during proof, seals the adapter/stub/provider identities, and checks every production
 return or exception through a Typeguard-backed runtime boundary. Wrong types and exceptions are
 retained violation outcomes, not silently trusted successes.
+Provider ownership follows the active certification interpreter: modules resolved beneath its
+standard-library, `purelib`, or `platlib` paths are external environment code even when a project
+virtualenv is physically beneath `source_root`. Distribution metadata is sealed when available but
+is not required for that classification. Only non-environment providers are compared with the
+application manifest; excluding an ordinary app module does not relabel it external.
 The proof-only stub is restricted to the canonical `Ensures(Result() is not None)` contract, so it
 cannot inject an impossible postcondition to make an application proof vacuous.
 The v10 certificate seals strict-mypy output, the pinned verifier image digest and proof scope, and

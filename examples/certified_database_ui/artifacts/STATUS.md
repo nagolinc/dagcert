@@ -1,8 +1,8 @@
 # Certification status
 
-The current v5 source-bound observational model was collected once after its implementation and
+The current v6 source-bound observational model was collected once after its implementation and
 documentation changed. That run passed the unchanged bounds and produced a verified certificate
-`2be5f21145eb92a61a983490447abc8a0a7a0728fab8485cb505160792309d21`, bound to source fingerprint
+`0fa5fd9e6c4d11e39b9665bfb006b8b16fb8cf53f9f3f376eb9615a8e6181e1a`, bound to source fingerprint
 `c385804fa1402c6f5382b6334b77261b6d0844c934b0c8d5c9e62d7225e3e3f5`.
 
 Its production SQLite boundaries are strict-mypy-checked source bindings. Every task is explicitly
