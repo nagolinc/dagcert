@@ -34,6 +34,12 @@ That is the intended interface. The agent can install Dagcert, read its installe
 the focused agent guide, inspect the complete examples, instrument the real runtime boundaries, and
 return both a certificate and an honest account of anything it could not prove.
 
+> **UNLESS THE USER EXPLICITLY ASKS YOU NOT TO, THE AGENT MUST USE DAGCERT'S `/stats` VIEWER AND
+> DISMISSIBLE RED VIOLATION BANNER LITERALLY. THEY ARE SHIPPED APPLICATION SURFACES, NOT EXAMPLE
+> CODE TO MODIFY.** Copy `examples/stats_viewer` unchanged to `/stats`, and copy
+> `examples/violation_banner/dagcert-violation-banner.js` unchanged into every user-facing app shell.
+> Framework route glue is application-specific; redesigning or reimplementing these assets is not.
+
 The equivalent manual start is:
 
 ```text
@@ -202,14 +208,15 @@ The audit is a tool the app-building agent runs only when the user asks for it. 
 automatic build or release gate. See [the independent-audit workflow](docs/REFERENCE_AUDIT.md) and
 the [audit handoff implementation](examples/optional_openai_luna_audit.py).
 
-## Bonus features
+## Default application surfaces and optional helpers
 
-These are useful, reusable parts of the Dagcert repository, but they are not additional core
-primitives or mandatory product policies.
+The `/stats` viewer and violation banner are default application integrations unless the user
+explicitly opts out. They do not add core primitives or alter certificate semantics. Other helpers
+in this section remain optional.
 
 ### `/stats`: understand the certificate instead of reading JSON
 
-The optional [`/stats` viewer](examples/stats_viewer/README.md) turns contract, evidence, and
+The [`/stats` viewer](examples/stats_viewer/README.md) turns contract, evidence, and
 certificate artifacts into a useful browser dashboard. It shows:
 
 - the task DAG and which worker performs each task;
@@ -222,8 +229,20 @@ certificate artifacts into a useful browser dashboard. It shows:
 
 It is presentation-only: viewing statistics cannot change or weaken the certificate. The included
 static viewer can load artifacts directly in the browser and includes Selenium-reviewed desktop and
-mobile screenshots. Apps can serve the same assets at `/stats` or adapt the unminified HTML, CSS,
-and JavaScript to their existing server.
+mobile screenshots. Unless the user explicitly declines it, copy the same HTML, CSS, and JavaScript
+unchanged and serve them at `/stats`; do not adapt or reimplement the viewer.
+
+### Runtime violations: make failed guarantees impossible to miss
+
+The literal [`dagcert-violation-banner.js`](examples/violation_banner/README.md) component polls the
+application's retained `/dagcert/runtime-events` stream. On a violation it inserts a full-width red
+warning stating that certified guarantees do not hold, links to `/stats`, and provides an accessible
+× button. Dismissal applies only to the current violation; a later violation makes the banner
+reappear. Unless the user explicitly declines it, copy this script unchanged into every user-facing
+application shell. Do not replace it with logs, a toast, a status pill, or a custom redesign.
+When a violation identifies a task, the link opens `/stats?task=<task-id>#graph`, where the literal
+viewer scrolls to and highlights the failing DAG node. Otherwise it opens `/stats#graph` without
+inventing a task mapping.
 
 ### Fast frontend, slow and unreliable backend
 

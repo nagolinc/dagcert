@@ -1,7 +1,9 @@
 # Python bytecode and test/tool caches
 __pycache__/
 *.py[cod]
+.cache/
 .pytest_cache/
+.pytest-cache-*/
 .pytest-local-*/
 .mypy_cache/
 .ruff_cache/
@@ -28,3 +30,6 @@ examples/certified_database_ui/artifacts/independent-audit-v*/
 examples/certified_vote/artifacts/audit-claims-v3-sealed/
 examples/certified_vote/artifacts/audit-result-v3-sealed.json
 examples/certified_vote/artifacts/independent-audit-v*/
+
+# Separate nested project with its own Git repository
+/Maledictus/

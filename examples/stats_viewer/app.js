@@ -6,6 +6,8 @@
     wait: "#765977",
   };
   let data = window.DAGCERT_SAMPLE;
+  const targetedTask = new URLSearchParams(window.location.search).get("task");
+  let targetedTaskScrolled = false;
   const $ = (id) => document.getElementById(id);
   const esc = (value) =>
     String(value ?? "").replace(
@@ -72,11 +74,13 @@
     const height = compact ? 25 + tasks.length * (nodeH + 35) : 276;
     const level = {};
     const byId = Object.fromEntries(tasks.map((t) => [t.id, t]));
+    const dependencyId = (dependency) =>
+      typeof dependency === "string" ? dependency : dependency?.task;
     function depth(id, seen = new Set()) {
       if (level[id] != null) return level[id];
       if (seen.has(id)) return 0;
       seen.add(id);
-      const deps = byId[id]?.depends_on || [];
+      const deps = (byId[id]?.depends_on || []).map(dependencyId).filter(Boolean);
       return (level[id] = deps.length
         ? 1 + Math.max(...deps.map((d) => depth(d, seen)))
         : 0);
@@ -105,9 +109,11 @@
     }
     let svg = `<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path class="dag-arrow" d="M0,0 L8,4 L0,8 Z"/></marker></defs>`;
     tasks.forEach((t) =>
-      (t.depends_on || []).forEach((dep) => {
+      (t.depends_on || []).forEach((dependency) => {
+        const dep = dependencyId(dependency);
         const a = pos[dep],
           b = pos[t.id];
+        if (!a || !b) return;
         const path = compact
           ? `M${a.x + nodeW / 2} ${a.y + nodeH} C${a.x + nodeW / 2} ${a.y + nodeH + 20},${b.x + nodeW / 2} ${b.y - 20},${b.x + nodeW / 2} ${b.y}`
           : `M${a.x + nodeW} ${a.y + nodeH / 2} C${a.x + nodeW + 45} ${a.y + nodeH / 2},${b.x - 45} ${b.y + nodeH / 2},${b.x} ${b.y + nodeH / 2}`;
@@ -123,7 +129,7 @@
           )
           .join("  ");
       svg += [
-        `<g class="dag-node" transform="translate(${p.x},${p.y})">`,
+        `<g class="dag-node${t.id === targetedTask ? " is-target" : ""}" data-task-id="${esc(t.id)}" transform="translate(${p.x},${p.y})">`,
         `<rect width="${nodeW}" height="${nodeH}" rx="14"/>`,
         `<circle cx="20" cy="21" r="5" fill="${colors[Object.values(t.timings || {})[0]?.metric] || colors.duration}"/>`,
         `<text class="task-name" x="34" y="26">${esc(t.id)}</text>`,
@@ -136,6 +142,13 @@
     $("dag").setAttribute("viewBox", `0 0 ${width} ${height}`);
     $("dag").style.height = compact ? `${height}px` : "300px";
     $("dag").innerHTML = svg;
+    const target = $("dag").querySelector(".dag-node.is-target");
+    if (target && !targetedTaskScrolled) {
+      targetedTaskScrolled = true;
+      window.requestAnimationFrame(() => {
+        target.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+      });
+    }
   }
   function renderTimings() {
     const taskMap = Object.fromEntries(

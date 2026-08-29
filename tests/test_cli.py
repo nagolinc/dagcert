@@ -61,7 +61,14 @@ def test_init_is_non_destructive(tmp_path: Path):
 def test_installed_help_lists_and_reads_database_ui_guide(capsys):
     assert main(["help"]) == 0
     listing = capsys.readouterr().out
+    assert "use the shipped /stats viewer" in listing
+    assert "app-surfaces" in listing
     assert "database-ui" in listing
+
+    assert main(["help", "app-surfaces"]) == 0
+    surfaces = capsys.readouterr().out
+    assert "dagcert-violation-banner.js" in surfaces
+    assert "/dagcert/runtime-events" in surfaces
 
     assert main(["help", "database-ui"]) == 0
     guide = capsys.readouterr().out

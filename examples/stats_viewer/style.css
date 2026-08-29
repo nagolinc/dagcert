@@ -196,8 +196,17 @@ main {
   fill: #fffefa;
   stroke: #c9c2b5;
 }
+.dag-node.is-target rect {
+  stroke: #a92e18;
+  stroke-width: 4;
+  filter: drop-shadow(0 3px 7px rgba(169, 46, 24, 0.35));
+}
 .dag-node .task-name {
   font: 500 15px "DM Sans";
+}
+.dag-node.is-target .task-name {
+  fill: #a92e18;
+  font-weight: 700;
 }
 .dag-node .worker-name {
   font: 11px "DM Sans";

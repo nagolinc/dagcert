@@ -14,6 +14,20 @@ dagcert verify APP_ROOT/artifacts/certificate.json --contract APP_ROOT/dag_contr
 Repeat `--check-result PATH` on both `issue` and `verify` to attach optional checker results.
 Repeat `--exclude PATTERN` identically when project-specific source exclusions are necessary.
 
+## Required application surfaces
+
+**UNLESS THE USER EXPLICITLY ASKS YOU NOT TO, USE THESE LITERALLY. THEY ARE SHIPPED APPLICATION
+SURFACES, NOT EXAMPLE CODE TO MODIFY.**
+
+Copy `examples/stats_viewer` unchanged and serve it at `/stats`. Copy
+`examples/violation_banner/dagcert-violation-banner.js` unchanged, serve it as
+`/dagcert-violation-banner.js`, include it on every user-facing application shell, and expose
+`GET /dagcert/runtime-events` with `violation_count` and `last_violation`. Framework-specific route
+glue is expected; redesigning, restyling, inlining, renaming, or reimplementing either shipped asset
+is not. Verify `/stats`, violation appearance, × dismissal, and reappearance for a later violation
+in the real browser. Omit either surface only after an explicit user opt-out and record that opt-out
+in the certification handoff. Run `python -m dagcert help app-surfaces` for the installed contract.
+
 ## Contract
 
 The hardened `dagcert-contract/v6` JSON or YAML object contains `workers`, `tasks`, `resources`,

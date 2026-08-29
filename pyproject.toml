@@ -64,13 +64,17 @@ examples = [
     "stats_viewer/*.js",
     "stats_viewer/*.md",
     "stats_viewer/screenshots/*.png",
+    "violation_banner/*.js",
+    "violation_banner/*.md",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+cache_dir = ".cache/pytest"
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
 packages = ["dagcert"]
+cache_dir = ".cache/mypy"

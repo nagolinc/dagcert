@@ -333,7 +333,7 @@ contract and invocation, so recomputing the outer digest cannot hide fabricated 
 This is an integrity-bound evidence report, not a signer identity. Sign the certificate artifact
 with an existing release-signing system when cryptographic authorship is required.
 
-## 9. API, CLI, and optional viewer
+## 9. API, CLI, and default application surfaces
 
 The public API exports the four primitive dataclasses, evidence recording/loading, analysis,
 generic checker protocol, source hashing, issuance, and verification. The CLI exposes only:
@@ -342,10 +342,14 @@ generic checker protocol, source hashing, issuance, and verification. The CLI ex
 - `lint`, `fingerprint`, `analyze`, `check-result`;
 - `issue`, `verify`.
 
-There is no required runtime or `/stats` route. `examples/stats_viewer` is a polished optional static
-artifact viewer. It shows the task DAG, resource flow, timing distributions, normalized recent
-trends, guarantees, and assumptions. Its desktop and mobile Selenium screenshots are committed with
-the example. Presentation code cannot affect whether a certificate passes.
+The certificate kernel does not depend on presentation routes. The agent workflow nevertheless
+installs two default application surfaces unless the user explicitly opts out: the unchanged
+`examples/stats_viewer` at `/stats`, and the unchanged
+`examples/violation_banner/dagcert-violation-banner.js` on every user-facing application shell.
+The application supplies framework route glue and a retained `/dagcert/runtime-events` projection.
+The assets are literal integration code, not templates to redesign or reimplement. Presentation code
+cannot affect whether a certificate passes; it makes certificate state and runtime violations
+visible.
 
 ## 10. Agent workflow and non-regression rule
 

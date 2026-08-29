@@ -4,6 +4,12 @@
 tests and selected checkers, and create certificate artifacts. It does not authorize product
 restrictions or unrelated redesign.
 
+Unless the user explicitly asks not to include them, copy Dagcert's shipped `/stats` viewer and
+`dagcert-violation-banner.js` literally into the application. They are application surfaces, not
+example code to modify. Expose `/dagcert/runtime-events`, include the banner on every user-facing
+shell, and browser-test violation display, × dismissal, and reappearance for a new violation. Run
+`python -m dagcert help app-surfaces` for the exact installed paths and response shape.
+
 First write `english_requirements.json`. Every certificate requires it. Each complete
 plain-English promise has a stable ID, explicit assumptions, and exact references to the formal
 primitives and any application checker required to establish it. Issuance embeds the document;

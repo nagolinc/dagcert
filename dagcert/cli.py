@@ -92,6 +92,10 @@ def replace_me(request: ReplaceMeInput) -> ReplaceMeCompleted:
 """
 
 HELP_TOPICS = {
+    "app-surfaces": (
+        "required literal /stats viewer and dismissible runtime-violation banner",
+        "docs/app-surfaces.md",
+    ),
     "database-ui": (
         "certified SQLite/browser example plus reusable exact-projection workflow",
         "docs/database-ui.md",
@@ -278,6 +282,10 @@ def _relative_inputs(root: str | Path, paths: list[str | Path]) -> list[str]:
 
 def _help(args: Namespace) -> int:
     if args.topic is None:
+        print(
+            "UNLESS EXPLICITLY DECLINED: use the shipped /stats viewer and dismissible "
+            "violation banner literally; they are application surfaces, not example code.\n"
+        )
         print("Installed Dagcert help topics:")
         for name, (description, _) in HELP_TOPICS.items():
             print(f"  {name:<16} {description}")

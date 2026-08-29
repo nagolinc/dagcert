@@ -8,6 +8,22 @@ description: Certify an application with dagcert by modeling its real worker/tas
 This is the focused workflow. Run `python -m dagcert help` for packaged guides and examples, and
 read [references/workflow.md](references/workflow.md) for current artifact formats and commands.
 
+## Required application surfaces: use the shipped code literally
+
+**UNLESS THE USER EXPLICITLY ASKS YOU NOT TO, USE THESE LITERALLY. THEY ARE SHIPPED APPLICATION
+SURFACES, NOT EXAMPLE CODE TO MODIFY.**
+
+- Copy `examples/stats_viewer` unchanged and serve it at `/stats`.
+- Copy `examples/violation_banner/dagcert-violation-banner.js` unchanged, include it on every
+  user-facing application shell, and expose its `/dagcert/runtime-events` JSON endpoint.
+
+Do not redesign, restyle, inline, rename, reimplement, or use either asset merely as inspiration.
+Write only the framework-specific route and event-serialization glue. Test in the real browser that
+`/stats` loads, a forced violation produces the full-width red warning, × dismisses that warning,
+and a later violation makes it reappear. Omit a surface only after an explicit user opt-out, and
+report that opt-out in the handoff. Read the **Required application surfaces** section of the
+workflow reference before integrating them.
+
 ## Rule 0: improve the experience; never certify a regression
 
 Certification observes and reports. It is not permission to redesign the application. Do not add
@@ -96,7 +112,8 @@ composed latency with a summary task whose measured output is the desired conclu
 
 ## Workflow
 
-1. Run `dagcert init <app-root>` and replace every placeholder.
+1. Run `dagcert init <app-root>` and replace every placeholder. Unless explicitly declined, install
+   the literal `/stats` viewer and dismissible violation banner before application certification.
 2. Inventory the user's requested guarantees. Classify each as observed, derived, or chance and write its
    exact scope and assumptions before evidence collection.
 3. Trace source paths and build the smallest faithful worker/task/resource DAG. Do not mirror every
