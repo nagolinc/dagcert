@@ -34,11 +34,11 @@ That is the intended interface. The agent can install Dagcert, read its installe
 the focused agent guide, inspect the complete examples, instrument the real runtime boundaries, and
 return both a certificate and an honest account of anything it could not prove.
 
-> **UNLESS THE USER EXPLICITLY ASKS YOU NOT TO, THE AGENT MUST USE DAGCERT'S `/stats` VIEWER AND
-> DISMISSIBLE RED VIOLATION BANNER LITERALLY. THEY ARE SHIPPED APPLICATION SURFACES, NOT EXAMPLE
-> CODE TO MODIFY.** Copy `examples/stats_viewer` unchanged to `/stats`, and copy
-> `examples/violation_banner/dagcert-violation-banner.js` unchanged into every user-facing app shell.
-> Framework route glue is application-specific; redesigning or reimplementing these assets is not.
+> **UNLESS THE USER EXPLICITLY ASKS YOU NOT TO, THE AGENT MUST USE DAGCERT'S SUPPLIED `/stats`
+> VIEWER AND DISMISSIBLE RED VIOLATION BANNER LITERALLY. THEY ARE APPLICATION APIS, NOT EXAMPLE CODE
+> TO COPY OR MODIFY.** Call `stats(app, certificate=...)` and `banner(app)`, then include exactly
+> `<script src="/dagcert/banner.js"></script>` on every user-facing app shell. Never serve the
+> bundled three-task demo as an application's `/stats` data.
 
 The equivalent manual start is:
 
@@ -216,8 +216,8 @@ in this section remain optional.
 
 ### `/stats`: understand the certificate instead of reading JSON
 
-The [`/stats` viewer](examples/stats_viewer/README.md) turns contract, evidence, and
-certificate artifacts into a useful browser dashboard. It shows:
+The [`/stats` viewer](examples/stats_viewer/README.md) turns the bound certificate, evidence, and
+retained violations into a useful browser dashboard. It shows recent violations first, then:
 
 - the task DAG and which worker performs each task;
 - resource production, consumption, acquisition, capacity, and current flow;
@@ -227,19 +227,37 @@ certificate artifacts into a useful browser dashboard. It shows:
 - which conclusions are conditional on assumptions; and
 - exact certificate/source identity.
 
-It is presentation-only: viewing statistics cannot change or weaken the certificate. The included
-static viewer can load artifacts directly in the browser and includes Selenium-reviewed desktop and
-mobile screenshots. Unless the user explicitly declines it, copy the same HTML, CSS, and JavaScript
-unchanged and serve them at `/stats`; do not adapt or reimplement the viewer.
+It is presentation-only: viewing statistics cannot change or weaken the certificate. After the one
+normal `pip install dagcert`, bind it to a Flask application with the supplied API:
+
+```python
+from dagcert import banner, stats
+
+stats(app, certificate="artifacts/certificate.json", evidence="artifacts/timings.jsonl")
+banner(app)
+```
+
+This makes `/stats` render one DAG node for every sealed task and serves the banner script and
+retained event feed. The examples directory is only a standalone visual preview; its bundled
+three-task dataset must never be served as application stats.
 
 ### Runtime violations: make failed guarantees impossible to miss
 
-The literal [`dagcert-violation-banner.js`](examples/violation_banner/README.md) component polls the
-application's retained `/dagcert/runtime-events` stream. On a violation it inserts a full-width red
+The supplied [`dagcert-violation-banner.js`](examples/violation_banner/README.md) component polls the
+application's retained `/dagcert/runtime-events` stream. On a violation it inserts a centered red
 warning stating that certified guarantees do not hold, links to `/stats`, and provides an accessible
 × button. Dismissal applies only to the current violation; a later violation makes the banner
-reappear. Unless the user explicitly declines it, copy this script unchanged into every user-facing
-application shell. Do not replace it with logs, a toast, a status pill, or a custom redesign.
+reappear. `banner(app)` serves it at `/dagcert/banner.js`; it deliberately does not rewrite HTML.
+Unless the user explicitly declines it, include this exact tag in every user-facing shell:
+
+```html
+<script src="/dagcert/banner.js"></script>
+```
+
+The default is `position=top`; the same script URL accepts `bottom`, `left`, or `right` when a
+different edge is wanted.
+
+Do not replace it with logs, a toast, a status pill, or a custom redesign.
 When a violation identifies a task, the link opens `/stats?task=<task-id>#graph`, where the literal
 viewer scrolls to and highlights the failing DAG node. Otherwise it opens `/stats#graph` without
 inventing a task mapping.
@@ -343,8 +361,7 @@ checker. See [LIBRARY_SPEC.md](LIBRARY_SPEC.md) for exact semantics and design d
 
 ## Development workspace hygiene
 
-Run pytest without repository-local cache or temporary-directory overrides. Its persistent cache is
-configured at `.cache/pytest`, and temporary test trees use the operating-system temporary
-directory. Test startup rejects `cache_dir` values elsewhere inside the repository and rejects every
-in-repository `--basetemp`; this prevents disposable `.pytest-cache-*` and `.pytest-local-*` trees
-from accumulating beside the source.
+The repository permits exactly one top-level disposable-output directory: `.cache/`. Pytest uses
+`.cache/pytest`, mypy uses `.cache/mypy`, and any repository-local test/build scratch belongs under
+that same tree. Test startup rejects `cache_dir` and `--basetemp` values elsewhere in the repository;
+this prevents `.pytest-cache-*`, `.pytest-local-*`, and other ad-hoc siblings from accumulating.

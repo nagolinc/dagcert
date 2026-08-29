@@ -14,10 +14,26 @@ def test_stats_viewer_assets_are_readable_source():
     assert "certificate: null" in script
     assert 'timing.metric === "interval"' in script
     assert 'new URLSearchParams(window.location.search).get("task")' in script
-    assert 'class="dag-node${t.id === targetedTask ? " is-target" : ""}"' in script
+    assert "window.DAGCERT_BOUND_DATA || window.DAGCERT_SAMPLE" in script
+    assert "renderViolations(health.violations)" in script
+    assert "renderHealth(health)" in script
+    assert "largestGroup" in script
+    assert 'class="dag-node${healthClass}${t.id === targetedTask ? " is-target" : ""}"' in script
     assert "target.scrollIntoView" in script
     assert 'typeof dependency === "string" ? dependency : dependency?.task' in script
     assert "Throughput &amp; staleness" in html
+    assert html.index('id="overview"') < html.index('id="health"') < html.index('id="graph"')
+
+
+def test_stats_viewer_uses_obvious_health_colors_not_beige() -> None:
+    root = Path(__file__).parents[1] / "examples" / "stats_viewer"
+    css = (root / "style.css").read_text(encoding="utf-8")
+    assert "--good-bg:" in css
+    assert "--danger-bg:" in css
+    assert ".health-card.is-unhealthy" in css
+    assert ".dag-node.is-unhealthy" in css
+    assert "#f4f1e9" not in css.lower()
+    assert "Newsreader" not in css
 
 
 def test_optional_mithril_helper_is_readable_source():

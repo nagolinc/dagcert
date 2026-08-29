@@ -5,7 +5,9 @@
     age: "#765977",
     wait: "#765977",
   };
-  let data = window.DAGCERT_SAMPLE;
+  let data = window.DAGCERT_BOUND_DATA || window.DAGCERT_SAMPLE;
+  const runtimeEndpoint = document.body.dataset.runtimeEvents || "/dagcert/runtime-events";
+  const runtimePollMs = Number(document.body.dataset.runtimePollMs || 5000);
   const targetedTask = new URLSearchParams(window.location.search).get("task");
   let targetedTaskScrolled = false;
   const $ = (id) => document.getElementById(id);
@@ -15,25 +17,218 @@
       (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch],
     );
   const timingOf = (task, caseName) => task.timings?.[caseName] || {};
+
+  function violationRows() {
+    const payload = data.runtime_events || {};
+    let rows = [];
+    if (Array.isArray(payload.violations)) rows = payload.violations;
+    else if (Array.isArray(payload.events)) {
+      rows = payload.events.filter((event) => event?.violation === true || event?.passed === false);
+    } else if (payload.last_violation) rows = [payload.last_violation];
+    return rows.slice().sort((left, right) => violationTime(right) - violationTime(left));
+  }
+
+  function violationTime(violation) {
+    const raw = violation?.recorded_at || violation?.at || violation?.timestamp || 0;
+    const numeric = typeof raw === "number" ? raw * (raw < 100000000000 ? 1000 : 1) : Date.parse(raw);
+    return Number.isFinite(numeric) ? numeric : 0;
+  }
+
+  function violationDetail(violation) {
+    return String(
+      violation?.message
+      || violation?.detail
+      || violation?.error
+      || violation?.claim
+      || "A certified runtime premise failed.",
+    );
+  }
+
+  function referencedId(violation, kind) {
+    const direct = kind === "task"
+      ? [violation?.task_id, violation?.task, violation?.node_id, violation?.metadata?.task_id]
+      : [violation?.worker_id, violation?.worker, violation?.metadata?.worker_id];
+    const value = direct.find((candidate) => typeof candidate === "string" && candidate.length);
+    if (value) return value.replace(new RegExp(`^${kind}:`), "");
+    const references = [
+      ...(Array.isArray(violation?.primitive_refs) ? violation.primitive_refs : []),
+      ...(Array.isArray(violation?.references) ? violation.references : []),
+    ];
+    const reference = references.find(
+      (candidate) => typeof candidate === "string" && candidate.startsWith(`${kind}:`),
+    );
+    return reference ? reference.slice(kind.length + 1) : null;
+  }
+
+  function activeViolation(violation) {
+    return violation?.active !== false && violation?.resolved !== true;
+  }
+
+  function taskHealth(task, violations) {
+    const samples = data.evidence.filter((row) => row.task_id === task.id);
+    const runtimeViolation = violations.find(
+      (violation) => activeViolation(violation) && referencedId(violation, "task") === task.id,
+    );
+    const failedSample = samples.find(
+      (row) => row.succeeded === false || row.violation === true || row.passed === false,
+    );
+    const boundBreach = samples.find((row) => {
+      const timing = timingOf(task, row.case);
+      return (timing.upper_ms != null && row.value_ms > timing.upper_ms)
+        || (timing.lower_ms != null && row.value_ms < timing.lower_ms);
+    });
+    if (runtimeViolation) {
+      return { healthy: false, detail: violationDetail(runtimeViolation), samples: samples.length };
+    }
+    if (failedSample) {
+      return {
+        healthy: false,
+        detail: `Failed ${failedSample.case || "runtime"} sample`,
+        samples: samples.length,
+      };
+    }
+    if (boundBreach) {
+      return {
+        healthy: false,
+        detail: `${boundBreach.case} exceeded its declared bound`,
+        samples: samples.length,
+      };
+    }
+    if (samples.length === 0) {
+      return { healthy: false, detail: "No retained runtime evidence", samples: 0 };
+    }
+    return {
+      healthy: true,
+      detail: `${samples.length} observations within declared bounds`,
+      samples: samples.length,
+    };
+  }
+
+  function healthModel() {
+    const violations = violationRows();
+    const tasks = new Map(
+      data.contract.tasks.map((task) => [task.id, { task, ...taskHealth(task, violations) }]),
+    );
+    const workers = new Map(data.contract.workers.map((worker) => {
+      const assigned = [...tasks.values()].filter((row) => row.task.worker === worker.id);
+      const directViolation = violations.find(
+        (violation) => activeViolation(violation) && referencedId(violation, "worker") === worker.id,
+      );
+      const unhealthy = assigned.filter((row) => !row.healthy);
+      const healthy = !directViolation && assigned.length > 0 && unhealthy.length === 0;
+      const detail = directViolation
+        ? violationDetail(directViolation)
+        : assigned.length === 0
+          ? "No declared tasks"
+          : healthy
+            ? `${assigned.length} assigned task${assigned.length === 1 ? "" : "s"} healthy`
+            : `${unhealthy.length} of ${assigned.length} assigned tasks need attention`;
+      return [worker.id, { worker, healthy, detail, assigned }];
+    }));
+    return { violations, tasks, workers };
+  }
+
   function render() {
-    renderSummary();
-    renderDag();
+    const health = healthModel();
+    renderViolations(health.violations);
+    renderHealth(health);
+    renderSummary(health);
+    renderDag(health);
     renderTimings();
     renderResources();
     renderGuarantees();
   }
-  function renderSummary() {
+
+  function graphHref(taskId) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("task", taskId);
+    url.hash = "graph";
+    return url.href;
+  }
+
+  function renderViolations(violations) {
+    if (violations.length === 0) {
+      $("violations").innerHTML = [
+        '<article class="violation-empty">',
+        '<span class="health-icon">✓</span>',
+        '<div><strong>No recent Dagcert violations</strong>',
+        '<p>The retained runtime-event feed reports no certificate-premise failures.</p></div>',
+        "</article>",
+      ].join("");
+      return;
+    }
+    $("violations").innerHTML = violations.slice(0, 10).map((violation) => {
+      const taskId = referencedId(violation, "task"),
+        workerId = referencedId(violation, "worker"),
+        occurred = violationTime(violation),
+        active = activeViolation(violation);
+      return [
+        `<article class="violation-row ${active ? "is-active" : "is-resolved"}">`,
+        '<span class="violation-mark">!</span>',
+        '<div class="violation-copy">',
+        `<div class="violation-title"><strong>${esc(violationDetail(violation))}</strong>`,
+        `<span class="state-pill">${active ? "Active" : "Resolved"}</span></div>`,
+        '<div class="violation-meta">',
+        occurred
+          ? `<time datetime="${new Date(occurred).toISOString()}">${esc(new Date(occurred).toLocaleString())}</time>`
+          : "<span>Time unavailable</span>",
+        taskId ? `<span>task · ${esc(taskId)}</span>` : "",
+        workerId ? `<span>worker · ${esc(workerId)}</span>` : "",
+        "</div></div>",
+        taskId ? `<a class="graph-link" href="${esc(graphHref(taskId))}">View task →</a>` : "",
+        "</article>",
+      ].join("");
+    }).join("");
+  }
+
+  function healthCard(id, type, healthy, detail, extra) {
+    return [
+      `<article class="health-card ${healthy ? "is-healthy" : "is-unhealthy"}">`,
+      `<span class="health-icon">${healthy ? "✓" : "!"}</span>`,
+      '<div class="health-copy">',
+      `<div><span class="health-kind">${esc(type)}</span><strong>${esc(id)}</strong></div>`,
+      `<p>${esc(detail)}</p>${extra || ""}</div>`,
+      `<span class="health-state">${healthy ? "Healthy" : "Attention"}</span>`,
+      "</article>",
+    ].join("");
+  }
+
+  function renderHealth(health) {
+    const workers = [...health.workers.values()];
+    const tasks = [...health.tasks.values()];
+    const healthyWorkers = workers.filter((row) => row.healthy).length;
+    const healthyTasks = tasks.filter((row) => row.healthy).length;
+    $("worker-health-count").textContent = `${healthyWorkers} / ${workers.length} healthy`;
+    $("task-health-count").textContent = `${healthyTasks} / ${tasks.length} healthy`;
+    $("worker-health").innerHTML = workers.map((row) => healthCard(
+      row.worker.id,
+      "worker",
+      row.healthy,
+      row.detail,
+      `<span class="health-extra">${row.worker.concurrency} concurrent slot${row.worker.concurrency === 1 ? "" : "s"}</span>`,
+    )).join("");
+    $("task-health").innerHTML = tasks.map((row) => healthCard(
+      row.task.id,
+      "task",
+      row.healthy,
+      row.detail,
+      `<a class="health-extra health-link" href="${esc(graphHref(row.task.id))}">worker · ${esc(row.task.worker)}</a>`,
+    )).join("");
+  }
+
+  function renderSummary(health) {
     const c = data.contract,
       a = data.certificate?.analysis || {};
-    $("hero-task-count").textContent = c.tasks.length;
-    $("header-status").textContent =
-      a.passed === false
-        ? "certificate not passing"
-        : a.conditional
-          ? "verified · conditional"
-          : "certificate verified";
-    document.querySelector(".status-dot").style.background =
-      a.passed === false ? "#d64b42" : a.conditional ? "#e6a923" : "#3aaa66";
+    const unhealthyWorkers = [...health.workers.values()].filter((row) => !row.healthy).length;
+    const unhealthyTasks = [...health.tasks.values()].filter((row) => !row.healthy).length;
+    const issueCount = unhealthyWorkers + unhealthyTasks;
+    const status = document.querySelector(".status");
+    status.dataset.health = issueCount || a.passed === false ? "unhealthy" : "healthy";
+    $("header-status").textContent = a.passed === false
+      ? "Certificate not passing"
+      : issueCount
+        ? `${issueCount} worker/task issue${issueCount === 1 ? "" : "s"}`
+        : "All workers and tasks healthy";
     const timingCount = c.tasks.reduce(
       (n, t) => n + Object.keys(t.timings || {}).length,
       0,
@@ -42,12 +237,12 @@
       [
         c.workers.length,
         "workers",
-        `${c.workers.reduce((n, w) => n + w.concurrency, 0)} concurrent slots`,
+        `${c.workers.length - unhealthyWorkers} healthy · ${c.workers.reduce((n, w) => n + w.concurrency, 0)} slots`,
       ],
       [
         c.tasks.length,
         "tasks",
-        `${c.tasks.filter((t) => (t.depends_on || []).length === 0).length} source task`,
+        `${c.tasks.length - unhealthyTasks} healthy · ${c.tasks.filter((t) => (t.depends_on || []).length === 0).length} source task`,
       ],
       [
         c.resources.length,
@@ -65,13 +260,11 @@
     $("fingerprint").textContent =
       `source ${String(data.certificate?.source_fingerprint || "unbound").slice(0, 16)}…`;
   }
-  function renderDag() {
+  function renderDag(health = healthModel()) {
     const tasks = data.contract.tasks;
     const compact = window.innerWidth <= 700;
-    const width = compact ? 380 : 1120;
     const nodeW = compact ? 310 : 250;
     const nodeH = 112;
-    const height = compact ? 25 + tasks.length * (nodeH + 35) : 276;
     const level = {};
     const byId = Object.fromEntries(tasks.map((t) => [t.id, t]));
     const dependencyId = (dependency) =>
@@ -89,6 +282,13 @@
     const max = Math.max(...Object.values(level), 0);
     const groups = Array.from({ length: max + 1 }, () => []);
     tasks.forEach((t) => groups[level[t.id]].push(t));
+    const largestGroup = Math.max(...groups.map((group) => group.length), 1);
+    const width = compact
+      ? 380
+      : Math.max(1120, 70 + (max + 1) * (nodeW + 120));
+    const height = compact
+      ? 25 + tasks.length * (nodeH + 35)
+      : 50 + largestGroup * (nodeH + 20);
     const pos = {};
     if (compact) {
       tasks
@@ -122,6 +322,8 @@
     );
     tasks.forEach((t) => {
       const p = pos[t.id],
+        taskState = health.tasks.get(t.id),
+        healthClass = taskState?.healthy ? " is-healthy" : " is-unhealthy",
         effects = Object.entries(t.resources || {})
           .map(
             ([id, e]) =>
@@ -129,9 +331,9 @@
           )
           .join("  ");
       svg += [
-        `<g class="dag-node${t.id === targetedTask ? " is-target" : ""}" data-task-id="${esc(t.id)}" transform="translate(${p.x},${p.y})">`,
+        `<g class="dag-node${healthClass}${t.id === targetedTask ? " is-target" : ""}" data-task-id="${esc(t.id)}" transform="translate(${p.x},${p.y})">`,
         `<rect width="${nodeW}" height="${nodeH}" rx="14"/>`,
-        `<circle cx="20" cy="21" r="5" fill="${colors[Object.values(t.timings || {})[0]?.metric] || colors.duration}"/>`,
+        '<circle cx="20" cy="21" r="6"/>',
         `<text class="task-name" x="34" y="26">${esc(t.id)}</text>`,
         `<text class="worker-name" x="18" y="52">worker · ${esc(t.worker)}</text>`,
         `<text class="flow-label" x="18" y="78">${esc(effects || "no resource flow")}</text>`,
@@ -140,7 +342,7 @@
       ].join("");
     });
     $("dag").setAttribute("viewBox", `0 0 ${width} ${height}`);
-    $("dag").style.height = compact ? `${height}px` : "300px";
+    $("dag").style.height = `${height}px`;
     $("dag").innerHTML = svg;
     const target = $("dag").querySelector(".dag-node.is-target");
     if (target && !targetedTaskScrolled) {
@@ -303,6 +505,7 @@
       contract: data.contract,
       evidence: [],
       certificate: null,
+      runtime_events: data.runtime_events,
     };
     let loadedContract = false;
     for (const file of files) {
@@ -317,7 +520,7 @@
       }
       try {
         const parsed = JSON.parse(text);
-        if (parsed.schema === "dagcert-contract/v2") {
+        if (parsed.schema?.startsWith("dagcert-contract/")) {
           next.contract = parsed;
           loadedContract = true;
         } else if (parsed.schema?.startsWith("dagcert-certificate/")) {
@@ -338,6 +541,25 @@
     data = next;
     render();
   });
+
+  async function refreshRuntimeEvents() {
+    try {
+      const response = await fetch(runtimeEndpoint, {
+        cache: "no-store",
+        credentials: "same-origin",
+      });
+      if (!response.ok) return;
+      data = { ...data, runtime_events: await response.json() };
+      render();
+    } catch (_error) {
+      // The standalone demo has no runtime endpoint and keeps its sample feed.
+    }
+  }
+
   window.addEventListener("resize", renderDag);
   render();
+  refreshRuntimeEvents();
+  if (Number.isFinite(runtimePollMs) && runtimePollMs > 0) {
+    window.setInterval(refreshRuntimeEvents, runtimePollMs);
+  }
 })();

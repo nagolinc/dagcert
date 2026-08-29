@@ -37,6 +37,7 @@ from .runtime import (
     outcome_type, runtime_violations,
 )
 from .source_types import SourceSignature, SourceTypeError, check_python_sources
+from .surfaces import SurfaceBinding, SurfaceError, banner, stats
 from .requirements import (
     EnglishClaim,
     EnglishRequirements,
@@ -51,12 +52,12 @@ __all__ = [
     "CheckFinding", "Checker", "CheckResult", "Composition", "CompositionStep",
     "Contract", "ContractError", "ExternalContract", "ExternalProvider", "Implementation",
     "EnglishClaim", "EnglishRequirements", "ErrorBudgetResult", "EvidenceError", "EvidenceRecorder", "ExternalEvidenceMonitor", "Finding",
-    "RequirementsError", "Resource", "ResourceEffect",
+    "RequirementsError", "Resource", "ResourceEffect", "SurfaceBinding", "SurfaceError",
     "StructuralProgress", "Task", "TaskErrorBudget", "TaskOutcome", "Timing", "TimingResult", "TimingSample", "TranslationAudit", "TypedDependency",
     "ExternalBoundaryEvent", "ExternalMonitorError", "ExternalRaised", "ExternalSuccess", "ExternalTypeViolation",
     "OperationTypeViolation", "SourceSignature", "SourceTypeError", "UnhandledException", "Worker", "analyze_contract", "audit_translation", "issue_certificate",
     "load_check_result", "load_contract", "load_evidence", "load_requirements", "run_checker", "sha256_file",
-    "check_python_sources", "clear_runtime_violations", "external_boundary", "monitor_external_boundaries", "operation", "outcome_type", "runtime_violations", "source_fingerprint", "source_manifest", "verify_certificate", "write_check_result",
+    "banner", "check_python_sources", "clear_runtime_violations", "external_boundary", "monitor_external_boundaries", "operation", "outcome_type", "runtime_violations", "source_fingerprint", "source_manifest", "stats", "verify_certificate", "write_check_result",
 ]
 
 __version__ = VERSION

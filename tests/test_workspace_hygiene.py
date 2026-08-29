@@ -42,5 +42,5 @@ def test_pytest_rejects_repository_basetemp_override(tmp_path: Path) -> None:
     assert not polluted.exists()
     result = _collect_with(tmp_path / "cache", f"--basetemp={polluted}")
     assert result.returncode != 0
-    assert "--basetemp must use the operating-system temporary directory" in result.stderr
+    assert "--basetemp must be outside the repository or below .cache" in result.stderr
     assert not polluted.exists()

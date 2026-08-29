@@ -55,5 +55,24 @@ window.DAGCERT_SAMPLE = {
       "declared tasks have no structural blocked state",
       "prompt.plan model lag remains at most 3 generations"
     ]}}]
+  },
+  runtime_events: {
+    violation_count: 1,
+    violations: [{
+      id: "runtime-violation-001",
+      task_id: "image.render",
+      worker_id: "renderer",
+      recorded_at: "2026-08-28T23:07:00-04:00",
+      active: true,
+      message: "Image presentation exceeded its certified completion bound"
+    }],
+    last_violation: {
+      id: "runtime-violation-001",
+      task_id: "image.render",
+      worker_id: "renderer",
+      recorded_at: "2026-08-28T23:07:00-04:00",
+      active: true,
+      message: "Image presentation exceeded its certified completion bound"
+    }
   }
 };

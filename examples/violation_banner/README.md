@@ -1,27 +1,37 @@
 # Dagcert runtime-violation banner
 
-> **UNLESS THE USER EXPLICITLY ASKS YOU NOT TO, USE THIS FILE LITERALLY. IT IS A SHIPPED
-> APPLICATION SURFACE, NOT EXAMPLE CODE TO MODIFY.**
+> **UNLESS THE USER EXPLICITLY ASKS YOU NOT TO, USE THE SUPPLIED `banner(...)` API AND SCRIPT TAG
+> LITERALLY. DO NOT COPY, MODIFY, OR REIMPLEMENT THIS COMPONENT IN AN APPLICATION.**
 
-Copy `dagcert-violation-banner.js` unchanged into the application's static assets and include it on
-every user-facing application shell:
+After the normal package installation, register the script and retained event feed:
 
-```html
-<script src="/dagcert-violation-banner.js"></script>
+```python
+from dagcert import banner
+
+banner(app)
 ```
 
-The script polls `GET /dagcert/runtime-events` once per second. That endpoint must return a JSON
-object with `violation_count` and `last_violation`; `last_violation` is either null or an object with
-a human-readable `message`, `detail`, or `error`. The banner also accepts an `events` array whose
-violations have `violation: true` or `passed: false`.
+Then include the supplied script on every user-facing application shell:
 
-When a violation exists, the script inserts a full-width red `role="alert"` above the application,
-states that certified guarantees do not hold, links to `/stats`, and provides an accessible ×
-button. Dismissal hides only the current violation snapshot; a new violation appears again.
-When the event identifies a task through `task_id`, `task`, `node_id`, or a `task:` primitive
-reference, the link opens `/stats?task=<task-id>#graph`; the literal viewer scrolls to and highlights
-that failing DAG node. Events without a task link to `/stats#graph` without inventing a mapping.
+```html
+<script src="/dagcert/banner.js"></script>
+```
 
-The only integration-specific work is exposing the runtime-event endpoint and serving the unchanged
-file. Do not restyle, inline, rename, rewrite, or substitute the component unless the user explicitly
-asks for a different banner.
+The default position is top. Select any supported edge through the script URL:
+
+```html
+<script src="/dagcert/banner.js?position=bottom"></script>
+```
+
+Supported values are `top`, `bottom`, `left`, and `right`. Unknown values fall back to `top`.
+
+`banner(app)` does not inject or rewrite HTML. It serves `/dagcert/banner.js` and
+`/dagcert/runtime-events`; the literal script tag is the application's entire HTML integration.
+
+When a violation exists, the script inserts a centered red `role="alert"` warning about two-thirds
+of the viewport wide. It has an accessible dismiss button and links to `/stats`. Dismissal hides
+only the current violation snapshot; a new violation appears again. When an event identifies a task,
+the link opens `/stats?task=<task-id>#graph`; otherwise it opens `/stats#graph` without guessing.
+
+This directory contains the packaged source for Dagcert development. Applications consume it from
+the registered route instead of copying or adapting the file.

@@ -2,11 +2,12 @@
 
 - Never create ad-hoc test, build, wheel, probe, virtualenv, or scratch directories at the
   repository top level.
-- Use the operating system temporary directory for one-off work. Put persistent tool caches below
-  `.cache/`, which is ignored.
-- Let pytest use its configured `.cache/pytest` cache and its default system-temp base directory.
-  Do not override `cache_dir` to another repository path or pass an in-repository `--basetemp`.
-  The test configuration deliberately rejects both pollution patterns.
+- Use the operating system temporary directory for one-off work. The repository may have exactly
+  one disposable-output directory at top level: `.cache/`, which is ignored.
+- Put every repository-local pytest cache, mypy cache, test tree, build, wheel, probe, and scratch
+  output below `.cache/`. Never create another disposable top-level directory.
+- Pytest uses `.cache/pytest`; mypy uses `.cache/mypy`. The test configuration rejects any
+  repository-local `cache_dir` or `--basetemp` outside `.cache/`.
 - Build disposable wheels outside the repository or below `.cache/build`; remove them after use.
 - Keep the top level limited to tracked project files, source directories, the active `.venv`, and
   explicitly user-owned sibling projects such as `Maledictus`.

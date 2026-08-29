@@ -8,21 +8,22 @@ description: Certify an application with dagcert by modeling its real worker/tas
 This is the focused workflow. Run `python -m dagcert help` for packaged guides and examples, and
 read [references/workflow.md](references/workflow.md) for current artifact formats and commands.
 
-## Required application surfaces: use the shipped code literally
+## Required application surfaces: use the supplied APIs literally
 
-**UNLESS THE USER EXPLICITLY ASKS YOU NOT TO, USE THESE LITERALLY. THEY ARE SHIPPED APPLICATION
-SURFACES, NOT EXAMPLE CODE TO MODIFY.**
+**UNLESS THE USER EXPLICITLY ASKS YOU NOT TO, USE THESE LITERALLY. THEY ARE SUPPLIED APPLICATION
+APIS, NOT EXAMPLE CODE TO COPY, MODIFY, OR REIMPLEMENT.**
 
-- Copy `examples/stats_viewer` unchanged and serve it at `/stats`.
-- Copy `examples/violation_banner/dagcert-violation-banner.js` unchanged, include it on every
-  user-facing application shell, and expose its `/dagcert/runtime-events` JSON endpoint.
+- After the normal `pip install dagcert`, call `stats(app, certificate=..., evidence=...)` and
+  `banner(app)`; there is no separate installer.
+- Include exactly `<script src="/dagcert/banner.js"></script>` on every user-facing shell.
+- Verify `/stats` contains one node for every task in the bound certificate. Never serve the
+  bundled three-task `sample-data.js` demo as application data.
 
-Do not redesign, restyle, inline, rename, reimplement, or use either asset merely as inspiration.
-Write only the framework-specific route and event-serialization glue. Test in the real browser that
-`/stats` loads, a forced violation produces the full-width red warning, × dismisses that warning,
-and a later violation makes it reappear. Omit a surface only after an explicit user opt-out, and
-report that opt-out in the handoff. Read the **Required application surfaces** section of the
-workflow reference before integrating them.
+`banner(app)` serves the script and event feed; it does not inject HTML. Test in the real browser
+that `/stats` loads the real certificate, a forced violation produces the red warning and red
+task/worker state, the dismiss button hides that warning, and a later violation makes it reappear.
+Omit a surface only after an explicit user opt-out, and report that opt-out in the handoff. Read the
+**Required application surfaces** section of the workflow reference before integrating them.
 
 ## Rule 0: improve the experience; never certify a regression
 

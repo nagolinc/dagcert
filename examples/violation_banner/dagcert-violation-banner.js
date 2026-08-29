@@ -2,9 +2,16 @@
   "use strict";
 
   const script = document.currentScript;
+  const scriptUrl = script?.src ? new URL(script.src, document.baseURI) : null;
   const endpoint = script?.dataset.endpoint || "/dagcert/runtime-events";
   const statsHref = script?.dataset.statsHref || "/stats";
   const pollMs = Number(script?.dataset.pollMs || 1000);
+  const requestedPosition = String(
+    scriptUrl?.searchParams.get("position") || "top",
+  ).toLowerCase();
+  const position = ["top", "bottom", "left", "right"].includes(requestedPosition)
+    ? requestedPosition
+    : "top";
   const bannerId = "dagcert-violation-banner";
   let dismissedToken = null;
   let visibleToken = null;
@@ -16,20 +23,50 @@
     style.id = `${bannerId}-style`;
     style.textContent = `
       #${bannerId} {
-        position: sticky;
-        top: 0;
         z-index: 2147483647;
         display: flex;
         align-items: center;
         gap: 12px;
-        width: 100%;
+        box-sizing: border-box;
+        width: 66.667vw;
+        max-width: 1080px;
         min-height: 42px;
-        padding: 9px clamp(18px, 4vw, 60px);
+        padding: 9px 52px 9px 18px;
         border: 0;
+        border-radius: 10px;
         background: #a92e18;
         color: #fff;
         box-shadow: 0 2px 10px rgba(107, 23, 15, 0.3);
         font: 600 12px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      #${bannerId}[data-position="top"] {
+        position: sticky;
+        top: 0;
+        margin: 12px auto 0;
+      }
+      #${bannerId}[data-position="bottom"] {
+        position: fixed;
+        left: 50%;
+        bottom: 12px;
+        transform: translateX(-50%);
+      }
+      #${bannerId}[data-position="left"],
+      #${bannerId}[data-position="right"] {
+        position: fixed;
+        top: 50%;
+        width: min(360px, calc(100vw - 24px));
+        max-width: none;
+        transform: translateY(-50%);
+        align-items: flex-start;
+        flex-wrap: wrap;
+      }
+      #${bannerId}[data-position="left"] { left: 12px; }
+      #${bannerId}[data-position="right"] { right: 12px; }
+      #${bannerId}[data-position="left"] .dagcert-violation-detail,
+      #${bannerId}[data-position="right"] .dagcert-violation-detail {
+        order: 3;
+        flex-basis: 100%;
+        white-space: normal;
       }
       #${bannerId}[hidden] { display: none; }
       #${bannerId} strong { flex: 0 0 auto; letter-spacing: 0.025em; }
@@ -43,10 +80,12 @@
       }
       #${bannerId} a { flex: 0 0 auto; color: #fff; text-decoration: underline; }
       #${bannerId} button {
-        flex: 0 0 auto;
+        position: absolute;
+        top: 7px;
+        right: 10px;
         width: 28px;
         height: 28px;
-        margin: -3px -8px -3px 0;
+        margin: 0;
         padding: 0;
         border: 1px solid rgba(255, 255, 255, 0.55);
         border-radius: 999px;
@@ -61,7 +100,6 @@
         #${bannerId} { align-items: flex-start; flex-wrap: wrap; gap: 5px 10px; }
         #${bannerId} strong { padding-right: 32px; }
         #${bannerId} .dagcert-violation-detail { order: 3; flex-basis: 100%; white-space: normal; }
-        #${bannerId} button { position: absolute; top: 9px; right: 18px; }
       }
     `;
     document.head.append(style);
@@ -72,6 +110,7 @@
     if (banner) return banner;
     banner = document.createElement("div");
     banner.id = bannerId;
+    banner.dataset.position = position;
     banner.hidden = true;
     banner.setAttribute("role", "alert");
     banner.setAttribute("aria-live", "assertive");

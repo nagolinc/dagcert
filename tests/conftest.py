@@ -15,6 +15,41 @@ from dagcert import (
 )
 
 
+def _is_within(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+    except ValueError:
+        return False
+    return True
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Confine repository-local disposable output to the single .cache tree."""
+    root = Path(str(config.rootpath)).resolve()
+    safe_cache_root = (root / ".cache").resolve()
+    cache_value = Path(str(config.getini("cache_dir")))
+    cache_path = (
+        cache_value if cache_value.is_absolute() else root / cache_value
+    ).resolve()
+    if _is_within(cache_path, root) and not _is_within(cache_path, safe_cache_root):
+        raise pytest.UsageError(
+            "pytest cache_dir must be outside the repository or below .cache; "
+            f"refusing {cache_path}"
+        )
+    basetemp = getattr(config.option, "basetemp", None)
+    if basetemp is None:
+        return
+    path = Path(str(basetemp))
+    basetemp_path = (path if path.is_absolute() else root / path).resolve()
+    if _is_within(basetemp_path, root) and not _is_within(
+        basetemp_path, safe_cache_root
+    ):
+        raise pytest.UsageError(
+            "pytest --basetemp must be outside the repository or below .cache, "
+            f"not the repository; refusing {basetemp_path}"
+        )
+
+
 @pytest.fixture
 def project(tmp_path: Path) -> dict[str, object]:
     root = tmp_path / "app"

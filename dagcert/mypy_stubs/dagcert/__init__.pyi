@@ -13,3 +13,9 @@ from .runtime import (
     outcome_type as outcome_type,
     runtime_violations as runtime_violations,
 )
+from .surfaces import (
+    SurfaceBinding as SurfaceBinding,
+    SurfaceError as SurfaceError,
+    banner as banner,
+    stats as stats,
+)

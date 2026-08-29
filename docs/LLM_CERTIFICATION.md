@@ -4,11 +4,13 @@
 tests and selected checkers, and create certificate artifacts. It does not authorize product
 restrictions or unrelated redesign.
 
-Unless the user explicitly asks not to include them, copy Dagcert's shipped `/stats` viewer and
-`dagcert-violation-banner.js` literally into the application. They are application surfaces, not
-example code to modify. Expose `/dagcert/runtime-events`, include the banner on every user-facing
-shell, and browser-test violation display, × dismissal, and reappearance for a new violation. Run
-`python -m dagcert help app-surfaces` for the exact installed paths and response shape.
+Unless the user explicitly asks not to include them, use Dagcert's supplied APIs literally:
+`stats(app, certificate=..., evidence=...)` and `banner(app)`. They come from the normal Dagcert
+package; there is no separate installer and they are not example code to copy or modify. Add exactly
+`<script src="/dagcert/banner.js"></script>` to every user-facing shell. Never expose the bundled
+three-task demo as application stats. Browser-test the exact certificate task set, violation display,
+red task/worker health, dismissal, and reappearance for a new violation. Run
+`python -m dagcert help app-surfaces` for the installed contract.
 
 First write `english_requirements.json`. Every certificate requires it. Each complete
 plain-English promise has a stable ID, explicit assumptions, and exact references to the formal

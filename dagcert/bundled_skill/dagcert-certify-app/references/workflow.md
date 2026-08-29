@@ -16,17 +16,24 @@ Repeat `--exclude PATTERN` identically when project-specific source exclusions a
 
 ## Required application surfaces
 
-**UNLESS THE USER EXPLICITLY ASKS YOU NOT TO, USE THESE LITERALLY. THEY ARE SHIPPED APPLICATION
-SURFACES, NOT EXAMPLE CODE TO MODIFY.**
+**UNLESS THE USER EXPLICITLY ASKS YOU NOT TO, USE DAGCERT'S SUPPLIED APIS LITERALLY. THEY ARE NOT
+EXAMPLE CODE TO COPY, MODIFY, OR REIMPLEMENT.**
 
-Copy `examples/stats_viewer` unchanged and serve it at `/stats`. Copy
-`examples/violation_banner/dagcert-violation-banner.js` unchanged, serve it as
-`/dagcert-violation-banner.js`, include it on every user-facing application shell, and expose
-`GET /dagcert/runtime-events` with `violation_count` and `last_violation`. Framework-specific route
-glue is expected; redesigning, restyling, inlining, renaming, or reimplementing either shipped asset
-is not. Verify `/stats`, violation appearance, × dismissal, and reappearance for a later violation
-in the real browser. Omit either surface only after an explicit user opt-out and record that opt-out
-in the certification handoff. Run `python -m dagcert help app-surfaces` for the installed contract.
+The normal package install contains both APIs:
+
+```python
+from dagcert import banner, stats
+
+stats(app, certificate="artifacts/certificate.json", evidence="artifacts/timings.jsonl")
+banner(app)
+```
+
+Add `<script src="/dagcert/banner.js"></script>` to every user-facing shell. `banner(app)` only
+serves that script and `/dagcert/runtime-events`; it does not rewrite HTML. `/stats` must contain a
+1:1 mapping to the bound certificate's task IDs, not the three-task standalone demo. Verify the real
+task set, violation appearance, linked red task/worker health, dismissal, and reappearance for a
+later violation in the browser. Omit either surface only after an explicit user opt-out and record
+that opt-out in the handoff. Run `python -m dagcert help app-surfaces` for the installed contract.
 
 ## Contract
 

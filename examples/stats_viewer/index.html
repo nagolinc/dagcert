@@ -6,39 +6,59 @@
     <title>Dagcert report</title>
     <link rel="stylesheet" href="style.css" />
   </head>
-  <body>
+  <body data-runtime-events="/dagcert/runtime-events" data-runtime-poll-ms="5000">
     <header class="topbar">
       <a class="brand" href="#">Dagcert</a>
       <nav>
-        <a class="active" href="#overview">Overview</a><a href="#graph">Graph</a
-        ><a href="#timings">Timings</a>
+        <a class="active" href="#overview">Violations</a><a href="#health">Health</a
+        ><a href="#graph">Graph</a><a href="#timings">Timings</a>
       </nav>
-      <div class="status">
+      <div class="status" data-health="healthy">
         <span class="status-dot"></span
-        ><span id="header-status">certificate verified</span>
+        ><span id="header-status">Checking runtime health</span>
       </div>
     </header>
 
     <main>
-      <section class="hero" id="overview">
-        <div>
-          <p class="eyebrow">EXACT-SOURCE CERTIFICATE</p>
-          <h1><span id="hero-task-count">3</span> tasks, one readable story</h1>
-          <p class="lede">
-            See what runs, what it needs, how long it takes, and which
-            guarantees are conditional.
-          </p>
+      <section class="incident-section" id="overview">
+        <div class="incident-heading">
+          <div>
+            <p class="eyebrow">RUNTIME SAFETY</p>
+            <h1>Recent Dagcert violations</h1>
+            <p class="lede">Newest retained certificate-premise failures appear first.</p>
+          </div>
+          <label class="load-button"
+            >Load artifacts<input
+              id="artifact-files"
+              type="file"
+              accept=".json,.jsonl"
+              multiple
+            /></label>
         </div>
-        <label class="load-button"
-          >Load artifacts<input
-            id="artifact-files"
-            type="file"
-            accept=".json,.jsonl"
-            multiple
-          /></label>
+        <div id="violations" class="violation-list" role="status" aria-live="polite"></div>
       </section>
 
-      <section class="summary-grid" id="summary"></section>
+      <section class="section health-section" id="health">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">CURRENT STATUS</p>
+            <h2>Workers and tasks</h2>
+          </div>
+          <p class="section-note">Green is healthy. Red needs attention now.</p>
+        </div>
+        <div class="health-layout">
+          <div class="panel">
+            <div class="panel-title"><h3>Workers</h3><span id="worker-health-count"></span></div>
+            <div id="worker-health" class="health-grid"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-title"><h3>Tasks</h3><span id="task-health-count"></span></div>
+            <div id="task-health" class="health-grid"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="summary-grid" id="summary" aria-label="Certificate summary"></section>
 
       <section class="section" id="graph">
         <div class="section-heading">

@@ -1,46 +1,44 @@
 # Required Dagcert application surfaces
 
-> **UNLESS THE USER EXPLICITLY ASKS YOU NOT TO, USE THESE LITERALLY. THEY ARE SHIPPED APPLICATION
-> SURFACES, NOT EXAMPLE CODE TO MODIFY.**
+> **UNLESS THE USER EXPLICITLY ASKS YOU NOT TO, USE DAGCERT'S SUPPLIED STATS AND BANNER APIS
+> LITERALLY. DO NOT COPY, MODIFY, OR REIMPLEMENT THEIR FRONTEND CODE.**
 
-Certification work includes two default user-facing integrations:
+There is no second installer. The normal `pip install dagcert` provides both functions. For Flask:
 
-1. Copy `examples/stats_viewer` unchanged and serve its `index.html`, `style.css`, `app.js`, and
-   `sample-data.js` at `/stats`.
-2. Copy `examples/violation_banner/dagcert-violation-banner.js` unchanged, serve it as
-   `/dagcert-violation-banner.js`, and include this exact tag on every user-facing app shell:
+```python
+from dagcert import banner, stats
+
+stats(app, certificate="artifacts/certificate.json", evidence="artifacts/timings.jsonl")
+banner(app)
+```
+
+`stats(...)` registers `/stats` and binds its initial data to that exact certificate. It must show
+one DAG node per sealed task, the sealed workers/resources, matching source fingerprint, available
+evidence, recent violations first, and obvious red/green task and worker health. If `evidence` is
+omitted, Dagcert uses `timings.jsonl` beside the certificate when present.
+
+`banner(...)` registers `/dagcert/banner.js` and `/dagcert/runtime-events`, serving the packaged
+`dagcert-violation-banner.js` component. It does not inject or rewrite HTML responses. Include the
+supplied component on every user-facing shell with this literal tag unless the user explicitly opts
+out:
 
 ```html
-<script src="/dagcert-violation-banner.js"></script>
+<script src="/dagcert/banner.js"></script>
 ```
 
-The banner expects `GET /dagcert/runtime-events` to return:
+The banner defaults to the top. Set `?position=bottom`, `left`, or `right` on the script URL when the
+user requests another edge. The supplied component handles the layout—do not fork its CSS.
 
-```json
-{
-  "violation_count": 1,
-  "last_violation": {
-    "recorded_at": 1787952000.0,
-    "message": "image presentation exceeded its certified bound"
-  }
-}
-```
+The banner polls the supplied feed, appears as a dismissible red warning, and links a task-bearing
+violation to `/stats?task=<task-id>#graph`. `banner(..., extra_events=callable)` can merge retained
+application-level premise failures into Dagcert's own `runtime_violations()` records.
 
-Return `{"violation_count": 0, "last_violation": null}` when no violation has been observed. Feed
-Dagcert's `runtime_violations()` records and any application-level certified-premise failures into
-that same retained event stream. Do not present a violation as success, and do not erase the
-persistent record when the user dismisses the banner.
+The files under `examples/stats_viewer` and `examples/violation_banner` are the packaged UI source
+and standalone preview. In particular, `sample-data.js` is a visual demo only. Never copy it into an
+application, never expose its three demo tasks as real stats, and never hand-build substitute route
+or banner behavior when these APIs are available.
 
-When a violation identifies a task through `task_id`, `task`, `node_id`, or a `task:` primitive
-reference, the banner links to `/stats?task=<task-id>#graph`. The literal viewer scrolls to and
-highlights that failing DAG node. If the event does not identify a task, it links to `/stats#graph`
-without guessing.
-
-Framework glue may map routes and serialize events. It must not redesign, restyle, inline, rename,
-or reimplement the shipped viewer or banner. Verify both surfaces in the real browser: `/stats`
-loads, a forced violation produces the red warning, × dismisses the current warning, and a later
-violation makes it reappear.
-
-These surfaces do not change whether a certificate passes. They make the certificate and runtime
-failures visible. Omit either surface only when the user explicitly asks not to include it, and
-record that opt-out in the final certification handoff.
+Verify the installed integration in the real browser: `/stats` has exactly the sealed task IDs; a
+forced violation makes the matching task and worker red; the banner appears; its dismiss button
+hides only the current violation; and a later violation makes it reappear. Omit either surface only
+on explicit user request and record that opt-out in the certification handoff.
