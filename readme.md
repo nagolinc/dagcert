@@ -340,3 +340,11 @@ dagcert verify APP/artifacts/certificate.json --contract APP/dag_contract.json -
 
 Repeat `--check-result PATH` during both issuance and verification for every selected application
 checker. See [LIBRARY_SPEC.md](LIBRARY_SPEC.md) for exact semantics and design decisions.
+
+## Development workspace hygiene
+
+Run pytest without repository-local cache or temporary-directory overrides. Its persistent cache is
+configured at `.cache/pytest`, and temporary test trees use the operating-system temporary
+directory. Test startup rejects `cache_dir` values elsewhere inside the repository and rejects every
+in-repository `--basetemp`; this prevents disposable `.pytest-cache-*` and `.pytest-local-*` trees
+from accumulating beside the source.

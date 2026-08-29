@@ -5,7 +5,8 @@
 - Use the operating system temporary directory for one-off work. Put persistent tool caches below
   `.cache/`, which is ignored.
 - Let pytest use its configured `.cache/pytest` cache and its default system-temp base directory.
-  Do not pass a repository-root `--basetemp` path.
+  Do not override `cache_dir` to another repository path or pass an in-repository `--basetemp`.
+  The test configuration deliberately rejects both pollution patterns.
 - Build disposable wheels outside the repository or below `.cache/build`; remove them after use.
 - Keep the top level limited to tracked project files, source directories, the active `.venv`, and
   explicitly user-owned sibling projects such as `Maledictus`.
