@@ -38,13 +38,14 @@ declares finite source-outcome paths over those primitives.
 
 - `operation` tasks are real executable leaf boundaries and may have measured timings.
 - In a v6 contract, an operation binds a real source file and symbol. Dagcert extracts its one-input
-  type and closed return union and runs strict mypy itself. It then requires the digest-pinned
-  Nagini/Viper container to prove the complete bound Python file has no undeclared exceptional
-  exit. Contract JSON cannot declare or override task types.
+  type and closed return union and runs strict mypy itself. It then requires an explicitly selected,
+  digest-pinned proof backend to prove the complete bound Python file has no undeclared exceptional
+  exit. Nagini/Viper is the default; Maledictus is an alternate only for its advertised narrow
+  Dagcert operation fragment. Contract JSON cannot declare or override task types.
 - Dagcert verifies the provenance of `operation` and `dataclass`; local lookalike decorators and
   source-tree modules shadowing `dagcert` or `dataclasses` fail. The marker preserves the exact
   callable type; it does not catch exceptions or widen the outcome union.
-- A v10 certificate seals strict-mypy output, the pinned Nagini image digest and proof scope, and the
+- A v10 certificate seals strict-mypy output, the selected proof-engine identity and proof scope, and the
   exact type-enforcement core-file manifest—not only a claimed Dagcert version or compiler result.
 - `instrumentation` tasks may record aggregate observations but cannot participate in a derived
   composition.
@@ -67,6 +68,16 @@ parsing, normalization, lookup, reservation, and other claim-relevant argument p
 the verified boundary. Never create a typed certification wrapper that production bypasses.
 Do not use operation-level Nagini `Requires` or executable-module `Assume`/`ContractOnly`; Dagcert
 must prove executable behavior for the complete declared input type without trusted axioms.
+
+Use `--proof-backend maledictus` only with both `--proof-backend-executable` and
+`--proof-backend-sha256`, and pass the same selection to lint, issue, and verify. Never switch
+backends after a refusal. Maledictus v2 requires `dagcert-closed-typed-operations/v3`. Its response
+v7 must
+include the exact strict-mypy package, runtime executable and bundle, configuration, and support
+hashes. Dagcert retains that identity in the certificate and requires an exact match on verification.
+For passed-at-construction callable fields, declare task-local `callable_bindings`; each binding
+must identify the field and a real source path/symbol or an explicit external-contract overlay.
+Never replace this machine-readable provenance with prose or a checker assertion.
 
 For a real third-party or standard-library boundary that Nagini cannot translate, declare a v6
 `external` task. Put the executable adapter in its own module, mark it with
@@ -94,11 +105,12 @@ Classify every claim before collecting evidence:
   The formula must use a declared multi-operation composition or bounds from at least two connected
   tasks plus relevant worker/resource state.
 - `chance` contains either a finite-composition engineering-envelope formula or one external-contract
-  probability premise. Every composition step must use a task-local
-  engineering error budget, select a source-typed good outcome, and cite that budget as an explicit
-  assumption. The budget's complete good set must equal the exact selected outcome. Do not invent
-  failure outcomes: a total task can use `error_budget: null`, and an optional budget may classify
-  every real outcome as good. Use one direct success-lower/failure-upper comparison with a
+  probability premise. A step with a declared task-local engineering error budget selects a
+  source-typed good outcome and cites that budget as an explicit assumption. A source-proved task
+  whose complete outcome union is exactly the selected outcome contributes structural zero when its
+  budget is null. It may instead declare a conservative nonzero budget without weakening its typed
+  totality guarantee. The budget's complete good set must equal the exact selected outcome. Do not
+  invent failure outcomes: an optional budget may classify every real outcome as good. Use one direct success-lower/failure-upper comparison with a
   literal probability; never add a boolean fallback branch. Retained observations test consistency
   only; never describe them as statistically establishing the leaf probability.
 

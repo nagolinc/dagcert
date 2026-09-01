@@ -7,17 +7,24 @@ from hashlib import sha256
 import os
 from pathlib import Path, PurePosixPath
 from time import time
-from typing import Any, Iterable, cast
+from typing import Any, Iterable, Literal, cast
 import json
 
 from .analysis import AnalysisReport, analyze_contract
 from .checks import CheckResult, load_check_result
-from .contract import Contract, load_contract
+from .contract import (
+    Contract, ExternalCallableProvider, SourceCallableProvider, load_contract,
+)
 from .evidence import load_evidence
 from .formula import FormulaError, evaluate_formula
 from .requirements import EnglishRequirements, audit_translation, load_requirements
 from .source_types import (
-    ExternalSourceContract, SourceTypeError, check_python_sources, type_enforcement_descriptor,
+    ExternalSourceContract, SourceProofBackend, SourceTypeError, check_python_sources,
+    type_enforcement_descriptor,
+)
+from .maledictus_verifier import (
+    MaledictusCallableBinding, MaledictusExternalCallableProvider,
+    MaledictusSourceCallableProvider,
 )
 
 
@@ -143,6 +150,9 @@ def _primitive_refs(contract: Contract) -> set[str]:
 def _serialized_primitives(contract: Contract, analysis_mapping: dict[str, Any]) -> dict[str, Any]:
     """Return the exact JSON shape stored in a certificate (tuples become arrays)."""
     tasks = [asdict(item) for item in contract.tasks]
+    for task in tasks:
+        if contract.schema != "dagcert-contract/v6" or not task["callable_bindings"]:
+            task.pop("callable_bindings", None)
     if contract.schema != "dagcert-contract/v6":
         for task in tasks:
             task.pop("external_contract", None)
@@ -191,6 +201,52 @@ def external_source_contracts(contract: Contract) -> tuple[ExternalSourceContrac
             external.assumption,
             signature,
         ))
+    return tuple(result)
+
+
+def maledictus_callable_bindings(
+    contract: Contract,
+) -> tuple[MaledictusCallableBinding, ...]:
+    """Resolve typed task declarations into the alternate backend's concrete provenance edges."""
+
+    result: list[MaledictusCallableBinding] = []
+    for task in contract.tasks:
+        if not task.callable_bindings:
+            continue
+        implementation = task.implementation
+        signature = task.source_signature
+        if implementation is None or signature is None:
+            raise CertificateError(
+                f"operation task {task.id} callable bindings lack a source implementation"
+            )
+        for binding in task.callable_bindings:
+            provider = binding.provider
+            if isinstance(provider, SourceCallableProvider):
+                resolved_provider: (
+                    MaledictusSourceCallableProvider | MaledictusExternalCallableProvider
+                ) = MaledictusSourceCallableProvider(provider.path, provider.symbol)
+            elif isinstance(provider, ExternalCallableProvider):
+                resolved_provider = MaledictusExternalCallableProvider(
+                    provider.module,
+                    provider.symbol,
+                    provider.stub_path,
+                    cast(
+                        Literal["assume-no-exception", "declared-by-exsures"],
+                        provider.exception_policy,
+                    ),
+                )
+            else:  # pragma: no cover - frozen union guarded by contract loading
+                raise CertificateError(
+                    f"operation task {task.id} callable binding {binding.id} has an unknown provider"
+                )
+            result.append(MaledictusCallableBinding(
+                binding.id,
+                implementation.path,
+                implementation.symbol,
+                signature.input_type,
+                binding.field,
+                resolved_provider,
+            ))
     return tuple(result)
 
 
@@ -275,6 +331,7 @@ def issue_certificate(
     source_root: str | Path = ".",
     check_result_paths: Iterable[str | Path] = (),
     source_exclude: Iterable[str] = (),
+    proof_backend: SourceProofBackend | None = None,
 ) -> dict[str, Any]:
     check_result_paths = tuple(check_result_paths)
     source_exclude = tuple(source_exclude)
@@ -310,6 +367,8 @@ def issue_certificate(
                 if task.role == "operation" and task.source_signature is not None
             ),
             external_contracts=external_source_contracts(contract),
+            callable_bindings=maledictus_callable_bindings(contract),
+            proof_backend=proof_backend,
         )
     except SourceTypeError as exc:
         raise CertificateError(f"certificate refused: {exc}") from exc
@@ -369,6 +428,7 @@ def verify_certificate(
     source_root: str | Path = ".",
     check_result_paths: Iterable[str | Path] = (),
     source_exclude: Iterable[str] = (),
+    proof_backend: SourceProofBackend | None = None,
 ) -> CertificateVerification:
     check_result_paths = tuple(check_result_paths)
     source_exclude = tuple(source_exclude)
@@ -444,22 +504,44 @@ def verify_certificate(
             except SourceTypeError as exc:
                 problems.append(f"current source type analysis failed: {exc}")
         if certificate_schema in {"dagcert-certificate/v9", "dagcert-certificate/v10"}:
-            try:
-                source_verification = check_python_sources(
-                    root,
-                    (task.source_signature for task in contract.tasks if task.source_signature is not None),
-                    source_fingerprint=fingerprint,
-                    source_manifest_paths=manifest,
-                    proof_signatures=(
-                        task.source_signature for task in contract.tasks
-                        if task.role == "operation" and task.source_signature is not None
-                    ),
-                    external_contracts=external_source_contracts(contract),
+            stored_source_verification = raw.get("source_verification")
+            stored_exception_verifier = (
+                stored_source_verification.get("exception_verifier")
+                if isinstance(stored_source_verification, dict) else None
+            )
+            stored_backend = (
+                stored_exception_verifier.get("checker")
+                if isinstance(stored_exception_verifier, dict) else None
+            )
+            selected_backend = proof_backend or SourceProofBackend()
+            if (
+                isinstance(stored_backend, str)
+                and stored_backend in {"nagini", "maledictus"}
+                and selected_backend.name != stored_backend
+            ):
+                problems.append(
+                    "proof backend selection mismatch: certificate requires "
+                    f"{stored_backend}, verifier selected {selected_backend.name}"
                 )
-                if raw.get("source_verification") != source_verification:
-                    problems.append("source verification no longer matches")
-            except SourceTypeError as exc:
-                problems.append(f"current source verification failed: {exc}")
+            else:
+                try:
+                    source_verification = check_python_sources(
+                        root,
+                        (task.source_signature for task in contract.tasks if task.source_signature is not None),
+                        source_fingerprint=fingerprint,
+                        source_manifest_paths=manifest,
+                        proof_signatures=(
+                            task.source_signature for task in contract.tasks
+                            if task.role == "operation" and task.source_signature is not None
+                        ),
+                        external_contracts=external_source_contracts(contract),
+                        callable_bindings=maledictus_callable_bindings(contract),
+                        proof_backend=selected_backend,
+                    )
+                    if stored_source_verification != source_verification:
+                        problems.append("source verification no longer matches")
+                except SourceTypeError as exc:
+                    problems.append(f"current source verification failed: {exc}")
         if (
             certificate_schema in {"dagcert-certificate/v7", "dagcert-certificate/v8", "dagcert-certificate/v9", "dagcert-certificate/v10"}
             and raw.get("type_enforcement") != type_enforcement_descriptor()

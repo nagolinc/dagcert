@@ -7,6 +7,7 @@ from math import ceil, isfinite
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 import json
+import keyword
 
 from .source_types import (
     SourceSignature, SourceTypeError, read_python_signature, validate_external_contract_stub,
@@ -97,6 +98,33 @@ class ExternalContract:
 
 
 @dataclass(frozen=True, slots=True)
+class SourceCallableProvider:
+    """A source-owned concrete value supplied to one callable operation-input field."""
+
+    path: str
+    symbol: str
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalCallableProvider:
+    """A callable supplied by one explicit checked external overlay."""
+
+    module: str
+    symbol: str
+    stub_path: str
+    exception_policy: str
+
+
+@dataclass(frozen=True, slots=True)
+class CallableBinding:
+    """Concrete provenance for one callable-valued operation-input field."""
+
+    id: str
+    field: str
+    provider: SourceCallableProvider | ExternalCallableProvider
+
+
+@dataclass(frozen=True, slots=True)
 class TypedDependency:
     task: str
     outcome_type: str
@@ -119,6 +147,7 @@ class Task:
     typed_dependencies: tuple[TypedDependency, ...] = ()
     error_budget: TaskErrorBudget | None = None
     external_contract: ExternalContract | None = None
+    callable_bindings: tuple[CallableBinding, ...] = ()
 
     @property
     def outcome_by_type(self) -> Mapping[str, TaskOutcome]:
@@ -246,6 +275,13 @@ def _identifier(value: Any, label: str) -> str:
     return result
 
 
+def _python_identifier(value: Any, label: str) -> str:
+    result = _identifier(value, label)
+    if not result.isidentifier() or keyword.iskeyword(result):
+        raise ContractError(f"{label} must be a Python identifier")
+    return result
+
+
 def _load(path: Path) -> Mapping[str, Any]:
     text = path.read_text(encoding="utf-8")
     try:
@@ -311,8 +347,9 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
         }
         v5_task_fields = v4_task_fields | {"error_budget"}
         v6_task_fields = v5_task_fields | {"external_contract"}
+        v6_optional_task_fields = {"callable_bindings"}
         allowed_task_fields = (
-            v6_task_fields if schema == "dagcert-contract/v6"
+            v6_task_fields | v6_optional_task_fields if schema == "dagcert-contract/v6"
             else v5_task_fields if schema == "dagcert-contract/v5"
             else v4_task_fields if schema == "dagcert-contract/v4"
             else legacy_task_fields
@@ -332,7 +369,9 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             raise ContractError(
                 f"v5 task fields mismatch: unexpected={sorted(unexpected_task_fields)}, missing={missing}"
             )
-        if schema == "dagcert-contract/v6" and (unexpected_task_fields or set(row) - {"metadata"} != v6_task_fields):
+        if schema == "dagcert-contract/v6" and (
+            unexpected_task_fields or v6_task_fields - (set(row) - {"metadata"})
+        ):
             missing = sorted(v6_task_fields - set(row))
             raise ContractError(
                 f"v6 task fields mismatch: unexpected={sorted(unexpected_task_fields)}, missing={missing}"
@@ -417,6 +456,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
         outcomes: tuple[TaskOutcome, ...] = ()
         source_signature: SourceSignature | None = None
         external_contract: ExternalContract | None = None
+        callable_bindings: tuple[CallableBinding, ...] = ()
         if schema == "dagcert-contract/v6" and row.get("external_contract") is not None:
             external = _object(
                 row.get("external_contract"), f"task {task_id}.external_contract"
@@ -477,6 +517,98 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             raise ContractError(
                 f"non-external task {task_id} must set external_contract to null"
             )
+        if schema == "dagcert-contract/v6":
+            parsed_bindings: list[CallableBinding] = []
+            for binding_value in _array(
+                row.get("callable_bindings", ()), f"task {task_id}.callable_bindings"
+            ):
+                callable_binding = _object(
+                    binding_value, f"task {task_id}.callable_binding"
+                )
+                if set(callable_binding) != {"id", "field", "provider"}:
+                    raise ContractError(
+                        f"task {task_id}.callable_binding must contain exactly id, field, "
+                        "and provider"
+                    )
+                provider_value = _object(
+                    callable_binding.get("provider"),
+                    f"task {task_id}.callable_binding.provider",
+                )
+                provider_kind = _identifier(
+                    provider_value.get("kind"),
+                    f"task {task_id}.callable_binding.provider.kind",
+                )
+                if provider_kind == "source":
+                    if set(provider_value) != {"kind", "path", "symbol"}:
+                        raise ContractError(
+                            f"task {task_id} source callable provider must contain exactly "
+                            "kind, path, and symbol"
+                        )
+                    callable_provider: (
+                        SourceCallableProvider | ExternalCallableProvider
+                    ) = (
+                        SourceCallableProvider(
+                            _identifier(
+                                provider_value.get("path"),
+                                f"task {task_id}.callable_binding.provider.path",
+                            ),
+                            _python_identifier(
+                                provider_value.get("symbol"),
+                                f"task {task_id}.callable_binding.provider.symbol",
+                            ),
+                        )
+                    )
+                elif provider_kind == "external-contract":
+                    if set(provider_value) != {
+                        "kind", "module", "symbol", "stub_path", "exception_policy",
+                    }:
+                        raise ContractError(
+                            f"task {task_id} external callable provider must contain exactly "
+                            "exception_policy, kind, module, stub_path, and symbol"
+                        )
+                    exception_policy = _identifier(
+                        provider_value.get("exception_policy"),
+                        f"task {task_id}.callable_binding.provider.exception_policy",
+                    )
+                    if exception_policy not in {
+                        "assume-no-exception", "declared-by-exsures",
+                    }:
+                        raise ContractError(
+                            f"task {task_id} external callable provider exception_policy must "
+                            "be assume-no-exception or declared-by-exsures"
+                        )
+                    callable_provider = ExternalCallableProvider(
+                        _identifier(
+                            provider_value.get("module"),
+                            f"task {task_id}.callable_binding.provider.module",
+                        ),
+                        _python_identifier(
+                            provider_value.get("symbol"),
+                            f"task {task_id}.callable_binding.provider.symbol",
+                        ),
+                        _identifier(
+                            provider_value.get("stub_path"),
+                            f"task {task_id}.callable_binding.provider.stub_path",
+                        ),
+                        exception_policy,
+                    )
+                else:
+                    raise ContractError(
+                        f"task {task_id} callable provider kind must be source or "
+                        "external-contract"
+                    )
+                parsed_bindings.append(CallableBinding(
+                    _identifier(
+                        callable_binding.get("id"),
+                        f"task {task_id}.callable_binding.id",
+                    ),
+                    _python_identifier(
+                        callable_binding.get("field"),
+                        f"task {task_id}.callable_binding.field",
+                    ),
+                    callable_provider,
+                ))
+            callable_bindings = tuple(parsed_bindings)
         if schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"}:
             binding = _object(row.get("implementation"), f"task {task_id}.implementation")
             if set(binding) != {"language", "path", "symbol"}:
@@ -652,6 +784,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             typed_dependencies,
             error_budget,
             external_contract,
+            callable_bindings,
         ))
 
     compositions: list[Composition] = []
@@ -724,6 +857,21 @@ def _validate(contract: Contract) -> None:
     tasks = contract.task_by_id
     resources = contract.resource_by_id
     if contract.schema == "dagcert-contract/v6":
+        callable_binding_ids = [
+            binding.id for task in contract.tasks for binding in task.callable_bindings
+        ]
+        if len(callable_binding_ids) != len(set(callable_binding_ids)):
+            raise ContractError("callable binding IDs must be unique across the contract")
+        for task in contract.tasks:
+            if task.callable_bindings and task.role != "operation":
+                raise ContractError(
+                    f"task {task.id} callable bindings require role operation"
+                )
+            fields = [binding.field for binding in task.callable_bindings]
+            if len(fields) != len(set(fields)):
+                raise ContractError(
+                    f"task {task.id} callable bindings must target unique input fields"
+                )
         external_paths = {
             task.implementation.path
             for task in contract.tasks

@@ -2,8 +2,9 @@ from pathlib import Path
 import json
 
 from dagcert import (
-    CertificateError, CheckContext, CheckResult, issue_certificate, load_check_result, load_contract, load_evidence,
-    load_requirements, run_checker, sha256_file, verify_certificate,
+    CertificateError, CheckContext, CheckResult, SourceProofBackend, issue_certificate,
+    load_check_result, load_contract, load_evidence, load_requirements, run_checker, sha256_file,
+    verify_certificate,
 )
 from dagcert.certificate import canonical_json, source_manifest
 from hashlib import sha256
@@ -91,13 +92,16 @@ def test_certificate_embeds_and_digest_binds_plain_english_requirements(project)
     assert document["schema"] == "dagcert-certificate/v10"
     assert document["type_enforcement"]["operation_marker"] == "type-preserving/v1"
     assert document["type_enforcement"]["mypy_import_surface"] == "sealed-type-preserving-dagcert-stub/v1"
-    assert document["type_enforcement"]["exception_verification"] == "nagini-viper-external-contract-overlays/v3"
+    assert document["type_enforcement"]["exception_verification"] == (
+        "selectable-nagini-viper-v3-or-maledictus-v2"
+    )
     assert document["type_enforcement"]["external_contracts"] == (
         "environment-resolved+p1-contract-only+typeguard-runtime/v3"
     )
-    assert document["type_enforcement"]["chance_composition"] == "engineering-envelope-exact-path+external/v3"
+    assert document["type_enforcement"]["chance_composition"] == "engineering-envelope-optional-budget+exact-path+external/v4"
     assert set(document["type_enforcement"]["kernel_manifest"]) >= {
-        "analysis.py", "certificate.py", "contract.py", "runtime.py", "source_types.py",
+        "analysis.py", "certificate.py", "contract.py", "maledictus_verifier.py",
+        "runtime.py", "source_types.py", "mypy_stubs/dagcert/surfaces.pyi",
     }
     assert len(document["type_enforcement"]["kernel_sha256"]) == 64
     verification = document["source_verification"]
@@ -370,3 +374,105 @@ def test_check_result_protocol_rejects_non_array_references(project):
         assert "primitive_refs" in str(exc)
     else:
         raise AssertionError("invalid check result was accepted")
+
+
+def test_verify_refuses_backend_switch_before_invoking_another_engine(
+    project, monkeypatch,
+):
+    calls = 0
+
+    def fake_source_verification(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return {
+            "provider": "test",
+            "type_checker": {"checker": "mypy", "version": "test", "mode": "strict"},
+            "exception_verifier": {
+                "checker": "maledictus", "version": "test", "result": "proved",
+            },
+            "signatures": [],
+            "external_contracts": [],
+        }
+
+    monkeypatch.setattr("dagcert.certificate.check_python_sources", fake_source_verification)
+    root = Path(project["root"])
+    certificate = root / "artifacts" / "certificate.json"
+    backend = SourceProofBackend.maledictus(root / "maledictus.exe", "a" * 64)
+    issue_certificate(
+        project["contract"], project["evidence"], certificate,
+        requirements_path=project["requirements"], source_root=root,
+        proof_backend=backend,
+    )
+    assert calls == 1
+
+    verification = verify_certificate(
+        certificate, contract_path=project["contract"], evidence_path=project["evidence"],
+        requirements_path=project["requirements"], source_root=root,
+    )
+    assert not verification.valid
+    assert calls == 1
+    assert verification.problems == (
+        "proof backend selection mismatch: certificate requires maledictus, "
+        "verifier selected nagini",
+    )
+
+
+def test_maledictus_typechecker_identity_is_retained_and_reverified(
+    project, monkeypatch,
+):
+    runtime_bundle_sha256 = "5" * 64
+
+    def fake_source_verification(*_args, **_kwargs):
+        return {
+            "provider": "test",
+            "type_checker": {"checker": "mypy", "version": "test", "mode": "strict"},
+            "exception_verifier": {
+                "checker": "maledictus",
+                "version": "0.1.0",
+                "schema": "maledictus-verification-result/v7",
+                "result": "proved",
+                "python_typechecker": {
+                    "checker": "mypy",
+                    "checker_version": "1.5.0",
+                    "profile": "strict-issuance",
+                    "package_sha256": "3" * 64,
+                    "runtime": "python",
+                    "runtime_version": "Python 3.12.10",
+                    "runtime_executable_sha256": "4" * 64,
+                    "runtime_bundle_sha256": runtime_bundle_sha256,
+                    "configuration_sha256": "6" * 64,
+                    "contract_support_sha256": "7" * 64,
+                },
+            },
+            "signatures": [],
+            "external_contracts": [],
+        }
+
+    monkeypatch.setattr("dagcert.certificate.check_python_sources", fake_source_verification)
+    root = Path(project["root"])
+    certificate = root / "artifacts" / "certificate.json"
+    backend = SourceProofBackend.maledictus(root / "maledictus.exe", "a" * 64)
+    document = issue_certificate(
+        project["contract"], project["evidence"], certificate,
+        requirements_path=project["requirements"], source_root=root,
+        proof_backend=backend,
+    )
+    assert (
+        document["source_verification"]["exception_verifier"]
+        ["python_typechecker"]["runtime_bundle_sha256"]
+        == "5" * 64
+    )
+    assert verify_certificate(
+        certificate, contract_path=project["contract"], evidence_path=project["evidence"],
+        requirements_path=project["requirements"], source_root=root,
+        proof_backend=backend,
+    ).valid
+
+    runtime_bundle_sha256 = "8" * 64
+    verification = verify_certificate(
+        certificate, contract_path=project["contract"], evidence_path=project["evidence"],
+        requirements_path=project["requirements"], source_root=root,
+        proof_backend=backend,
+    )
+    assert not verification.valid
+    assert "source verification no longer matches" in verification.problems

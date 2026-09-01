@@ -49,16 +49,30 @@ The current Python provider certifies synchronous operations only; async callabl
 the approved external verifier can prove cancellation and awaited exception behavior.
 
 Python operations use `@dagcert.runtime.operation`, a type-preserving source marker. Dagcert runs
-strict mypy and then invokes a digest-pinned Nagini/Viper container with networking disabled and the
-source mounted read-only. Nagini verifies the complete bound file and must prove that no undeclared
-exceptional exit is reachable. Missing Docker/image, unsupported syntax, translation failure,
-timeout, internal verifier error, or any failed proof refuses issuance. Expected failures are
+strict mypy and then invokes the explicitly selected proof backend. Nagini/Viper is the default and
+runs digest-pinned with networking disabled and the source mounted read-only. Maledictus can instead
+be selected with `--proof-backend maledictus`, an explicit executable, and its exact SHA-256; v2
+requires `dagcert-closed-typed-operations/v3` in every returned file result. Maledictus response v7
+additionally binds the exact strict-mypy package,
+Python runtime executable and complete runtime bundle, configuration, and contract-support hashes;
+Dagcert retains and rechecks the complete identity. The selected backend verifies the complete bound file and must prove that
+no undeclared exceptional exit is reachable. Missing backend/runtime, digest mismatch, unsupported
+syntax, translation failure, timeout, internal verifier error, or any failed proof refuses issuance.
+There is no silent fallback. Expected failures are
 explicit return variants; task operations may not declare `Exsures`. The contract's `outcomes`
 array must cover the extracted union exactly and gives each variant its `acquire`, `consume`, and
 `produce` effects. A derived resource
 formula uses the minimum effect across all variants. Resources contain
 `capacity`, `initial`, and `unit`. Every task has a duration timing; other timing metrics may be
 `interval`, `wait`, or `age`. An `assumed` timing requires zero samples and makes results conditional.
+
+An operation task with callable-valued frozen dataclass fields declares `callable_bindings` as an
+array of `{id, field, provider}` objects. A source provider is
+`{kind: source, path, symbol}`. An external provider is
+`{kind: external-contract, module, symbol, stub_path, exception_policy}`. Dagcert derives the
+consumer path, operation symbol, and input record from the task's real source signature. Maledictus
+hash-binds those edges and composes provider exception outcomes; an absent or abstract binding,
+signature mismatch, unknown provider, or altered response evidence refuses certification.
 
 Task operations also may not declare `Requires`, because a task must be total over its complete
 source input type. Executable application modules may not use Nagini `Assume` or `ContractOnly`.
@@ -92,8 +106,11 @@ the certified leaf bounds; a composition never declares its own measured timing.
 Each v6 task also contains `error_budget`, either null or an object with basis
 `engineering_assumption`, one canonical duration `evidence_case`, source-derived `good_outcomes`, a
 `bad_event_probability_upper` in `[0,1)`, and positive `minimum_observations`. A finite chance
-composition uses the union bound: sum `step.count` times each task
-budget and cap at one. The kernel never multiplies success probabilities or assumes independence.
+composition uses the union bound: sum `step.count` times each declared task budget and cap at one.
+A source-proved task whose only outcome is the exact outcome selected by the composition contributes
+zero when its budget is null. The same total task may declare a conservative nonzero engineering
+budget; doing so does not alter its stronger typed totality guarantee. The kernel never multiplies
+success probabilities or assumes independence.
 `good_outcomes` may include every real outcome; Dagcert never requires an invented failure branch.
 For a chance path it must equal the exact single outcome selected by the step. A chance claim directly compares the composition
 success lower bound or failure upper bound with a literal probability in `[0,1]`; `or`, `not`, and
@@ -123,7 +140,7 @@ input and cannot be reconstructed from checker output.
 
 Chance claims use a finite composition operator or
 `external_failure_probability_upper`/`external_success_probability_lower`. They cite every
-participating `error-budget:TASK` and state the simplified engineering probability premises in
+participating declared `error-budget:TASK` and state the simplified engineering probability premises in
 English. These are conditional envelopes, not statistical estimates from the retained sample.
 
 `dagcert lint` and issuance run the mandatory deterministic translation audit. All formal tasks and

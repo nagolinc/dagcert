@@ -9,8 +9,14 @@ import sys
 import pytest
 from mypy import api as mypy_api
 
-from dagcert import CertificateError, ContractError, TimingSample, analyze_contract, issue_certificate, load_contract, load_evidence, operation
-from dagcert.source_types import SourceSignature, check_python_sources
+from dagcert import (
+    CertificateError, ContractError, SourceProofBackend, TimingSample, analyze_contract,
+    issue_certificate, load_contract, load_evidence, operation,
+)
+from dagcert.source_types import SourceSignature, SourceTypeError, check_python_sources
+from dagcert.maledictus_verifier import (
+    MaledictusCallableBinding, MaledictusSourceCallableProvider,
+)
 
 
 @dataclass(frozen=True)
@@ -243,6 +249,127 @@ def test_certificate_refuses_a_mypy_clean_unexpected_exception(project):
             project["contract"], project["evidence"],
             Path(project["root"]) / "artifacts" / "certificate.json",
             requirements_path=project["requirements"], source_root=project["root"],
+        )
+
+
+def test_source_verification_selects_explicit_maledictus_without_nagini_fallback(
+    project, monkeypatch,
+):
+    contract = load_contract(project["contract"], source_root=project["root"])
+    signature = contract.tasks[0].source_signature
+    assert signature is not None
+    captured = {}
+
+    def fake_maledictus(root, files, symbols_by_file, **kwargs):
+        captured.update({
+            "root": root,
+            "files": files,
+            "symbols_by_file": symbols_by_file,
+            **kwargs,
+        })
+        return {
+            "verifier": "maledictus", "version": "0.1.0", "status": "proved",
+        }
+
+    monkeypatch.setattr("dagcert.source_types.verify_with_maledictus", fake_maledictus)
+    monkeypatch.setattr(
+        "dagcert.source_types.verify_exception_freedom",
+        lambda *_args, **_kwargs: pytest.fail("must not silently fall back to Nagini"),
+    )
+    backend = SourceProofBackend.maledictus(
+        Path(project["root"]) / "maledictus.exe", "a" * 64,
+    )
+    result = check_python_sources(
+        project["root"],
+        [signature],
+        source_fingerprint="f" * 64,
+        source_manifest_paths=["app.py"],
+        proof_signatures=[signature],
+        proof_backend=backend,
+    )
+    assert result["exception_verifier"]["checker"] == "maledictus"
+    assert result["exception_verifier"]["result"] == "proved"
+    assert result["exception_verifier"]["status"] == "proved"
+    assert captured["files"] == ("app.py",)
+    assert captured["symbols_by_file"] == {"app.py": ("work",)}
+    assert captured["executable"] == backend.executable
+    assert captured["expected_executable_sha256"] == "a" * 64
+    assert captured["callable_bindings"] == ()
+
+
+def test_source_verification_typechecks_and_forwards_concrete_callable_provider(
+    tmp_path: Path, monkeypatch,
+):
+    (tmp_path / "app.py").write_text("# operation\n", encoding="utf-8")
+    (tmp_path / "provider.py").write_text("# callback\n", encoding="utf-8")
+    binding = MaledictusCallableBinding(
+        "work-enhance",
+        "app.py",
+        "work",
+        "WorkInput",
+        "enhance",
+        MaledictusSourceCallableProvider("provider.py", "enhance"),
+    )
+    mypy_arguments = []
+    captured = {}
+
+    def fake_mypy(arguments):
+        mypy_arguments.extend(arguments)
+        return "", "", 0
+
+    def fake_maledictus(root, files, symbols_by_file, **kwargs):
+        captured.update({"files": files, "symbols": symbols_by_file, **kwargs})
+        return {"verifier": "maledictus", "version": "0.1.0", "status": "proved"}
+
+    monkeypatch.setattr("mypy.api.run", fake_mypy)
+    monkeypatch.setattr("dagcert.source_types.verify_with_maledictus", fake_maledictus)
+    result = check_python_sources(
+        tmp_path,
+        [SourceSignature("python", "app.py", "work", "WorkInput", ("Done",), 1)],
+        source_fingerprint="f" * 64,
+        source_manifest_paths=["app.py", "provider.py"],
+        callable_bindings=[binding],
+        proof_backend=SourceProofBackend.maledictus(
+            tmp_path / "maledictus.exe", "a" * 64
+        ),
+    )
+
+    assert str(tmp_path / "app.py") in mypy_arguments
+    assert str(tmp_path / "provider.py") in mypy_arguments
+    assert captured["files"] == ("app.py",)
+    assert captured["symbols"] == {"app.py": ("work",)}
+    assert captured["callable_bindings"] == (binding,)
+    assert result["exception_verifier"]["checker"] == "maledictus"
+
+    with pytest.raises(SourceTypeError, match="present in the exact source manifest"):
+        check_python_sources(
+            tmp_path,
+            [SourceSignature(
+                "python", "app.py", "work", "WorkInput", ("Done",), 1,
+            )],
+            source_fingerprint="f" * 64,
+            source_manifest_paths=["app.py"],
+            callable_bindings=[binding],
+            proof_backend=SourceProofBackend.maledictus(
+                tmp_path / "maledictus.exe", "a" * 64
+            ),
+        )
+
+    monkeypatch.setattr(
+        "dagcert.source_types.verify_exception_freedom",
+        lambda *_args, **_kwargs: pytest.fail(
+            "Nagini must not receive an abstract passed-at-construction callable"
+        ),
+    )
+    with pytest.raises(SourceTypeError, match="require the explicit Maledictus backend"):
+        check_python_sources(
+            tmp_path,
+            [SourceSignature(
+                "python", "app.py", "work", "WorkInput", ("Done",), 1,
+            )],
+            source_fingerprint="f" * 64,
+            source_manifest_paths=["app.py", "provider.py"],
+            callable_bindings=[binding],
         )
 
 

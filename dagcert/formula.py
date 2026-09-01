@@ -55,7 +55,11 @@ def evaluate_formula(
     for composition_ref in probability_compositions:
         composition = contract.composition_by_id.get(composition_ref.split(":", 1)[1])
         if composition is not None:
-            references.update(f"error-budget:{step.task}" for step in composition.steps)
+            references.update(
+                f"error-budget:{step.task}"
+                for step in composition.steps
+                if contract.task_by_id[step.task].error_budget is not None
+            )
     external_probability_refs = {
         reference for reference in references
         if reference.startswith("external-contract:")
@@ -457,8 +461,18 @@ def _composition_failure_probability_upper(
         task = state.contract.task_by_id[step.task]
         budget = task.error_budget
         if budget is None:
+            if (
+                task.external_contract is None
+                and len(task.outcomes) == 1
+                and task.outcomes[0].type == step.outcome_type
+            ):
+                # The source-closed outcome union proves this exact path result. A task may
+                # still declare a conservative engineering budget, but the kernel must not
+                # force one merely to participate in a chance composition.
+                continue
             raise FormulaError(
-                f"composition {composition_id} task {task.id} has no error budget"
+                f"composition {composition_id} task {task.id} has no error budget and "
+                f"does not structurally guarantee its selected outcome {step.outcome_type!r}"
             )
         if step.timing != budget.evidence_case:
             raise FormulaError(

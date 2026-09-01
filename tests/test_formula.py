@@ -5,8 +5,9 @@ import json
 import pytest
 
 from dagcert import (
-    ContractError, EnglishClaim, EnglishRequirements, TimingSample, analyze_contract,
-    audit_translation, load_contract, load_evidence,
+    CompositionStep, ContractError, EnglishClaim, EnglishRequirements, TaskErrorBudget,
+    TimingSample, analyze_contract, audit_translation, load_contract, load_evidence,
+    load_requirements,
 )
 from dagcert.formula import FormulaError, evaluate_formula, validate_claim_formula
 
@@ -158,6 +159,127 @@ def test_finite_composition_uses_union_bound_without_independence():
         "error-budget:vote.commit",
         "error-budget:vote.preview",
     )
+
+
+def _vote_contract_with_summary_step():
+    root = Path(__file__).parents[1] / "examples" / "certified_vote"
+    contract = load_contract(root / "dag_contract.json", source_root=root)
+    composition = contract.composition_by_id["vote-cast"]
+    extended = replace(
+        composition,
+        steps=composition.steps + (
+            CompositionStep(
+                task="summary.advance",
+                timing="completion",
+                count=1,
+                outcome_type="SummaryGeneration",
+            ),
+        ),
+    )
+    return root, replace(contract, compositions=(extended,))
+
+
+def test_chance_composition_accepts_unbudgeted_structurally_total_step():
+    root, contract = _vote_contract_with_summary_step()
+    samples = load_evidence(root / "artifacts" / "timings.jsonl")
+    analysis = analyze_contract(
+        contract, samples, source_fingerprint=samples[0].source_fingerprint,
+    )
+
+    evaluation = evaluate_formula({
+        "eq": [
+            {"composition_failure_probability_upper": "composition:vote-cast"},
+            0.02,
+        ]
+    }, contract, analysis)
+
+    assert evaluation.passed
+    assert evaluation.primitive_refs == (
+        "composition:vote-cast",
+        "error-budget:vote.commit",
+        "error-budget:vote.preview",
+    )
+    requirements = load_requirements(root / "english_requirements.json")
+    assert audit_translation(requirements, contract).passed
+
+
+def test_structurally_total_step_may_declare_conservative_probability_budget():
+    root, contract = _vote_contract_with_summary_step()
+    summary = contract.task_by_id["summary.advance"]
+    budgeted_summary = replace(
+        summary,
+        error_budget=TaskErrorBudget(
+            basis="engineering_assumption",
+            evidence_case="completion",
+            good_outcomes=("SummaryGeneration",),
+            bad_event_probability_upper=0.03,
+            minimum_observations=10,
+        ),
+    )
+    contract = replace(
+        contract,
+        tasks=tuple(
+            budgeted_summary if task.id == summary.id else task
+            for task in contract.tasks
+        ),
+    )
+    samples = load_evidence(root / "artifacts" / "timings.jsonl")
+    analysis = analyze_contract(
+        contract, samples, source_fingerprint=samples[0].source_fingerprint,
+    )
+
+    evaluation = evaluate_formula({
+        "eq": [
+            {"composition_failure_probability_upper": "composition:vote-cast"},
+            0.05,
+        ]
+    }, contract, analysis)
+
+    assert evaluation.passed
+    assert evaluation.primitive_refs == (
+        "composition:vote-cast",
+        "error-budget:summary.advance",
+        "error-budget:vote.commit",
+        "error-budget:vote.preview",
+    )
+    requirements = load_requirements(root / "english_requirements.json")
+    chance = next(claim for claim in requirements.claims if claim.basis == "chance")
+    requirements = replace(
+        requirements,
+        claims=tuple(
+            replace(
+                claim,
+                primitive_refs=claim.primitive_refs + ("error-budget:summary.advance",),
+            ) if claim.id == chance.id else claim
+            for claim in requirements.claims
+        ),
+    )
+    assert audit_translation(requirements, contract).passed
+
+
+def test_unbudgeted_conditional_outcome_cannot_enter_chance_composition():
+    root = Path(__file__).parents[1] / "examples" / "certified_vote"
+    contract = load_contract(root / "dag_contract.json", source_root=root)
+    preview = contract.task_by_id["vote.preview"]
+    contract = replace(
+        contract,
+        tasks=tuple(
+            replace(preview, error_budget=None) if task.id == preview.id else task
+            for task in contract.tasks
+        ),
+    )
+    samples = load_evidence(root / "artifacts" / "timings.jsonl")
+    analysis = analyze_contract(
+        contract, samples, source_fingerprint=samples[0].source_fingerprint,
+    )
+
+    with pytest.raises(FormulaError, match="does not structurally guarantee"):
+        evaluate_formula({
+            "gte": [
+                {"composition_success_probability_lower": "composition:vote-cast"},
+                0.98,
+            ]
+        }, contract, analysis)
 
 
 def test_chance_claim_cannot_hide_a_failed_probability_bound_in_true_or_branch():

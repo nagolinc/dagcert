@@ -15,13 +15,13 @@ from . import __version__
 from .analysis import analyze_contract
 from .certificate import (
     CertificateError, canonical_json, external_source_contracts, issue_certificate,
-    source_fingerprint, source_manifest, verify_certificate,
+    maledictus_callable_bindings, source_fingerprint, source_manifest, verify_certificate,
 )
 from .checks import load_check_result
 from .contract import ContractError, load_contract
 from .evidence import EvidenceError, load_evidence
 from .requirements import RequirementsError, audit_translation, load_requirements
-from .source_types import check_python_sources
+from .source_types import SourceProofBackend, check_python_sources
 
 
 CONTRACT_TEMPLATE = """{
@@ -128,6 +128,7 @@ def parser() -> ArgumentParser:
     lint.add_argument("--requirements", required=True)
     lint.add_argument("--source-root")
     lint.add_argument("--exclude", action="append", default=[])
+    _proof_backend_arguments(lint)
 
     fingerprint = commands.add_parser("fingerprint", help="print exact application source identity")
     fingerprint.add_argument("source_root", nargs="?", default=".")
@@ -161,6 +162,33 @@ def _certificate_arguments(command: ArgumentParser) -> None:
     command.add_argument("--source-root", default=".")
     command.add_argument("--check-result", action="append", default=[])
     command.add_argument("--exclude", action="append", default=[])
+    _proof_backend_arguments(command)
+
+
+def _proof_backend_arguments(command: ArgumentParser) -> None:
+    command.add_argument(
+        "--proof-backend", choices=("nagini", "maledictus"), default="nagini",
+    )
+    command.add_argument("--proof-backend-executable")
+    command.add_argument("--proof-backend-sha256")
+
+
+def _proof_backend(args: Namespace) -> SourceProofBackend:
+    if args.proof_backend == "nagini":
+        if args.proof_backend_executable is not None or args.proof_backend_sha256 is not None:
+            raise ValueError(
+                "--proof-backend-executable/--proof-backend-sha256 require "
+                "--proof-backend maledictus"
+            )
+        return SourceProofBackend()
+    if args.proof_backend_executable is None or args.proof_backend_sha256 is None:
+        raise ValueError(
+            "--proof-backend maledictus requires --proof-backend-executable and "
+            "--proof-backend-sha256"
+        )
+    return SourceProofBackend.maledictus(
+        args.proof_backend_executable, args.proof_backend_sha256,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -203,6 +231,8 @@ def main(argv: list[str] | None = None) -> int:
                     if task.role == "operation" and task.source_signature is not None
                 ),
                 external_contracts=external_source_contracts(contract),
+                callable_bindings=maledictus_callable_bindings(contract),
+                proof_backend=_proof_backend(args),
             )
             translation_audit = audit_translation(requirements, contract)
             if not translation_audit.passed:
@@ -214,7 +244,10 @@ def main(argv: list[str] | None = None) -> int:
                 dict[str, object], source_verification["exception_verifier"],
             )
             if exception_result.get("result") == "not-applicable":
-                print("source verification: strict mypy passed; Nagini not applicable (instrumentation-only contract)")
+                print(
+                    "source verification: strict mypy passed; "
+                    f"{exception_result['checker']} not applicable (instrumentation-only contract)"
+                )
             else:
                 print(
                     "source verification: strict mypy and "
@@ -249,6 +282,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.contract, args.evidence, args.output, source_root=args.source_root,
                 requirements_path=args.requirements,
                 check_result_paths=args.check_result, source_exclude=args.exclude,
+                proof_backend=_proof_backend(args),
             )
             print(f"issued {args.output}: {document['certificate_sha256']}")
             return 0
@@ -257,6 +291,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.certificate, contract_path=args.contract, evidence_path=args.evidence,
                 requirements_path=args.requirements,
                 source_root=args.source_root, check_result_paths=args.check_result, source_exclude=args.exclude,
+                proof_backend=_proof_backend(args),
             )
             if not verification.valid:
                 print("certificate invalid: " + "; ".join(verification.problems), file=sys.stderr)

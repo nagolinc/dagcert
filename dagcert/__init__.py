@@ -25,8 +25,9 @@ from .checks import (
     write_check_result,
 )
 from .contract import (
-    Composition, CompositionStep, Contract, ContractError, ExternalContract, ExternalProvider,
-    Implementation, Resource, ResourceEffect,
+    CallableBinding, Composition, CompositionStep, Contract, ContractError, ExternalCallableProvider,
+    ExternalContract, ExternalProvider, Implementation, Resource, ResourceEffect,
+    SourceCallableProvider,
     Task, TaskErrorBudget, TaskOutcome, Timing, TypedDependency, Worker, load_contract,
 )
 from .evidence import ExternalEvidenceMonitor, EvidenceError, EvidenceRecorder, TimingSample, load_evidence
@@ -36,7 +37,9 @@ from .runtime import (
     clear_runtime_violations, external_boundary, monitor_external_boundaries, operation,
     outcome_type, runtime_violations,
 )
-from .source_types import SourceSignature, SourceTypeError, check_python_sources
+from .source_types import (
+    SourceProofBackend, SourceSignature, SourceTypeError, check_python_sources,
+)
 from .surfaces import SurfaceBinding, SurfaceError, banner, stats
 from .requirements import (
     EnglishClaim,
@@ -50,12 +53,13 @@ from .requirements import (
 __all__ = [
     "AnalysisReport", "CertificateError", "CertificateVerification", "CheckContext",
     "CheckFinding", "Checker", "CheckResult", "Composition", "CompositionStep",
-    "Contract", "ContractError", "ExternalContract", "ExternalProvider", "Implementation",
+    "CallableBinding", "Contract", "ContractError", "ExternalCallableProvider",
+    "ExternalContract", "ExternalProvider", "Implementation",
     "EnglishClaim", "EnglishRequirements", "ErrorBudgetResult", "EvidenceError", "EvidenceRecorder", "ExternalEvidenceMonitor", "Finding",
     "RequirementsError", "Resource", "ResourceEffect", "SurfaceBinding", "SurfaceError",
     "StructuralProgress", "Task", "TaskErrorBudget", "TaskOutcome", "Timing", "TimingResult", "TimingSample", "TranslationAudit", "TypedDependency",
     "ExternalBoundaryEvent", "ExternalMonitorError", "ExternalRaised", "ExternalSuccess", "ExternalTypeViolation",
-    "OperationTypeViolation", "SourceSignature", "SourceTypeError", "UnhandledException", "Worker", "analyze_contract", "audit_translation", "issue_certificate",
+    "OperationTypeViolation", "SourceCallableProvider", "SourceProofBackend", "SourceSignature", "SourceTypeError", "UnhandledException", "Worker", "analyze_contract", "audit_translation", "issue_certificate",
     "load_check_result", "load_contract", "load_evidence", "load_requirements", "run_checker", "sha256_file",
     "banner", "check_python_sources", "clear_runtime_violations", "external_boundary", "monitor_external_boundaries", "operation", "outcome_type", "runtime_violations", "source_fingerprint", "source_manifest", "stats", "verify_certificate", "write_check_result",
 ]

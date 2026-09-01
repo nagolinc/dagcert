@@ -229,6 +229,7 @@ def audit_translation(
                             budget_refs.update(
                                 f"error-budget:{step.task}"
                                 for step in referenced_composition.steps
+                                if contract.task_by_id[step.task].error_budget is not None
                             )
                     budget_refs.update(
                         f"error-budget:{reference.split(':', 1)[1]}"

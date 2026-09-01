@@ -94,8 +94,10 @@ boolean.
 
 For Python, each v6 task points to the production source file and symbol. Dagcert reads the real
 one-input annotation and closed return union, rejects `Any` throughout those boundary variants,
-runs strict mypy over the real implementation body itself, and requires a digest-pinned
-Nagini/Viper container to prove the complete bound file has no undeclared exceptional exit. The
+runs strict mypy over the real implementation body itself, and requires an explicitly selected,
+digest-pinned proof backend to prove the complete bound file has no undeclared exceptional exit.
+Nagini/Viper remains the default. The independently distributed Maledictus executable is available
+as an alternate backend for its advertised `dagcert-closed-typed-operations/v3` fragment. The
 JSON contract cannot invent `input_type` or `output_type` labels.
 Decorator provenance is resolved from imports: a same-named local decorator or a shadowing local
 `dagcert`/`dataclasses` module is rejected. The operation marker preserves the callable's exact
@@ -113,16 +115,47 @@ is not required for that classification. Only non-environment providers are comp
 application manifest; excluding an ordinary app module does not relabel it external.
 The proof-only stub is restricted to the canonical `Ensures(Result() is not None)` contract, so it
 cannot inject an impossible postcondition to make an application proof vacuous.
+For callable-valued frozen dataclass fields, an operation task may declare machine-readable
+`callable_bindings`. Each binding identifies the real input field and either a source path/symbol
+or an explicit external module/symbol/stub overlay. Dagcert derives the consumer operation and
+input record from source rather than prose. Maledictus hash-binds every consumer, source provider,
+and external stub, composes the provider's normal and exceptional outcomes, and rejects missing,
+duplicate, unknown, or tampered edges.
+
 The v10 certificate seals strict-mypy output, the pinned verifier image digest and proof scope, and
-a manifest hash of the source-verification kernel and typing stubs,
+a manifest hash of the source-verification kernel and typing stubs. For Maledictus, response v7
+also requires and retains the exact strict-mypy package, runtime executable, complete runtime
+bundle, configuration, and contract-support hashes. Verification reruns the digest-pinned backend
+and rejects any change in that recorded typechecker identity,
 so verification also detects a changed type-enforcement kernel rather than trusting a version label.
 Every dependency names an upstream outcome that must exactly match the downstream callable's source
 input, and resource derivations use the minimum effect across every explicit outcome. Missing
-Docker/image, unsupported syntax, verifier crash, translation failure, timeout, or failed proof
-refuses issuance. Instrumentation is strict-mypy checked but cannot enter a derived composition.
+backend/runtime, digest mismatch, unsupported syntax, verifier crash, translation failure, timeout,
+or failed proof refuses issuance. Instrumentation is strict-mypy checked but cannot enter a derived
+composition.
 
-This provider is deliberately language-specific. Python `operation` tasks require strict mypy plus
-Nagini. JavaScript and TypeScript have no approved exception/totality verifier in this release, so
+Select Maledictus only with an exact executable and SHA-256 pin; Dagcert does not discover, vendor,
+or silently fall back between independently owned proof engines:
+
+```powershell
+dagcert lint dag_contract.json --requirements english_requirements.json `
+  --proof-backend maledictus `
+  --proof-backend-executable C:\proof-tools\maledictus.exe `
+  --proof-backend-sha256 <64-hex-digest>
+```
+
+Pass the same three backend options to `issue` and `verify`. Verification recomputes the proof and
+requires the complete v7 result—including its strict typechecker identity and callable-binding
+evidence—to match the certificate.
+Maledictus v2 accepts the narrow source-owned Dagcert operation fragment plus explicit source or
+external-contract callable providers. Unsupported provider forms fail closed. On Windows, select
+the packaged executable beside
+its pinned `libz3.dll`, not a bare Cargo output missing its runtime.
+
+The current Dagcert contract provider remains deliberately Python-specific. Python `operation`
+tasks require strict mypy plus the selected proof backend. Although Maledictus has narrow JavaScript
+and TypeScript frontend fragments, Dagcert does not yet bind JS/TS production symbols into v6
+operation tasks, so
 Dagcert refuses to bind them as operations; they may appear only behind explicitly observational
 instrumentation and cannot support derived DAG claims. `tsc --strict` alone is not misrepresented
 as an exception-freedom proof.
@@ -132,10 +165,13 @@ is structurally reachable but outcome-conditional; it is not mislabeled blocked 
 as an unconditional supply guarantee. Optional task error budgets classify a nonempty source-derived
 subset of outcomes as good for one canonical duration stream. That subset may include every real
 outcome; Dagcert does not require or invent a semantically bad branch. A
-chance path requires that set to equal the exact typed outcome selected at each step. Chance claims
-directly compare the finite path's union-bound result with a literal probability; boolean fallback
-branches are rejected. The kernel sums finite invocation budgets, so correlation and burstiness
-cannot make the result falsely tighter.
+chance path requires each declared budget's good set to equal the exact typed outcome selected at
+that step. A source-proved task with exactly that one outcome needs no budget and contributes zero;
+it may still declare a conservative nonzero engineering budget without weakening the stronger
+typed-totality result. Unbudgeted conditional paths remain invalid. Chance claims directly compare
+the finite path's union-bound result with a literal probability; boolean fallback branches are
+rejected. The kernel sums finite invocation budgets, so correlation and burstiness cannot make the
+result falsely tighter.
 Retained observations only check consistency with those engineering assumptions; they do not
 statistically establish rare-event rates.
 

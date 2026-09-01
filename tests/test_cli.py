@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
 
+from dagcert import SourceProofBackend
 from dagcert.cli import main
 
 
@@ -36,7 +37,11 @@ def test_cli_lint_checks_external_contracts_with_the_exact_manifest(
 
     def fake_source_verification(_root, _signatures, **kwargs):
         captured.update(kwargs)
-        return {"exception_verifier": {"result": "not-applicable"}}
+        return {
+            "exception_verifier": {
+                "checker": "nagini", "result": "not-applicable",
+            },
+        }
 
     monkeypatch.setattr("dagcert.cli.check_python_sources", fake_source_verification)
     assert main([
@@ -46,6 +51,42 @@ def test_cli_lint_checks_external_contracts_with_the_exact_manifest(
     assert captured["source_manifest_paths"]
     assert len(captured["external_contracts"]) == 1
     assert "source verification" in capsys.readouterr().out
+
+
+def test_cli_requires_an_executable_and_digest_for_maledictus(project, capsys):
+    assert main([
+        "lint", str(project["contract"]), "--requirements", str(project["requirements"]),
+        "--proof-backend", "maledictus",
+    ]) == 2
+    assert "requires --proof-backend-executable" in capsys.readouterr().err
+
+
+def test_cli_passes_explicit_maledictus_backend_to_source_verification(
+    project, monkeypatch, capsys,
+):
+    captured = {}
+
+    def fake_source_verification(_root, _signatures, **kwargs):
+        captured.update(kwargs)
+        return {
+            "exception_verifier": {
+                "checker": "maledictus", "version": "0.1.0", "result": "proved",
+            },
+        }
+
+    executable = Path(project["root"]) / "maledictus.exe"
+    executable.write_bytes(b"fake executable")
+    monkeypatch.setattr("dagcert.cli.check_python_sources", fake_source_verification)
+    assert main([
+        "lint", str(project["contract"]), "--requirements", str(project["requirements"]),
+        "--proof-backend", "maledictus",
+        "--proof-backend-executable", str(executable),
+        "--proof-backend-sha256", "a" * 64,
+    ]) == 0
+    assert captured["proof_backend"] == SourceProofBackend.maledictus(
+        executable, "a" * 64,
+    )
+    assert "maledictus 0.1.0 passed" in capsys.readouterr().out
 
 
 def test_init_is_non_destructive(tmp_path: Path):

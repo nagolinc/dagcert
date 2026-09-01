@@ -22,10 +22,44 @@ import sysconfig
 import tempfile
 
 from .python_verifier import PythonVerificationError, verify_exception_freedom
+from .maledictus_verifier import (
+    MaledictusCallableBinding, MaledictusExternalCallableProvider,
+    MaledictusSourceCallableProvider, MaledictusVerificationError,
+    verify_with_maledictus,
+)
 
 
 class SourceTypeError(ValueError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class SourceProofBackend:
+    """Explicit proof-engine selection; local alternate binaries require an exact digest pin."""
+
+    name: str = "nagini"
+    executable: str | None = None
+    executable_sha256: str | None = None
+
+    @classmethod
+    def maledictus(
+        cls, executable: str | Path, executable_sha256: str,
+    ) -> SourceProofBackend:
+        return cls("maledictus", str(Path(executable).resolve()), executable_sha256.lower())
+
+    def validate(self) -> None:
+        if self.name == "nagini":
+            if self.executable is not None or self.executable_sha256 is not None:
+                raise SourceTypeError(
+                    "Nagini backend does not accept a local executable or digest override"
+                )
+            return
+        if self.name != "maledictus":
+            raise SourceTypeError(f"unknown source proof backend {self.name!r}")
+        if self.executable is None or self.executable_sha256 is None:
+            raise SourceTypeError(
+                "Maledictus backend requires an explicit executable and SHA-256 pin"
+            )
 
 
 def type_enforcement_descriptor() -> dict[str, object]:
@@ -36,9 +70,10 @@ def type_enforcement_descriptor() -> dict[str, object]:
     kernel_files = (
         "_version.py", "__init__.py", "analysis.py", "certificate.py", "contract.py",
         "evidence.py", "formula.py", "requirements.py", "runtime.py", "runtime.pyi",
-        "python_verifier.py", "source_types.py",
+        "maledictus_verifier.py", "python_verifier.py", "source_types.py",
         "nagini_stubs/dagcert/__init__.pyi", "nagini_stubs/dagcert/runtime.pyi",
         "mypy_stubs/dagcert/__init__.pyi", "mypy_stubs/dagcert/runtime.pyi",
+        "mypy_stubs/dagcert/surfaces.pyi",
     )
     manifest = {
         name: sha256((package / name).read_bytes()).hexdigest()
@@ -48,16 +83,16 @@ def type_enforcement_descriptor() -> dict[str, object]:
         manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
     ).encode("utf-8")
     return {
-        "provider": "dagcert.python/v7",
+        "provider": "dagcert.python/v8",
         "dagcert_version": VERSION,
         "static_analysis": "source-ast+strict-mypy/v1",
         "mypy_import_surface": "sealed-type-preserving-dagcert-stub/v1",
         "decorator_provenance": "trusted-imports-and-shadow-rejection/v1",
         "operation_marker": "type-preserving/v1",
-        "exception_verification": "nagini-viper-external-contract-overlays/v3",
+        "exception_verification": "selectable-nagini-viper-v3-or-maledictus-v2",
         "external_contracts": "environment-resolved+p1-contract-only+typeguard-runtime/v3",
         "reachability": "typed-may-must/v1",
-        "chance_composition": "engineering-envelope-exact-path+external/v3",
+        "chance_composition": "engineering-envelope-optional-budget+exact-path+external/v4",
         "kernel_manifest": manifest,
         "kernel_sha256": sha256(manifest_bytes).hexdigest(),
     }
@@ -94,6 +129,8 @@ def check_python_sources(
     prove_exceptions: bool = True,
     proof_signatures: Iterable[SourceSignature] | None = None,
     external_contracts: Iterable[ExternalSourceContract] = (),
+    callable_bindings: Iterable[MaledictusCallableBinding] = (),
+    proof_backend: SourceProofBackend | None = None,
 ) -> dict[str, object]:
     """Run strict mypy and external exception verification over real implementation files.
 
@@ -105,7 +142,18 @@ def check_python_sources(
         bound_signatures if proof_signatures is None else tuple(proof_signatures)
     )
     external_boundaries = tuple(external_contracts)
-    files = tuple(sorted({item.path for item in bound_signatures if item.language == "python"}))
+    concrete_callable_bindings = tuple(callable_bindings)
+    selected_backend = proof_backend or SourceProofBackend()
+    selected_backend.validate()
+    source_callable_files = {
+        binding.provider.path
+        for binding in concrete_callable_bindings
+        if isinstance(binding.provider, MaledictusSourceCallableProvider)
+    }
+    files = tuple(sorted(
+        {item.path for item in bound_signatures if item.language == "python"}
+        | source_callable_files
+    ))
     if not files:
         raise SourceTypeError("source-typed contract contains no Python implementation files")
     try:
@@ -170,6 +218,23 @@ def check_python_sources(
         None if source_manifest_paths is None
         else frozenset(Path(item).as_posix() for item in source_manifest_paths)
     )
+    if manifest_paths is not None:
+        callable_provenance_paths = {
+            Path(binding.provider.path).as_posix()
+            if isinstance(binding.provider, MaledictusSourceCallableProvider)
+            else Path(binding.provider.stub_path).as_posix()
+            for binding in concrete_callable_bindings
+            if isinstance(
+                binding.provider,
+                (MaledictusSourceCallableProvider, MaledictusExternalCallableProvider),
+            )
+        }
+        missing_callable_paths = callable_provenance_paths - manifest_paths
+        if missing_callable_paths:
+            raise SourceTypeError(
+                "callable provider source/stub paths must be present in the exact source "
+                f"manifest: {sorted(missing_callable_paths)}"
+            )
     external_results = [
         _validate_external_source_contract(root, item, manifest_paths)
         for item in external_boundaries
@@ -185,19 +250,45 @@ def check_python_sources(
             path: tuple(item.symbol for item in proof_bound_signatures if item.path == path)
             for path in proof_files
         }
-        try:
-            exception_verification = verify_exception_freedom(
-                root,
-                proof_files,
-                symbols_by_file,
-                source_fingerprint=source_fingerprint,
-                external_overlays=overlays,
-            )
-        except PythonVerificationError as exc:
-            raise SourceTypeError(str(exc)) from exc
+        if selected_backend.name == "nagini":
+            if concrete_callable_bindings:
+                raise SourceTypeError(
+                    "callable-valued operation inputs require the explicit Maledictus backend; "
+                    "the Nagini adapter cannot bind passed-at-construction callables"
+                )
+            try:
+                exception_verification = verify_exception_freedom(
+                    root,
+                    proof_files,
+                    symbols_by_file,
+                    source_fingerprint=source_fingerprint,
+                    external_overlays=overlays,
+                )
+            except PythonVerificationError as exc:
+                raise SourceTypeError(str(exc)) from exc
+        else:
+            assert selected_backend.executable is not None
+            assert selected_backend.executable_sha256 is not None
+            try:
+                maledictus_response = verify_with_maledictus(
+                    root,
+                    proof_files,
+                    symbols_by_file,
+                    source_fingerprint=source_fingerprint,
+                    executable=selected_backend.executable,
+                    expected_executable_sha256=selected_backend.executable_sha256,
+                    callable_bindings=concrete_callable_bindings,
+                )
+                exception_verification = {
+                    **maledictus_response,
+                    "checker": "maledictus",
+                    "result": "proved",
+                }
+            except MaledictusVerificationError as exc:
+                raise SourceTypeError(str(exc)) from exc
     else:
         exception_verification = {
-            "checker": "nagini",
+            "checker": selected_backend.name,
             "version": None,
             "proof_obligation": "no-undeclared-exceptional-exit",
             "result": "not-applicable",
