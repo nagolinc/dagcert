@@ -37,9 +37,11 @@ that opt-out in the handoff. Run `python -m dagcert help app-surfaces` for the i
 
 ## Contract
 
-The hardened `dagcert-contract/v6` JSON or YAML object contains `workers`, `tasks`, `resources`,
-task-local `timings`, finite typed-path `compositions`, and metadata. Each composition step names
-the source outcome it traverses, and adjacent steps must match a real typed dependency edge.
+The hardened `dagcert-contract/v7` JSON or YAML object contains `workers`, `tasks`, `resources`,
+task-local `timings`, structured finite `compositions`, `state_claims`, and metadata. Composition
+expressions contain only `leaf`, `sequence`, `parallel_all`, and `finite_repeat`. Every leaf names
+the source outcome it traverses, sequence boundaries must match real typed dependency edges, and a
+fork/join binds branch outputs to fields of the real downstream source input record.
 Each task has an `implementation` binding
 with `language`, source-root-relative `path`, and `symbol`. For Python, Dagcert parses that exact
 callable, requires one explicit source-defined input class and an inline closed union of explicit
@@ -65,6 +67,12 @@ array must cover the extracted union exactly and gives each variant its `acquire
 formula uses the minimum effect across all variants. Resources contain
 `capacity`, `initial`, and `unit`. Every task has a duration timing; other timing metrics may be
 `interval`, `wait`, or `age`. An `assumed` timing requires zero samples and makes results conditional.
+
+V7 JavaScript and TypeScript operation leaves require Maledictus. A `verified_interface` declares
+one synchronous primitive parameter and one primitive return, but the declaration is not trusted:
+the backend returns the interface extracted by pinned TypeScript 5.9.3 and Dagcert requires exact
+equality. The accepted body must also belong to Maledictus's advertised closed-total fragment.
+Browser, DOM, and host-platform behavior are separate assumptions or observed boundaries.
 
 An operation task with callable-valued frozen dataclass fields declares `callable_bindings` as an
 array of `{id, field, provider}` objects. A source provider is
@@ -94,16 +102,23 @@ modules shadowing `dagcert`/`dataclasses`. Strict mypy rejects `Any` at the sour
 claim-relevant input construction and transformation inside bound operations; a verified leaf does
 not certify exception-producing glue that ran before the call.
 
-Each v6 dependency is `{"task": "UPSTREAM", "outcome_type": "Variant"}`. Dagcert verifies that the
+Each v7 dependency is `{"task": "UPSTREAM", "outcome_type": "Variant"}` and may add
+`input_field` at a join. Dagcert verifies that the
 variant is in the upstream source return union and exactly equals the downstream source input type.
 This makes dependency arrows typed dataflow rather than documentation.
 
-Every task is either an `operation` or `instrumentation`. A composition contains at least two
-connected operation tasks and names the exact duration case and finite execution count for each.
-Instrumentation cannot be included. The kernel computes a conservative serial upper bound from
-the certified leaf bounds; a composition never declares its own measured timing.
+Every task is either an `operation` or `instrumentation`. Instrumentation cannot be included in a
+composition. The kernel derives sequence sums, finite-repeat products, and parallel maxima only
+when worker concurrency and acquired-resource capacity permit overlap; otherwise it uses a
+conservative serial sum. A composition never declares its own measured timing.
 
-Each v6 task also contains `error_budget`, either null or an object with basis
+V7 `start_resources` records reservation/acquisition effects before operation execution. Each
+typed outcome retains its own completion effects. Evidence records both phases separately.
+`linear_invariant` checks every declared transition, `bounded_non_starvation` proves only a finite
+producer/consumer horizon from explicit service envelopes, and `bounded_response` proves the
+separate dispatch wait. A failing state proof returns the concrete transition or finite trace.
+
+Each v7 task also contains `error_budget`, either null or an object with basis
 `engineering_assumption`, one canonical duration `evidence_case`, source-derived `good_outcomes`, a
 `bad_event_probability_upper` in `[0,1)`, and positive `minimum_observations`. A finite chance
 composition uses the union bound: sum `step.count` times each declared task budget and cap at one.
@@ -119,10 +134,11 @@ not already exceed the declared premise.
 
 ## Timing evidence
 
-Evidence is JSON Lines. Each v6 line contains `task_id`, `case`, `value_ms`, `worker_id`,
+Evidence is JSON Lines. Each v7 line contains `task_id`, `case`, `value_ms`, `worker_id`,
 `source_fingerprint`, `recorded_at`, and the actual runtime `outcome_type`. It may also contain
 `observed_worker_concurrency`,
-`resource_acquired`, `resource_consumed`, `resource_produced`, `resource_levels`, and `metadata`.
+`resource_acquired`, `resource_consumed`, `resource_produced`, `start_resource_acquired`,
+`start_resource_consumed`, `start_resource_produced`, `resource_levels`, and `metadata`.
 Evidence cannot declare task input/output types. Every duration sample is checked against its exact
 source outcome's effects. An undeclared outcome, unexpected exception sentinel, or legacy evidence
 type label makes analysis fail. Error budgets classify explicit task outcomes; they cannot turn an
@@ -146,7 +162,7 @@ English. These are conditional envelopes, not statistical estimates from the ret
 `dagcert lint` and issuance run the mandatory deterministic translation audit. All formal tasks and
 timings must be covered by the English claims; primitive references must resolve; assumed timings
 must have explicit English assumptions; and issuance requires every checker named by a claim.
-`dagcert-certificate/v10` embeds source type extraction, strict-mypy result, the digest-pinned
+`dagcert-certificate/v11` embeds source type extraction, strict-mypy result, the digest-pinned
 Nagini/Viper proof result and scope, the exact source-verification descriptor plus its core-file
 manifest hash, that recomputable audit, and kernel claim
 analysis. The Luna workflow below is the optional,
@@ -176,7 +192,9 @@ It separately reports may-reachable, must-reachable, and outcome-conditional tas
 The result assumes reachable producer task types can recur, resource effects match runtime,
 acquisition is atomic, and scheduling is fair. A timing-based checker may diagnose sustained
 throughput, non-starvation, or bounded lag, but its boolean cannot prove those derived properties.
-An unsupported derived formula remains uncertified.
+The installed `fork-join`, `reservation-lifecycle`, `bounded-buffer`, `finite-confidence`,
+`external-verified-leaf`, and `composed-worker-pipeline` help topics show the supported proof
+shapes. Anything beyond those restricted kernels remains uncertified.
 
 ## User-requested independent audit handoff
 

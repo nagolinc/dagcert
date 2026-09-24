@@ -128,6 +128,7 @@ class CallableBinding:
 class TypedDependency:
     task: str
     outcome_type: str
+    input_field: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +149,7 @@ class Task:
     error_budget: TaskErrorBudget | None = None
     external_contract: ExternalContract | None = None
     callable_bindings: tuple[CallableBinding, ...] = ()
+    start_resources: Mapping[str, ResourceEffect] = field(default_factory=dict)
 
     @property
     def outcome_by_type(self) -> Mapping[str, TaskOutcome]:
@@ -183,16 +185,37 @@ class CompositionStep:
 
 
 @dataclass(frozen=True, slots=True)
+class CompositionExpression:
+    """One node in the deliberately small structured-workflow algebra."""
+
+    kind: str
+    step: CompositionStep | None = None
+    children: tuple[CompositionExpression, ...] = ()
+    count: int = 1
+
+
+@dataclass(frozen=True, slots=True)
 class Composition:
     """A finite application path whose bound is derived from real operation tasks."""
 
     id: str
     steps: tuple[CompositionStep, ...]
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    expression: CompositionExpression | None = None
 
     @property
     def task_refs(self) -> tuple[str, ...]:
         return tuple(step.task for step in self.steps)
+
+
+@dataclass(frozen=True, slots=True)
+class StateClaim:
+    """One kernel-owned restricted lifecycle or bounded-flow proof request."""
+
+    id: str
+    kind: str
+    specification: Mapping[str, Any]
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,6 +226,7 @@ class Contract:
     resources: tuple[Resource, ...]
     metadata: Mapping[str, Any] = field(default_factory=dict)
     compositions: tuple[Composition, ...] = ()
+    state_claims: tuple[StateClaim, ...] = ()
 
     @property
     def worker_by_id(self) -> Mapping[str, Worker]:
@@ -220,6 +244,10 @@ class Contract:
     def composition_by_id(self) -> Mapping[str, Composition]:
         return {item.id: item for item in self.compositions}
 
+    @property
+    def state_claim_by_id(self) -> Mapping[str, StateClaim]:
+        return {item.id: item for item in self.state_claims}
+
     def topological_tasks(self) -> tuple[str, ...]:
         remaining = {task.id: set(task.depends_on) for task in self.tasks}
         result: list[str] = []
@@ -233,6 +261,29 @@ class Contract:
             for dependencies in remaining.values():
                 dependencies.difference_update(ready)
         return tuple(result)
+
+
+def composition_steps(
+    expression: CompositionExpression, *, multiplier: int = 1,
+) -> tuple[CompositionStep, ...]:
+    """Flatten a structured expression only for coverage and union-bound accounting."""
+
+    if expression.kind == "leaf":
+        assert expression.step is not None
+        step = expression.step
+        return (
+            CompositionStep(
+                step.task, step.timing, step.count * multiplier, step.outcome_type,
+            ),
+        )
+    if expression.kind == "finite_repeat":
+        return composition_steps(
+            expression.children[0], multiplier=multiplier * expression.count,
+        )
+    result: list[CompositionStep] = []
+    for child in expression.children:
+        result.extend(composition_steps(child, multiplier=multiplier))
+    return tuple(result)
 
 
 def _object(value: Any, label: str) -> Mapping[str, Any]:
@@ -259,6 +310,15 @@ def _nonnegative(value: Any, label: str) -> float:
     return float(value)
 
 
+def _finite_number(value: Any, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ContractError(f"{label} must be a finite number")
+    result = float(value)
+    if not isfinite(result):
+        raise ContractError(f"{label} must be a finite number")
+    return result
+
+
 def _probability(value: Any, label: str) -> float:
     result = _nonnegative(value, label)
     if result >= 1:
@@ -282,6 +342,55 @@ def _python_identifier(value: Any, label: str) -> str:
     return result
 
 
+def _composition_expression(value: Any, label: str) -> CompositionExpression:
+    row = _object(value, label)
+    kind = _identifier(row.get("kind"), f"{label}.kind")
+    if kind == "leaf":
+        required = {"kind", "task", "timing", "outcome_type"}
+        if set(row) != required:
+            raise ContractError(
+                f"{label} leaf must contain exactly kind, task, timing, and outcome_type"
+            )
+        return CompositionExpression(
+            "leaf",
+            step=CompositionStep(
+                _identifier(row.get("task"), f"{label}.task"),
+                _identifier(row.get("timing"), f"{label}.timing"),
+                1,
+                _identifier(row.get("outcome_type"), f"{label}.outcome_type"),
+            ),
+        )
+    if kind in {"sequence", "parallel_all"}:
+        if set(row) != {"kind", "children"}:
+            raise ContractError(f"{label} {kind} must contain exactly kind and children")
+        raw_children = _array(row.get("children"), f"{label}.children")
+        if len(raw_children) < 2:
+            raise ContractError(f"{label} {kind} requires at least two children")
+        return CompositionExpression(
+            kind,
+            children=tuple(
+                _composition_expression(child, f"{label}.children[{index}]")
+                for index, child in enumerate(raw_children)
+            ),
+        )
+    if kind == "finite_repeat":
+        if set(row) != {"kind", "count", "body"}:
+            raise ContractError(
+                f"{label} finite_repeat must contain exactly kind, count, and body"
+            )
+        count = _positive(row.get("count"), f"{label}.count")
+        if not count.is_integer():
+            raise ContractError(f"{label}.count must be an integer")
+        return CompositionExpression(
+            kind,
+            children=(_composition_expression(row.get("body"), f"{label}.body"),),
+            count=int(count),
+        )
+    raise ContractError(
+        f"{label}.kind must be leaf, sequence, parallel_all, or finite_repeat"
+    )
+
+
 def _load(path: Path) -> Mapping[str, Any]:
     text = path.read_text(encoding="utf-8")
     try:
@@ -301,15 +410,23 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
     schema = raw.get("schema")
     if schema not in {
         "dagcert-contract/v2", "dagcert-contract/v3", "dagcert-contract/v4",
-        "dagcert-contract/v5", "dagcert-contract/v6",
-    }:
-        raise ContractError("contract schema must be dagcert-contract/v2, v3, v4, v5, or v6")
-    if schema in {"dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"} and set(raw) != {
-        "schema", "workers", "resources", "tasks", "compositions", "metadata",
+        "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7",
     }:
         raise ContractError(
+            "contract schema must be dagcert-contract/v2, v3, v4, v5, v6, or v7"
+        )
+    expected_top_level = {
+        "schema", "workers", "resources", "tasks", "compositions", "metadata",
+    }
+    if schema == "dagcert-contract/v7":
+        expected_top_level.add("state_claims")
+    if schema in {
+        "dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5",
+        "dagcert-contract/v6", "dagcert-contract/v7",
+    } and set(raw) != expected_top_level:
+        raise ContractError(
             f"{schema.rsplit('/', 1)[-1]} contract must contain exactly schema, workers, resources, "
-            "tasks, compositions, and metadata"
+            "tasks, compositions, metadata, and state_claims for v7"
         )
     implementation_root = Path(source_root).resolve() if source_root is not None else contract_path.resolve().parent
 
@@ -348,8 +465,11 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
         v5_task_fields = v4_task_fields | {"error_budget"}
         v6_task_fields = v5_task_fields | {"external_contract"}
         v6_optional_task_fields = {"callable_bindings"}
+        v7_task_fields = v6_task_fields | {"start_resources"}
+        v7_optional_task_fields = v6_optional_task_fields | {"verified_interface"}
         allowed_task_fields = (
-            v6_task_fields | v6_optional_task_fields if schema == "dagcert-contract/v6"
+            v7_task_fields | v7_optional_task_fields if schema == "dagcert-contract/v7"
+            else v6_task_fields | v6_optional_task_fields if schema == "dagcert-contract/v6"
             else v5_task_fields if schema == "dagcert-contract/v5"
             else v4_task_fields if schema == "dagcert-contract/v4"
             else legacy_task_fields
@@ -376,13 +496,31 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             raise ContractError(
                 f"v6 task fields mismatch: unexpected={sorted(unexpected_task_fields)}, missing={missing}"
             )
+        if schema == "dagcert-contract/v7" and (
+            unexpected_task_fields or v7_task_fields - (set(row) - {"metadata"})
+        ):
+            missing = sorted(v7_task_fields - set(row))
+            raise ContractError(
+                f"v7 task fields mismatch: unexpected={sorted(unexpected_task_fields)}, "
+                f"missing={missing}"
+            )
         task_id = _identifier(row.get("id"), "task.id")
         role = _identifier(
-            row.get("role") if schema in {"dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"} else row.get("role", "operation"),
+            row.get("role") if schema in {
+                "dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5",
+                "dagcert-contract/v6", "dagcert-contract/v7",
+            } else row.get("role", "operation"),
             f"task {task_id}.role",
         )
-        allowed_roles = {"operation", "instrumentation", "external"} if schema == "dagcert-contract/v6" else {"operation", "instrumentation"}
-        if schema in {"dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"} and role not in allowed_roles:
+        allowed_roles = (
+            {"operation", "instrumentation", "external"}
+            if schema in {"dagcert-contract/v6", "dagcert-contract/v7"}
+            else {"operation", "instrumentation"}
+        )
+        if schema in {
+            "dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5",
+            "dagcert-contract/v6", "dagcert-contract/v7",
+        } and role not in allowed_roles:
             raise ContractError(
                 f"task {task_id}.role must be one of {sorted(allowed_roles)}"
             )
@@ -457,7 +595,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
         source_signature: SourceSignature | None = None
         external_contract: ExternalContract | None = None
         callable_bindings: tuple[CallableBinding, ...] = ()
-        if schema == "dagcert-contract/v6" and row.get("external_contract") is not None:
+        if schema in {"dagcert-contract/v6", "dagcert-contract/v7"} and row.get("external_contract") is not None:
             external = _object(
                 row.get("external_contract"), f"task {task_id}.external_contract"
             )
@@ -517,7 +655,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             raise ContractError(
                 f"non-external task {task_id} must set external_contract to null"
             )
-        if schema == "dagcert-contract/v6":
+        if schema in {"dagcert-contract/v6", "dagcert-contract/v7"}:
             parsed_bindings: list[CallableBinding] = []
             for binding_value in _array(
                 row.get("callable_bindings", ()), f"task {task_id}.callable_bindings"
@@ -609,7 +747,10 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
                     callable_provider,
                 ))
             callable_bindings = tuple(parsed_bindings)
-        if schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"}:
+        if schema in {
+            "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
+            "dagcert-contract/v7",
+        }:
             binding = _object(row.get("implementation"), f"task {task_id}.implementation")
             if set(binding) != {"language", "path", "symbol"}:
                 raise ContractError(
@@ -620,31 +761,103 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
                 _identifier(binding.get("path"), f"task {task_id}.implementation.path"),
                 _identifier(binding.get("symbol"), f"task {task_id}.implementation.symbol"),
             )
-            if implementation.language != "python":
-                raise ContractError(
-                    f"task {task_id} uses unsupported source type provider {implementation.language!r}"
-                )
-            try:
-                source_signature = read_python_signature(
-                    implementation_root, implementation.path, implementation.symbol,
-                    include_legacy_unhandled=schema == "dagcert-contract/v4",
-                    external_boundary_id=task_id if role == "external" else None,
-                )
-                if external_contract is not None:
-                    if source_signature.outcome_types[0] != external_contract.success_outcome:
-                        raise SourceTypeError(
-                            f"external contract success outcome "
-                            f"{external_contract.success_outcome!r} does not match adapter return "
-                            f"{source_signature.outcome_types[0]!r}"
-                        )
-                    validate_external_contract_stub(
-                        implementation_root,
-                        external_contract.stub_path,
-                        implementation.symbol,
-                        source_signature,
+            if implementation.language == "python":
+                if row.get("verified_interface") is not None:
+                    raise ContractError(
+                        f"task {task_id} Python interface is extracted from source and must not "
+                        "declare verified_interface"
                     )
-            except SourceTypeError as exc:
-                raise ContractError(f"task {task_id} source type error: {exc}") from exc
+                try:
+                    source_signature = read_python_signature(
+                        implementation_root, implementation.path, implementation.symbol,
+                        include_legacy_unhandled=schema == "dagcert-contract/v4",
+                        external_boundary_id=task_id if role == "external" else None,
+                    )
+                    if external_contract is not None:
+                        if source_signature.outcome_types[0] != external_contract.success_outcome:
+                            raise SourceTypeError(
+                                f"external contract success outcome "
+                                f"{external_contract.success_outcome!r} does not match adapter "
+                                f"return {source_signature.outcome_types[0]!r}"
+                            )
+                        validate_external_contract_stub(
+                            implementation_root,
+                            external_contract.stub_path,
+                            implementation.symbol,
+                            source_signature,
+                        )
+                except SourceTypeError as exc:
+                    raise ContractError(f"task {task_id} source type error: {exc}") from exc
+            elif (
+                schema == "dagcert-contract/v7"
+                and implementation.language in {"javascript", "typescript"}
+            ):
+                if role != "operation":
+                    raise ContractError(
+                        f"task {task_id} verified {implementation.language} leaf must have role "
+                        "operation"
+                    )
+                interface = _object(
+                    row.get("verified_interface"), f"task {task_id}.verified_interface",
+                )
+                if set(interface) != {"execution", "parameters", "return_type"}:
+                    raise ContractError(
+                        f"task {task_id}.verified_interface must contain execution, parameters, "
+                        "and return_type"
+                    )
+                if interface.get("execution") != "synchronous":
+                    raise ContractError(
+                        f"task {task_id}.verified_interface currently requires synchronous "
+                        "execution"
+                    )
+                parameter_rows = _array(
+                    interface.get("parameters"),
+                    f"task {task_id}.verified_interface.parameters",
+                )
+                if len(parameter_rows) != 1:
+                    raise ContractError(
+                        f"task {task_id}.verified_interface requires exactly one parameter"
+                    )
+                parameter = _object(
+                    parameter_rows[0],
+                    f"task {task_id}.verified_interface.parameters[0]",
+                )
+                if set(parameter) != {"name", "type"}:
+                    raise ContractError(
+                        f"task {task_id}.verified_interface parameter must contain name and type"
+                    )
+                parameter_name = _identifier(
+                    parameter.get("name"),
+                    f"task {task_id}.verified_interface parameter name",
+                )
+                parameter_type = _identifier(
+                    parameter.get("type"),
+                    f"task {task_id}.verified_interface parameter type",
+                )
+                return_type = _identifier(
+                    interface.get("return_type"),
+                    f"task {task_id}.verified_interface.return_type",
+                )
+                allowed_types = {"boolean", "number", "string"}
+                if parameter_type not in allowed_types or return_type not in allowed_types:
+                    raise ContractError(
+                        f"task {task_id}.verified_interface currently supports only primitive "
+                        f"types {sorted(allowed_types)}"
+                    )
+                source_signature = SourceSignature(
+                    implementation.language,
+                    Path(implementation.path).as_posix(),
+                    implementation.symbol,
+                    parameter_type,
+                    (return_type,),
+                    1,
+                    ((parameter_name, parameter_type),),
+                )
+            else:
+                raise ContractError(
+                    f"task {task_id} uses unsupported source type provider "
+                    f"{implementation.language!r}"
+                )
             outcome_rows = _array(row.get("outcomes"), f"task {task_id}.outcomes")
             parsed_outcomes: list[TaskOutcome] = []
             for outcome_value in outcome_rows:
@@ -694,7 +907,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             input_type = _identifier(row.get("input_type"), f"task {task_id}.input_type")
             output_type = _identifier(row.get("output_type"), f"task {task_id}.output_type")
         error_budget: TaskErrorBudget | None = None
-        if schema in {"dagcert-contract/v5", "dagcert-contract/v6"} and row.get("error_budget") is not None:
+        if schema in {"dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7"} and row.get("error_budget") is not None:
             budget = _object(row.get("error_budget"), f"task {task_id}.error_budget")
             required_budget_fields = {
                 "basis", "evidence_case", "good_outcomes",
@@ -744,13 +957,24 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             )
         typed_dependencies: tuple[TypedDependency, ...] = ()
         dependency_values = _array(row.get("depends_on", ()), f"task {task_id}.depends_on")
-        if schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"}:
+        if schema in {
+            "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
+            "dagcert-contract/v7",
+        }:
             parsed_dependencies: list[TypedDependency] = []
             for dependency_value in dependency_values:
                 dependency = _object(dependency_value, f"task {task_id}.dependency")
-                if set(dependency) != {"task", "outcome_type"}:
+                allowed_dependency_fields = (
+                    {"task", "outcome_type", "input_field"}
+                    if schema == "dagcert-contract/v7"
+                    else {"task", "outcome_type"}
+                )
+                if set(dependency) not in (
+                    {"task", "outcome_type"}, allowed_dependency_fields,
+                ):
                     raise ContractError(
-                        f"task {task_id} typed dependency must contain exactly task and outcome_type"
+                        f"task {task_id} typed dependency must contain task, outcome_type, "
+                        "and optionally input_field in v7"
                     )
                 parsed_dependencies.append(TypedDependency(
                     _identifier(dependency.get("task"), f"task {task_id}.dependency.task"),
@@ -758,6 +982,10 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
                         dependency.get("outcome_type"),
                         f"task {task_id}.dependency.outcome_type",
                     ),
+                    _python_identifier(
+                        dependency.get("input_field"),
+                        f"task {task_id}.dependency.input_field",
+                    ) if dependency.get("input_field") is not None else None,
                 ))
             typed_dependencies = tuple(parsed_dependencies)
             dependencies = tuple(item.task for item in typed_dependencies)
@@ -768,6 +996,13 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             )
         if len(dependencies) != len(set(dependencies)):
             raise ContractError(f"task {task_id}.depends_on must not contain duplicates")
+        start_resources = (
+            parse_effects(
+                row.get("start_resources", {}), f"task {task_id}.start_resources",
+            )
+            if schema == "dagcert-contract/v7"
+            else {}
+        )
         tasks.append(Task(
             task_id,
             _identifier(row.get("worker"), f"task {task_id}.worker"),
@@ -785,40 +1020,69 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             error_budget,
             external_contract,
             callable_bindings,
+            start_resources,
         ))
 
     compositions: list[Composition] = []
     for value in _array(raw.get("compositions", ()), "compositions"):
         row = _object(value, "composition")
+        if schema == "dagcert-contract/v7":
+            if set(row) != {"id", "expression", "metadata"}:
+                raise ContractError(
+                    "v7 composition must contain exactly id, expression, and metadata"
+                )
+            composition_id = _identifier(row.get("id"), "composition.id")
+            expression = _composition_expression(
+                row.get("expression"), f"composition {composition_id}.expression",
+            )
+            v7_steps = composition_steps(expression)
+            if len({step.task for step in v7_steps}) < 2:
+                raise ContractError(
+                    f"composition {composition_id} must contain at least two "
+                    "operation/external tasks"
+                )
+            compositions.append(Composition(
+                composition_id,
+                v7_steps,
+                dict(_object(row.get("metadata", {}), f"composition {composition_id}.metadata")),
+                expression,
+            ))
+            continue
         if set(row) != {"id", "steps", "metadata"}:
             raise ContractError("composition must contain exactly id, steps, and metadata")
         composition_id = _identifier(row.get("id"), "composition.id")
-        steps: list[CompositionStep] = []
+        legacy_steps: list[CompositionStep] = []
         for step_value in _array(row.get("steps"), f"composition {composition_id}.steps"):
             step = _object(step_value, f"composition {composition_id}.step")
             required_step_fields = (
                 {"task", "timing", "count", "outcome_type"}
-                if schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"}
+                if schema in {
+                    "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
+                }
                 else {"task", "timing", "count"}
             )
             if set(step) != required_step_fields:
-                suffix = ", and outcome_type" if schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"} else ""
+                suffix = ", and outcome_type" if schema in {
+                    "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
+                } else ""
                 raise ContractError(
                     "composition step must contain exactly task, timing, count" + suffix
                 )
             count = _positive(step.get("count"), "composition step count")
             if not count.is_integer():
                 raise ContractError("composition step count must be an integer")
-            steps.append(CompositionStep(
+            legacy_steps.append(CompositionStep(
                 _identifier(step.get("task"), f"composition {composition_id}.step.task"),
                 _identifier(step.get("timing"), f"composition {composition_id}.step.timing"),
                 int(count),
                 _identifier(
                     step.get("outcome_type"),
                     f"composition {composition_id}.step.outcome_type",
-                ) if schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"} else None,
+                ) if schema in {
+                    "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
+                } else None,
             ))
-        task_refs = tuple(step.task for step in steps)
+        task_refs = tuple(step.task for step in legacy_steps)
         if len(set(task_refs)) < 2:
             raise ContractError(
                 f"composition {composition_id} must contain at least two operation/external tasks"
@@ -829,17 +1093,221 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             )
         compositions.append(Composition(
             composition_id,
-            tuple(steps),
+            tuple(legacy_steps),
             dict(_object(row.get("metadata", {}), f"composition {composition_id}.metadata")),
+        ))
+
+    state_claims: list[StateClaim] = []
+    for value in _array(raw.get("state_claims", ()), "state_claims"):
+        row = _object(value, "state_claim")
+        claim_id = _identifier(row.get("id"), "state_claim.id")
+        kind = _identifier(row.get("kind"), f"state_claim {claim_id}.kind")
+        if kind == "linear_invariant":
+            required = {"id", "kind", "expression", "operator", "bound", "metadata"}
+            if set(row) != required:
+                raise ContractError(
+                    f"state_claim {claim_id} linear_invariant fields mismatch"
+                )
+            invariant_expression = {
+                _identifier(resource_id, f"state_claim {claim_id}.expression resource"): (
+                    _finite_number(weight, f"state_claim {claim_id}.expression weight")
+                )
+                for resource_id, weight in _object(
+                    row.get("expression"), f"state_claim {claim_id}.expression",
+                ).items()
+            }
+            if not invariant_expression or any(
+                weight == 0 for weight in invariant_expression.values()
+            ):
+                raise ContractError(
+                    f"state_claim {claim_id}.expression must contain nonzero coefficients"
+                )
+            operator = _identifier(row.get("operator"), f"state_claim {claim_id}.operator")
+            if operator not in {"eq", "lte", "gte"}:
+                raise ContractError(
+                    f"state_claim {claim_id}.operator must be eq, lte, or gte"
+                )
+            specification: Mapping[str, Any] = {
+                "expression": invariant_expression,
+                "operator": operator,
+                "bound": _finite_number(row.get("bound"), f"state_claim {claim_id}.bound"),
+            }
+        elif kind == "bounded_non_starvation":
+            required = {
+                "id", "kind", "inventory_resources", "producer", "consumer",
+                "horizon", "metadata",
+            }
+            if set(row) != required:
+                raise ContractError(
+                    f"state_claim {claim_id} bounded_non_starvation fields mismatch"
+                )
+            inventory_resources = tuple(
+                _identifier(item, f"state_claim {claim_id}.inventory_resources")
+                for item in _array(
+                    row.get("inventory_resources"),
+                    f"state_claim {claim_id}.inventory_resources",
+                )
+            )
+            if not inventory_resources or len(inventory_resources) != len(
+                set(inventory_resources)
+            ):
+                raise ContractError(
+                    f"state_claim {claim_id}.inventory_resources must be nonempty and unique"
+                )
+            endpoints: dict[str, dict[str, str]] = {}
+            for endpoint in ("producer", "consumer"):
+                endpoint_row = _object(
+                    row.get(endpoint), f"state_claim {claim_id}.{endpoint}",
+                )
+                if set(endpoint_row) != {"task", "timing"}:
+                    raise ContractError(
+                        f"state_claim {claim_id}.{endpoint} must contain task and timing"
+                    )
+                endpoints[endpoint] = {
+                    "task": _identifier(
+                        endpoint_row.get("task"),
+                        f"state_claim {claim_id}.{endpoint}.task",
+                    ),
+                    "timing": _identifier(
+                        endpoint_row.get("timing"),
+                        f"state_claim {claim_id}.{endpoint}.timing",
+                    ),
+                }
+            horizon = _positive(row.get("horizon"), f"state_claim {claim_id}.horizon")
+            if not horizon.is_integer():
+                raise ContractError(f"state_claim {claim_id}.horizon must be an integer")
+            specification = {
+                "inventory_resources": inventory_resources,
+                **endpoints,
+                "horizon": int(horizon),
+            }
+        elif kind == "bounded_response":
+            required = {
+                "id", "kind", "trigger_resource", "response_task", "response_timing",
+                "upper_ms", "metadata",
+            }
+            if set(row) != required:
+                raise ContractError(f"state_claim {claim_id} bounded_response fields mismatch")
+            specification = {
+                "trigger_resource": _identifier(
+                    row.get("trigger_resource"),
+                    f"state_claim {claim_id}.trigger_resource",
+                ),
+                "response_task": _identifier(
+                    row.get("response_task"), f"state_claim {claim_id}.response_task",
+                ),
+                "response_timing": _identifier(
+                    row.get("response_timing"),
+                    f"state_claim {claim_id}.response_timing",
+                ),
+                "upper_ms": _positive(
+                    row.get("upper_ms"), f"state_claim {claim_id}.upper_ms",
+                ),
+            }
+        else:
+            raise ContractError(
+                f"state_claim {claim_id}.kind must be linear_invariant, "
+                "bounded_non_starvation, or bounded_response"
+            )
+        state_claims.append(StateClaim(
+            claim_id,
+            kind,
+            specification,
+            dict(_object(row.get("metadata", {}), f"state_claim {claim_id}.metadata")),
         ))
 
     contract = Contract(
         str(schema), tuple(workers), tuple(tasks), tuple(resources),
         dict(_object(raw.get("metadata", {}), "metadata")),
         tuple(compositions),
+        tuple(state_claims),
     )
     _validate(contract)
     return contract
+
+
+def _expression_entries(expression: CompositionExpression) -> tuple[CompositionStep, ...]:
+    if expression.kind == "leaf":
+        assert expression.step is not None
+        return (expression.step,)
+    if expression.kind == "sequence":
+        return _expression_entries(expression.children[0])
+    if expression.kind == "parallel_all":
+        return tuple(
+            step for child in expression.children for step in _expression_entries(child)
+        )
+    return _expression_entries(expression.children[0])
+
+
+def _expression_exits(expression: CompositionExpression) -> tuple[CompositionStep, ...]:
+    if expression.kind == "leaf":
+        assert expression.step is not None
+        return (expression.step,)
+    if expression.kind == "sequence":
+        return _expression_exits(expression.children[-1])
+    if expression.kind == "parallel_all":
+        return tuple(
+            step for child in expression.children for step in _expression_exits(child)
+        )
+    return _expression_exits(expression.children[0])
+
+
+def _require_expression_edges(
+    upstream: CompositionExpression,
+    downstream: CompositionExpression,
+    tasks: Mapping[str, Task],
+    composition_id: str,
+) -> None:
+    for downstream_step in _expression_entries(downstream):
+        downstream_task = tasks[downstream_step.task]
+        for upstream_step in _expression_exits(upstream):
+            if not any(
+                dependency.task == upstream_step.task
+                and dependency.outcome_type == upstream_step.outcome_type
+                for dependency in downstream_task.typed_dependencies
+            ):
+                raise ContractError(
+                    f"composition {composition_id} is not a real typed workflow edge: "
+                    f"{upstream_step.task}/{upstream_step.outcome_type} does not feed "
+                    f"{downstream_step.task}/{downstream_task.input_type}"
+                )
+
+
+def _validate_composition_expression_edges(
+    expression: CompositionExpression,
+    tasks: Mapping[str, Task],
+    composition_id: str,
+) -> None:
+    for child in expression.children:
+        _validate_composition_expression_edges(child, tasks, composition_id)
+    if expression.kind == "sequence":
+        for upstream, downstream in zip(
+            expression.children, expression.children[1:], strict=False,
+        ):
+            _require_expression_edges(upstream, downstream, tasks, composition_id)
+    if expression.kind == "parallel_all":
+        branch_tasks = [
+            {step.task for step in composition_steps(child)}
+            for child in expression.children
+        ]
+        for branch_index, task_ids in enumerate(branch_tasks):
+            other_task_ids = set().union(*(
+                identifiers
+                for index, identifiers in enumerate(branch_tasks)
+                if index != branch_index
+            ))
+            hidden_edges = sorted(
+                (dependency.task, task_id)
+                for task_id in task_ids
+                for dependency in tasks[task_id].typed_dependencies
+                if dependency.task in other_task_ids
+            )
+            if hidden_edges:
+                edge = hidden_edges[0]
+                raise ContractError(
+                    f"composition {composition_id} parallel_all branches are not independent: "
+                    f"{edge[0]} feeds {edge[1]} across branches"
+                )
 
 
 def _validate(contract: Contract) -> None:
@@ -848,15 +1316,16 @@ def _validate(contract: Contract) -> None:
         ("task", [item.id for item in contract.tasks]),
         ("resource", [item.id for item in contract.resources]),
         ("composition", [item.id for item in contract.compositions]),
+        ("state claim", [item.id for item in contract.state_claims]),
     ):
-        if label not in {"resource", "composition"} and not identifiers:
+        if label not in {"resource", "composition", "state claim"} and not identifiers:
             raise ContractError(f"contract must declare at least one {label}")
         if len(identifiers) != len(set(identifiers)):
             raise ContractError(f"{label} IDs must be unique")
     workers = contract.worker_by_id
     tasks = contract.task_by_id
     resources = contract.resource_by_id
-    if contract.schema == "dagcert-contract/v6":
+    if contract.schema in {"dagcert-contract/v6", "dagcert-contract/v7"}:
         callable_binding_ids = [
             binding.id for task in contract.tasks for binding in task.callable_bindings
         ]
@@ -913,7 +1382,10 @@ def _validate(contract: Contract) -> None:
             raise ContractError(f"task {task.id} has unknown dependencies {sorted(missing_dependencies)}")
         if task.id in task.depends_on:
             raise ContractError(f"task {task.id} depends on itself")
-        if contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"}:
+        if contract.schema in {
+            "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
+            "dagcert-contract/v7",
+        }:
             for dependency in task.typed_dependencies:
                 upstream = tasks.get(dependency.task)
                 if upstream is None:
@@ -923,12 +1395,33 @@ def _validate(contract: Contract) -> None:
                         f"task {task.id} dependency cites {dependency.task} outcome "
                         f"{dependency.outcome_type!r}, which is not in the upstream source union"
                     )
-                if dependency.outcome_type != task.input_type:
+                if dependency.input_field is None and dependency.outcome_type != task.input_type:
                     raise ContractError(
                         f"task {task.id} source input {task.input_type!r} does not accept typed edge "
                         f"{dependency.task}/{dependency.outcome_type}"
                     )
-            if contract.schema in {"dagcert-contract/v5", "dagcert-contract/v6"} and task.error_budget is not None:
+                if dependency.input_field is not None:
+                    if contract.schema != "dagcert-contract/v7":
+                        raise ContractError(
+                            f"task {task.id} dependency input_field requires v7"
+                        )
+                    assert task.source_signature is not None
+                    field_types = dict(task.source_signature.input_fields)
+                    actual_type = field_types.get(dependency.input_field)
+                    if actual_type is None:
+                        raise ContractError(
+                            f"task {task.id} dependency targets unknown source input field "
+                            f"{dependency.input_field!r}"
+                        )
+                    if actual_type != dependency.outcome_type:
+                        raise ContractError(
+                            f"task {task.id} source input field {dependency.input_field!r} "
+                            f"expects {actual_type!r}, not {dependency.outcome_type!r} from "
+                            f"{dependency.task}"
+                        )
+            if contract.schema in {
+                "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7",
+            } and task.error_budget is not None:
                 budget = task.error_budget
                 unknown_good = set(budget.good_outcomes) - set(task.outcome_by_type)
                 if unknown_good:
@@ -975,7 +1468,7 @@ def _validate(contract: Contract) -> None:
                         f"external task {task.id} cites unknown conformance evidence case "
                         f"{external.evidence_case!r}"
                     )
-        for resource_id, effect in task.resources.items():
+        for resource_id, effect in (*task.resources.items(), *task.start_resources.items()):
             if resource_id not in resources:
                 raise ContractError(f"task {task.id} references unknown resource {resource_id}")
             resource = resources[resource_id]
@@ -1011,13 +1504,20 @@ def _validate(contract: Contract) -> None:
                 raise ContractError(
                     f"composition {composition.id} step {step.task}/{step.timing} must be a duration"
                 )
-            if contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"}:
+            if contract.schema in {
+                "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
+                "dagcert-contract/v7",
+            }:
                 if step.outcome_type not in task.outcome_by_type:
                     raise ContractError(
                         f"composition {composition.id} step {step.task} cites outcome "
                         f"{step.outcome_type!r} outside the task's source union"
                     )
-                if step.count > 1 and step.outcome_type != task.input_type:
+                if (
+                    contract.schema != "dagcert-contract/v7"
+                    and step.count > 1
+                    and step.outcome_type != task.input_type
+                ):
                     raise ContractError(
                         f"composition {composition.id} repeats {step.task}, but outcome "
                         f"{step.outcome_type!r} is not the task input {task.input_type!r}"
@@ -1034,6 +1534,11 @@ def _validate(contract: Contract) -> None:
                         f"{upstream_step.task}/{upstream_step.outcome_type} does not feed "
                         f"{downstream_step.task}/{downstream.input_type}"
                     )
+        if contract.schema == "dagcert-contract/v7":
+            assert composition.expression is not None
+            _validate_composition_expression_edges(
+                composition.expression, tasks, composition.id,
+            )
         selected = set(composition.task_refs)
         connected = {composition.task_refs[0]}
         changed = True
@@ -1057,4 +1562,66 @@ def _validate(contract: Contract) -> None:
             raise ContractError(
                 f"composition {composition.id} tasks must form one connected DAG subgraph"
             )
+    for claim in contract.state_claims:
+        spec = claim.specification
+        if claim.kind == "linear_invariant":
+            unknown_resources = set(spec["expression"]) - set(resources)
+            if unknown_resources:
+                raise ContractError(
+                    f"state_claim {claim.id} cites unknown resources "
+                    f"{sorted(unknown_resources)}"
+                )
+        elif claim.kind == "bounded_non_starvation":
+            unknown_resources = set(spec["inventory_resources"]) - set(resources)
+            if unknown_resources:
+                raise ContractError(
+                    f"state_claim {claim.id} cites unknown inventory resources "
+                    f"{sorted(unknown_resources)}"
+                )
+            for endpoint in ("producer", "consumer"):
+                endpoint_spec = spec[endpoint]
+                state_task = tasks.get(endpoint_spec["task"])
+                if state_task is None:
+                    raise ContractError(
+                        f"state_claim {claim.id} cites unknown {endpoint} task "
+                        f"{endpoint_spec['task']!r}"
+                    )
+                timing = state_task.timings.get(endpoint_spec["timing"])
+                if timing is None:
+                    raise ContractError(
+                        f"state_claim {claim.id} cites unknown {endpoint} timing "
+                        f"{endpoint_spec['task']}/{endpoint_spec['timing']}"
+                    )
+                if timing.metric != "duration":
+                    raise ContractError(
+                        f"state_claim {claim.id} {endpoint} timing must be a duration metric"
+                    )
+                required_bound = "upper_ms" if endpoint == "producer" else "lower_ms"
+                if getattr(timing, required_bound) is None:
+                    raise ContractError(
+                        f"state_claim {claim.id} {endpoint} timing requires {required_bound}"
+                    )
+        elif claim.kind == "bounded_response":
+            trigger = spec["trigger_resource"]
+            if trigger not in resources:
+                raise ContractError(
+                    f"state_claim {claim.id} cites unknown trigger resource {trigger!r}"
+                )
+            response_task = tasks.get(spec["response_task"])
+            if response_task is None or spec["response_timing"] not in response_task.timings:
+                raise ContractError(
+                    f"state_claim {claim.id} cites unknown response timing "
+                    f"{spec['response_task']}/{spec['response_timing']}"
+                )
+            timing = response_task.timings[spec["response_timing"]]
+            if timing.metric != "wait" or timing.upper_ms is None:
+                raise ContractError(
+                    f"state_claim {claim.id} response timing must be a bounded wait metric"
+                )
+            effect = response_task.start_resources.get(trigger, ResourceEffect())
+            if effect.consume <= 0:
+                raise ContractError(
+                    f"state_claim {claim.id} response task must consume trigger resource "
+                    f"{trigger!r} at start"
+                )
     contract.topological_tasks()

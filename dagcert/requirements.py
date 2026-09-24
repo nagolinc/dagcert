@@ -96,6 +96,7 @@ def audit_translation(
         f"timing:{task.id}/{case}" for task in contract.tasks for case in task.timings
     )
     valid_primitives.update(f"composition:{item.id}" for item in contract.compositions)
+    valid_primitives.update(f"state-claim:{item.id}" for item in contract.state_claims)
     valid_primitives.update(
         f"error-budget:{task.id}" for task in contract.tasks
         if task.error_budget is not None
@@ -146,6 +147,35 @@ def audit_translation(
         coverage_primitives.update(
             f"timing:{step.task}/{step.timing}" for step in composition.steps
         )
+    for state_claim in contract.state_claims:
+        if f"state-claim:{state_claim.id}" not in referenced_primitives:
+            continue
+        specification = state_claim.specification
+        if state_claim.kind == "linear_invariant":
+            coverage_primitives.update(
+                f"resource:{resource_id}"
+                for resource_id in specification["expression"]
+            )
+        elif state_claim.kind == "bounded_non_starvation":
+            coverage_primitives.update(
+                f"resource:{resource_id}"
+                for resource_id in specification["inventory_resources"]
+            )
+            for endpoint in ("producer", "consumer"):
+                endpoint_spec = specification[endpoint]
+                coverage_primitives.add(f"task:{endpoint_spec['task']}")
+                coverage_primitives.add(
+                    f"timing:{endpoint_spec['task']}/{endpoint_spec['timing']}"
+                )
+        elif state_claim.kind == "bounded_response":
+            coverage_primitives.add(
+                f"resource:{specification['trigger_resource']}"
+            )
+            coverage_primitives.add(f"task:{specification['response_task']}")
+            coverage_primitives.add(
+                f"timing:{specification['response_task']}/"
+                f"{specification['response_timing']}"
+            )
     for task in contract.tasks:
         if f"external-contract:{task.id}" not in coverage_primitives:
             continue

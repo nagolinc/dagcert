@@ -10,6 +10,7 @@ import pytest
 from dagcert.maledictus_verifier import (
     MaledictusCallableBinding, MaledictusExternalCallableProvider,
     MaledictusSourceCallableProvider, MaledictusVerificationError,
+    MaledictusVerifiedInterface,
     verify_with_maledictus,
 )
 
@@ -94,6 +95,125 @@ def test_digest_pinned_maledictus_response_is_exactly_bound(
     )
     assert result["status"] == "proved"
     assert result["python_typechecker"] == _proved_response(root, digest)["python_typechecker"]
+
+
+def test_compiler_derived_typescript_interface_is_exactly_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    root = tmp_path / "typescript-app"
+    root.mkdir()
+    source = root / "present.ts"
+    source.write_text(
+        "export function present(value: string): string { return value; }\n",
+        encoding="utf-8",
+    )
+    (root / "app.py").write_text("# response template\n", encoding="utf-8")
+    executable = tmp_path / "maledictus.exe"
+    executable.write_bytes(b"pinned verifier")
+    digest = sha256(executable.read_bytes()).hexdigest()
+    response = _proved_response(root, digest)
+    response["files"] = [{
+        "path": "present.ts",
+        "sha256": sha256(source.read_bytes()).hexdigest(),
+        "symbols": ["present"],
+        "scope": "all-source-symbol-bodies",
+        "result": "proved",
+        "fragment": "strict-typescript-closed-total-functions/v11",
+        "verified_interfaces": [{
+            "symbol": "present",
+            "execution": "synchronous",
+            "parameters": [{"name": "value", "type_name": "string"}],
+            "return_type": "string",
+        }],
+    }]
+    response.pop("python_typechecker")
+    response["typescript_toolchain"] = {
+        "compiler": "typescript",
+        "compiler_version": "5.9.3",
+        "compiler_bundle_sha256": "8" * 64,
+        "runtime": "node",
+        "runtime_version": "v24.0.0",
+        "runtime_executable_sha256": "9" * 64,
+    }
+
+    def fake_run(arguments, **_kwargs):
+        request = json.loads(Path(arguments[-1]).read_text(encoding="utf-8"))
+        assert request["files"] == [{
+            "path": "present.ts", "language": "typescript", "symbols": ["present"],
+        }]
+        return CompletedProcess(arguments, 0, json.dumps(response), "")
+
+    monkeypatch.setattr("dagcert.maledictus_verifier.run", fake_run)
+    result = verify_with_maledictus(
+        root,
+        ["present.ts"],
+        {"present.ts": ("present",)},
+        source_fingerprint="source-fingerprint",
+        executable=executable,
+        expected_executable_sha256=digest,
+        languages_by_file={"present.ts": "typescript"},
+        verified_interfaces=(MaledictusVerifiedInterface(
+            "present.ts", "typescript", "present", (("value", "string"),), "string",
+        ),),
+    )
+
+    assert result["files"] == response["files"]
+
+
+def test_typescript_interface_mismatch_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    root = tmp_path / "typescript-app"
+    root.mkdir()
+    source = root / "present.ts"
+    source.write_text(
+        "export function present(value: string): string { return value; }\n",
+        encoding="utf-8",
+    )
+    (root / "app.py").write_text("# response template\n", encoding="utf-8")
+    executable = tmp_path / "maledictus.exe"
+    executable.write_bytes(b"pinned verifier")
+    digest = sha256(executable.read_bytes()).hexdigest()
+    response = _proved_response(root, digest)
+    response["files"] = [{
+        "path": "present.ts",
+        "sha256": sha256(source.read_bytes()).hexdigest(),
+        "symbols": ["present"],
+        "scope": "all-source-symbol-bodies",
+        "result": "proved",
+        "fragment": "strict-typescript-closed-total-functions/v11",
+        "verified_interfaces": [{
+            "symbol": "present", "execution": "synchronous",
+            "parameters": [{"name": "value", "type_name": "string"}],
+            "return_type": "string",
+        }],
+    }]
+    response.pop("python_typechecker")
+    response["typescript_toolchain"] = {
+        "compiler": "typescript", "compiler_version": "5.9.3",
+        "compiler_bundle_sha256": "8" * 64, "runtime": "node",
+        "runtime_version": "v24.0.0", "runtime_executable_sha256": "9" * 64,
+    }
+    monkeypatch.setattr(
+        "dagcert.maledictus_verifier.run",
+        lambda arguments, **_kwargs: CompletedProcess(
+            arguments, 0, json.dumps(response), "",
+        ),
+    )
+
+    with pytest.raises(MaledictusVerificationError, match="does not match"):
+        verify_with_maledictus(
+            root,
+            ["present.ts"],
+            {"present.ts": ("present",)},
+            source_fingerprint="source-fingerprint",
+            executable=executable,
+            expected_executable_sha256=digest,
+            languages_by_file={"present.ts": "typescript"},
+            verified_interfaces=(MaledictusVerifiedInterface(
+                "present.ts", "typescript", "present", (("value", "boolean"),), "string",
+            ),),
+        )
 
 
 def test_maledictus_executable_digest_mismatch_refuses_before_execution(

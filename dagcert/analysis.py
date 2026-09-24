@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass
 from math import ceil
 from typing import Any, Iterable
 
-from .contract import Contract, Task, Timing
+from .contract import Contract, ResourceEffect, Task, Timing
 from .evidence import TimingSample
 
 
@@ -126,8 +126,13 @@ def analyze_contract(
                 "retained timing evidence contains a failed task attempt",
             ))
         if timing is not None and timing.metric == "duration":
-            if contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"}:
+            if contract.schema in {
+                "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
+                "dagcert-contract/v7",
+            }:
                 _check_typed_outcome_observation(task, sample, contract, findings)
+                if contract.schema == "dagcert-contract/v7":
+                    _check_start_resource_observation(task, sample, findings)
             elif sample.succeeded:
                 _check_execution_observation(task, sample, contract, findings)
 
@@ -142,9 +147,9 @@ def analyze_contract(
             usable = [
                 sample for sample in evidence
                 if sample.task_id == task.id and sample.case == case
-                and (contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"} or sample.succeeded)
+                and (contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7"} or sample.succeeded)
                 and (
-                    contract.schema not in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"}
+                    contract.schema not in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7"}
                     or sample.outcome_type in task.outcome_by_type
                 )
                 and sample.worker_id == task.worker and sample.source_fingerprint == source_fingerprint
@@ -182,7 +187,7 @@ def analyze_contract(
                 requirement.lower_ms, requirement.upper_ms, passed,
             ))
 
-    if contract.schema in {"dagcert-contract/v5", "dagcert-contract/v6"}:
+    if contract.schema in {"dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7"}:
         for task in contract.tasks:
             budget = task.error_budget
             if budget is None:
@@ -355,6 +360,44 @@ def _check_execution_observation(
             ))
 
 
+def _check_start_resource_observation(
+    task: Task, sample: TimingSample, findings: list[Finding],
+) -> None:
+    observed_by_kind = {
+        "acquire": sample.start_resource_acquired,
+        "consume": sample.start_resource_consumed,
+        "produce": sample.start_resource_produced,
+    }
+    for resource_id, effect in task.start_resources.items():
+        for kind, observed in observed_by_kind.items():
+            declared = getattr(effect, kind)
+            actual = observed.get(resource_id)
+            if declared > 0 and actual is None:
+                findings.append(Finding(
+                    "missing-start-resource-effect-observation",
+                    f"{task.id}/{resource_id}",
+                    f"missing observed start {kind} amount",
+                ))
+            elif actual is not None and actual != declared:
+                findings.append(Finding(
+                    "start-resource-effect-mismatch",
+                    f"{task.id}/{resource_id}",
+                    f"declared start {kind} {declared:g}, observed {actual:g}",
+                ))
+    declared_resources = set(task.start_resources)
+    for kind, observed in observed_by_kind.items():
+        for resource_id, actual in observed.items():
+            if (
+                resource_id not in declared_resources
+                or getattr(task.start_resources[resource_id], kind) == 0
+            ):
+                findings.append(Finding(
+                    "undeclared-start-resource-effect",
+                    f"{task.id}/{resource_id}",
+                    f"observed start {kind} {actual:g}",
+                ))
+
+
 def _check_typed_outcome_observation(
     task: Task, sample: TimingSample, contract: Contract, findings: list[Finding],
 ) -> None:
@@ -448,15 +491,15 @@ def _reachable_tasks(contract: Contract, *, guaranteed: bool) -> set[str]:
                     for item in task.typed_dependencies
                 ):
                     continue
-            unavailable = [
-                resource_id
-                for resource_id, effect in task.resources.items()
-                if effect.consume > contract.resource_by_id[resource_id].initial
-                and resource_id not in producible
-            ]
+            unavailable = _unavailable_for_first_execution(
+                task, contract, producible,
+            )
             if unavailable:
                 continue
             reachable.add(task_id)
+            for resource_id, effect in task.start_resources.items():
+                if effect.produce > 0:
+                    producible.add(resource_id)
             for resource_id in task.resources:
                 amount = (
                     task.guaranteed_effect(resource_id, "produce")
@@ -468,6 +511,28 @@ def _reachable_tasks(contract: Contract, *, guaranteed: bool) -> set[str]:
             remaining.pop(task_id)
             changed = True
     return reachable
+
+
+def _unavailable_for_first_execution(
+    task: Task, contract: Contract, producible: set[str],
+) -> list[str]:
+    """Return resources that cannot support the task's ordered start/finish phases."""
+
+    identifiers = set(task.start_resources) | set(task.resources)
+    unavailable: list[str] = []
+    for resource_id in identifiers:
+        if resource_id in producible:
+            continue
+        initial = contract.resource_by_id[resource_id].initial
+        start = task.start_resources.get(resource_id, ResourceEffect())
+        if start.consume > initial:
+            unavailable.append(resource_id)
+            continue
+        after_start = initial - start.consume + start.produce
+        finish = task.resources.get(resource_id, ResourceEffect())
+        if finish.consume > after_start:
+            unavailable.append(resource_id)
+    return sorted(unavailable)
 
 
 def _structurally_blocked_tasks(
@@ -488,18 +553,18 @@ def _structurally_blocked_tasks(
     producible = {
         resource_id
         for task in contract.tasks if task.id in reachable
-        for resource_id in task.resources
-        if task.possible_effect(resource_id, "produce") > 0
+        for resource_id in set(task.resources) | set(task.start_resources)
+        if (
+            task.start_resources.get(resource_id, ResourceEffect()).produce > 0
+            or task.possible_effect(resource_id, "produce") > 0
+        )
     }
 
     blocked: dict[str, str] = {}
     for task_id, task in remaining.items():
         missing_dependencies = sorted(set(task.depends_on) - reachable)
-        unavailable_resources = sorted(
-            resource_id
-            for resource_id, effect in task.resources.items()
-            if effect.consume > contract.resource_by_id[resource_id].initial
-            and resource_id not in producible
+        unavailable_resources = _unavailable_for_first_execution(
+            task, contract, producible,
         )
         reasons: list[str] = []
         if missing_dependencies:

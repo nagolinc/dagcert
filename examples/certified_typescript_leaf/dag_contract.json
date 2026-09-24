@@ -1,0 +1,101 @@
+{
+  "schema": "dagcert-contract/v7",
+  "workers": [
+    {"id": "application", "concurrency": 1},
+    {"id": "browser", "concurrency": 1}
+  ],
+  "resources": [],
+  "tasks": [
+    {
+      "id": "prepare",
+      "role": "operation",
+      "worker": "application",
+      "implementation": {
+        "language": "typescript",
+        "path": "pipeline.ts",
+        "symbol": "prepare"
+      },
+      "verified_interface": {
+        "execution": "synchronous",
+        "parameters": [{"name": "value", "type": "string"}],
+        "return_type": "string"
+      },
+      "outcomes": [
+        {"type": "string", "resources": {}, "metadata": {}}
+      ],
+      "error_budget": null,
+      "external_contract": null,
+      "start_resources": {},
+      "depends_on": [],
+      "timings": {
+        "duration": {
+          "metric": "duration",
+          "upper_ms": 5,
+          "minimum_samples": 0,
+          "evidence": "assumed",
+          "safety_factor": 1
+        }
+      }
+    },
+    {
+      "id": "present",
+      "role": "operation",
+      "worker": "browser",
+      "implementation": {
+        "language": "typescript",
+        "path": "pipeline.ts",
+        "symbol": "present"
+      },
+      "verified_interface": {
+        "execution": "synchronous",
+        "parameters": [{"name": "value", "type": "string"}],
+        "return_type": "string"
+      },
+      "outcomes": [
+        {"type": "string", "resources": {}, "metadata": {}}
+      ],
+      "error_budget": null,
+      "external_contract": null,
+      "start_resources": {},
+      "depends_on": [
+        {"task": "prepare", "outcome_type": "string"}
+      ],
+      "timings": {
+        "duration": {
+          "metric": "duration",
+          "upper_ms": 5,
+          "minimum_samples": 0,
+          "evidence": "assumed",
+          "safety_factor": 1
+        }
+      }
+    }
+  ],
+  "compositions": [
+    {
+      "id": "prepare-and-present",
+      "expression": {
+        "kind": "sequence",
+        "children": [
+          {
+            "kind": "leaf",
+            "task": "prepare",
+            "timing": "duration",
+            "outcome_type": "string"
+          },
+          {
+            "kind": "leaf",
+            "task": "present",
+            "timing": "duration",
+            "outcome_type": "string"
+          }
+        ]
+      },
+      "metadata": {}
+    }
+  ],
+  "state_claims": [],
+  "metadata": {
+    "purpose": "Minimal compiler-bound TypeScript leaf composition"
+  }
+}

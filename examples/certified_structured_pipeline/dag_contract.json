@@ -1,0 +1,270 @@
+{
+  "schema": "dagcert-contract/v7",
+  "workers": [
+    {"id": "preparer", "concurrency": 2},
+    {"id": "validator", "concurrency": 1},
+    {"id": "hasher", "concurrency": 1},
+    {"id": "publisher", "concurrency": 1}
+  ],
+  "resources": [
+    {"id": "free", "capacity": 5, "initial": 3},
+    {"id": "preparing", "capacity": 5, "initial": 0},
+    {"id": "ready", "capacity": 5, "initial": 2},
+    {"id": "running", "capacity": 5, "initial": 0}
+  ],
+  "tasks": [
+    {
+      "id": "prepare",
+      "role": "operation",
+      "worker": "preparer",
+      "implementation": {
+        "language": "python",
+        "path": "pipeline.py",
+        "symbol": "prepare"
+      },
+      "outcomes": [
+        {
+          "type": "PreparedJob",
+          "resources": {
+            "preparing": {"consume": 1},
+            "ready": {"produce": 1}
+          },
+          "metadata": {}
+        }
+      ],
+      "error_budget": null,
+      "external_contract": null,
+      "start_resources": {
+        "free": {"consume": 1},
+        "preparing": {"produce": 1}
+      },
+      "depends_on": [],
+      "timings": {
+        "duration": {
+          "metric": "duration",
+          "upper_ms": 10,
+          "minimum_samples": 5,
+          "policy": "max",
+          "safety_factor": 1
+        },
+        "service-envelope": {
+          "metric": "duration",
+          "upper_ms": 10,
+          "minimum_samples": 0,
+          "evidence": "assumed",
+          "safety_factor": 1
+        }
+      }
+    },
+    {
+      "id": "validate",
+      "role": "operation",
+      "worker": "validator",
+      "implementation": {
+        "language": "python",
+        "path": "pipeline.py",
+        "symbol": "validate"
+      },
+      "outcomes": [
+        {"type": "ValidatedJob", "resources": {}, "metadata": {}}
+      ],
+      "error_budget": {
+        "basis": "engineering_assumption",
+        "evidence_case": "duration",
+        "good_outcomes": ["ValidatedJob"],
+        "bad_event_probability_upper": 0.01,
+        "minimum_observations": 5
+      },
+      "external_contract": null,
+      "start_resources": {},
+      "depends_on": [
+        {"task": "prepare", "outcome_type": "PreparedJob"}
+      ],
+      "timings": {
+        "duration": {
+          "metric": "duration",
+          "upper_ms": 10,
+          "minimum_samples": 5,
+          "policy": "max",
+          "safety_factor": 1
+        }
+      }
+    },
+    {
+      "id": "checksum",
+      "role": "operation",
+      "worker": "hasher",
+      "implementation": {
+        "language": "python",
+        "path": "pipeline.py",
+        "symbol": "checksum"
+      },
+      "outcomes": [
+        {"type": "ChecksummedJob", "resources": {}, "metadata": {}}
+      ],
+      "error_budget": {
+        "basis": "engineering_assumption",
+        "evidence_case": "duration",
+        "good_outcomes": ["ChecksummedJob"],
+        "bad_event_probability_upper": 0.02,
+        "minimum_observations": 5
+      },
+      "external_contract": null,
+      "start_resources": {},
+      "depends_on": [
+        {"task": "prepare", "outcome_type": "PreparedJob"}
+      ],
+      "timings": {
+        "duration": {
+          "metric": "duration",
+          "upper_ms": 10,
+          "minimum_samples": 5,
+          "policy": "max",
+          "safety_factor": 1
+        }
+      }
+    },
+    {
+      "id": "publish",
+      "role": "operation",
+      "worker": "publisher",
+      "implementation": {
+        "language": "python",
+        "path": "pipeline.py",
+        "symbol": "publish"
+      },
+      "outcomes": [
+        {
+          "type": "PublishedJob",
+          "resources": {
+            "running": {"consume": 1},
+            "free": {"produce": 1}
+          },
+          "metadata": {}
+        }
+      ],
+      "error_budget": null,
+      "external_contract": null,
+      "start_resources": {
+        "ready": {"consume": 1},
+        "running": {"produce": 1}
+      },
+      "depends_on": [
+        {
+          "task": "validate",
+          "outcome_type": "ValidatedJob",
+          "input_field": "validation"
+        },
+        {
+          "task": "checksum",
+          "outcome_type": "ChecksummedJob",
+          "input_field": "checksum"
+        }
+      ],
+      "timings": {
+        "duration": {
+          "metric": "duration",
+          "upper_ms": 10,
+          "minimum_samples": 5,
+          "policy": "max",
+          "safety_factor": 1
+        },
+        "service-envelope": {
+          "metric": "duration",
+          "lower_ms": 8,
+          "upper_ms": 20,
+          "minimum_samples": 0,
+          "evidence": "assumed",
+          "safety_factor": 1
+        },
+        "dispatch": {
+          "metric": "wait",
+          "upper_ms": 5,
+          "minimum_samples": 0,
+          "evidence": "assumed",
+          "safety_factor": 1
+        }
+      }
+    }
+  ],
+  "compositions": [
+    {
+      "id": "three-jobs",
+      "expression": {
+        "kind": "finite_repeat",
+        "count": 3,
+        "body": {
+          "kind": "sequence",
+          "children": [
+            {
+              "kind": "leaf",
+              "task": "prepare",
+              "timing": "duration",
+              "outcome_type": "PreparedJob"
+            },
+            {
+              "kind": "parallel_all",
+              "children": [
+                {
+                  "kind": "leaf",
+                  "task": "validate",
+                  "timing": "duration",
+                  "outcome_type": "ValidatedJob"
+                },
+                {
+                  "kind": "leaf",
+                  "task": "checksum",
+                  "timing": "duration",
+                  "outcome_type": "ChecksummedJob"
+                }
+              ]
+            },
+            {
+              "kind": "leaf",
+              "task": "publish",
+              "timing": "duration",
+              "outcome_type": "PublishedJob"
+            }
+          ]
+        }
+      },
+      "metadata": {}
+    }
+  ],
+  "state_claims": [
+    {
+      "id": "slots-conserved",
+      "kind": "linear_invariant",
+      "expression": {
+        "free": 1,
+        "preparing": 1,
+        "ready": 1,
+        "running": 1
+      },
+      "operator": "eq",
+      "bound": 5,
+      "metadata": {}
+    },
+    {
+      "id": "five-publications-have-supply",
+      "kind": "bounded_non_starvation",
+      "inventory_resources": ["ready", "running"],
+      "producer": {"task": "prepare", "timing": "service-envelope"},
+      "consumer": {"task": "publish", "timing": "service-envelope"},
+      "horizon": 5,
+      "metadata": {}
+    },
+    {
+      "id": "ready-dispatch",
+      "kind": "bounded_response",
+      "trigger_resource": "ready",
+      "response_task": "publish",
+      "response_timing": "dispatch",
+      "upper_ms": 5,
+      "metadata": {}
+    }
+  ],
+  "metadata": {
+    "purpose": "Generic Dagcert v7 structured workflow example"
+  }
+}

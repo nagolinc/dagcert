@@ -36,6 +36,9 @@ class TimingSample:
     resource_acquired: Mapping[str, float] = field(default_factory=dict)
     resource_consumed: Mapping[str, float] = field(default_factory=dict)
     resource_produced: Mapping[str, float] = field(default_factory=dict)
+    start_resource_acquired: Mapping[str, float] = field(default_factory=dict)
+    start_resource_consumed: Mapping[str, float] = field(default_factory=dict)
+    start_resource_produced: Mapping[str, float] = field(default_factory=dict)
     resource_levels: Mapping[str, float] = field(default_factory=dict)
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
@@ -71,6 +74,7 @@ class TimingSample:
                 raise EvidenceError(f"{field_name} must be a nonempty string or null")
         for field_name in (
             "resource_acquired", "resource_consumed", "resource_produced", "resource_levels",
+            "start_resource_acquired", "start_resource_consumed", "start_resource_produced",
         ):
             _validate_number_mapping(getattr(self, field_name), field_name)
         if not isinstance(self.metadata, Mapping):
@@ -170,6 +174,15 @@ def load_evidence(path: str | Path) -> tuple[TimingSample, ...]:
                 resource_acquired=_number_mapping(row.get("resource_acquired", {})),
                 resource_consumed=_number_mapping(row.get("resource_consumed", {})),
                 resource_produced=_number_mapping(row.get("resource_produced", {})),
+                start_resource_acquired=_number_mapping(
+                    row.get("start_resource_acquired", {})
+                ),
+                start_resource_consumed=_number_mapping(
+                    row.get("start_resource_consumed", {})
+                ),
+                start_resource_produced=_number_mapping(
+                    row.get("start_resource_produced", {})
+                ),
                 resource_levels=_number_mapping(row.get("resource_levels", {})),
                 metadata=dict(row.get("metadata", {})),
             )

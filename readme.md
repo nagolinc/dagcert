@@ -84,15 +84,24 @@ Those primitives are enough to express conditional statements such as:
 - model X is never more than G generations out of date; and
 - a handler or visible action completes within its declared deadline.
 
-New v10 issuance separates real `operation`, `external`, and `instrumentation` tasks and supports finite,
-source-typed multi-operation paths. Every v6 composition step names the source outcome traversed,
-and consecutive steps must match a real typed dependency edge. A composition has no stopwatch of its own: Dagcert computes its
-bound from exact leaf duration cases. Claims are `observed` (retained executions only), `derived`
+V11 issuance separates real `operation`, `external`, and `instrumentation` tasks and supports a
+small structured workflow algebra: `leaf`, `sequence`, `parallel_all`, and `finite_repeat`.
+Every v7 leaf names the source outcome traversed and every sequence boundary must match real typed
+dependency edges. A fork/join binds each branch output to a field of the downstream source input
+record. A composition has no stopwatch of its own: Dagcert computes its bound from exact leaf
+duration cases, using `max` for a parallel region only when worker and acquired-resource capacity
+permit the declared overlap. Claims are `observed` (retained executions only), `derived`
 (a fixed-algebra deterministic formula), or `chance` (a finite-composition union bound over explicit
 engineering error budgets). Derived and chance claims cannot delegate proof to an arbitrary checker
 boolean.
 
-For Python, each v6 task points to the production source file and symbol. Dagcert reads the real
+V7 tasks also distinguish resource effects at task start from effects on each typed completion
+outcome. Kernel-owned state claims cover affine lifecycle invariants, finite-horizon
+producer/consumer supply, and a separate bounded dispatch wait. These deliberately restricted
+proofs return concrete failing transitions or finite-horizon traces; they are not a general temporal
+logic language.
+
+For Python, each v7 task points to the production source file and symbol. Dagcert reads the real
 one-input annotation and closed return union, rejects `Any` throughout those boundary variants,
 runs strict mypy over the real implementation body itself, and requires an explicitly selected,
 digest-pinned proof backend to prove the complete bound file has no undeclared exceptional exit.
@@ -122,7 +131,7 @@ input record from source rather than prose. Maledictus hash-binds every consumer
 and external stub, composes the provider's normal and exceptional outcomes, and rejects missing,
 duplicate, unknown, or tampered edges.
 
-The v10 certificate seals strict-mypy output, the pinned verifier image digest and proof scope, and
+The v11 certificate seals strict-mypy output, the pinned verifier image digest and proof scope, and
 a manifest hash of the source-verification kernel and typing stubs. For Maledictus, response v7
 also requires and retains the exact strict-mypy package, runtime executable, complete runtime
 bundle, configuration, and contract-support hashes. Verification reruns the digest-pinned backend
@@ -152,13 +161,14 @@ external-contract callable providers. Unsupported provider forms fail closed. On
 the packaged executable beside
 its pinned `libz3.dll`, not a bare Cargo output missing its runtime.
 
-The current Dagcert contract provider remains deliberately Python-specific. Python `operation`
-tasks require strict mypy plus the selected proof backend. Although Maledictus has narrow JavaScript
-and TypeScript frontend fragments, Dagcert does not yet bind JS/TS production symbols into v6
-operation tasks, so
-Dagcert refuses to bind them as operations; they may appear only behind explicitly observational
-instrumentation and cannot support derived DAG claims. `tsc --strict` alone is not misrepresented
-as an exception-freedom proof.
+Python `operation` tasks require strict mypy plus the selected proof backend. V7 also admits a
+deliberately narrow JavaScript/TypeScript leaf only through the explicit Maledictus backend. The
+contract's `verified_interface` is an assertion, not an authority: Maledictus asks pinned
+TypeScript 5.9.3 for the real source symbol's parameter and return types, proves the accepted body
+has no undeclared exceptional exit, and returns the compiler-derived interface for exact comparison.
+The initial surface is synchronous, one primitive parameter, and one primitive return. Unsupported
+syntax or any mismatch refuses issuance. Browser and platform behavior remain explicit external
+assumptions; `tsc --strict` alone is never misrepresented as an exception-freedom proof.
 
 Dagcert separately reports may-reachability and must-reachability. A success-only downstream branch
 is structurally reachable but outcome-conditional; it is not mislabeled blocked and cannot be used
@@ -328,8 +338,23 @@ its actual query, selectors, workload, assumptions, and product behavior.
 
 ## Complete examples and their certification status
 
-The repository ships two current hardened example certificates. Historical audit artifacts remain
+The repository ships current hardened example certificates. Historical audit artifacts remain
 review material but are not proof for changed requirements.
+
+### Structured worker-pipeline certificate
+
+[`examples/certified_structured_pipeline`](examples/certified_structured_pipeline/README.md) is a
+generic job pipeline demonstrating source-typed fork/join, task-start reservations, completion
+effects, slot conservation, bounded finite supply, bounded dispatch, finite repetition, and
+union-bound confidence. Its checked-in v11 certificate uses no aggregate observer task. Run
+`python -m dagcert help composed-worker-pipeline` for the installed walkthrough.
+
+### TypeScript verified-leaf certificate
+
+[`examples/certified_typescript_leaf`](examples/certified_typescript_leaf/README.md) composes two
+real TypeScript functions whose compiler-derived interfaces and accepted bodies are proved by the
+digest-pinned Maledictus backend. The platform timing is explicitly assumed. Run
+`python -m dagcert help external-verified-leaf` for the boundary rules.
 
 ### Certified vote and flow model
 

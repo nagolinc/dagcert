@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from subprocess import TimeoutExpired, run
 from tempfile import TemporaryDirectory
-from typing import Iterable, Literal
+from typing import Iterable, Literal, Mapping
 
 
 class MaledictusVerificationError(RuntimeError):
@@ -18,13 +18,15 @@ class MaledictusVerificationError(RuntimeError):
 _REQUEST_SCHEMA = "maledictus-verification-request/v4"
 _RESPONSE_SCHEMA = "maledictus-verification-result/v7"
 _DAGCERT_FRAGMENT = "dagcert-closed-typed-operations/v3"
+_TYPESCRIPT_FRAGMENT = "strict-typescript-closed-total-functions/v11"
+_JAVASCRIPT_FRAGMENT = "strict-javascript-jsdoc-closed-total-functions/v11"
 _RESPONSE_FIELDS = {
     "schema", "verifier", "version", "status", "proof_obligation",
     "source_fingerprint", "files", "source_imports", "external_contracts",
     "cross_language_bindings", "python_callable_bindings", "obligations",
-    "verifier_identity", "python_typechecker", "diagnostics",
+    "verifier_identity", "diagnostics",
 }
-_OPTIONAL_RESPONSE_FIELDS = {"solver", "typescript_toolchain"}
+_OPTIONAL_RESPONSE_FIELDS = {"solver", "typescript_toolchain", "python_typechecker"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +53,15 @@ class MaledictusCallableBinding:
     provider: MaledictusSourceCallableProvider | MaledictusExternalCallableProvider
 
 
+@dataclass(frozen=True, slots=True)
+class MaledictusVerifiedInterface:
+    path: str
+    language: Literal["javascript", "typescript"]
+    symbol: str
+    parameters: tuple[tuple[str, str], ...]
+    return_type: str
+
+
 def verify_with_maledictus(
     source_root: str | Path,
     files: Iterable[str],
@@ -61,6 +72,8 @@ def verify_with_maledictus(
     expected_executable_sha256: str,
     timeout_seconds: float = 120.0,
     callable_bindings: Iterable[MaledictusCallableBinding] = (),
+    languages_by_file: Mapping[str, str] | None = None,
+    verified_interfaces: Iterable[MaledictusVerifiedInterface] = (),
 ) -> dict[str, object]:
     """Run one exact, digest-pinned Maledictus request and validate its complete response."""
 
@@ -85,6 +98,11 @@ def verify_with_maledictus(
         )
 
     bindings = tuple(callable_bindings)
+    interface_assertions = tuple(verified_interfaces)
+    requested_languages = {
+        Path(path).as_posix(): language
+        for path, language in (languages_by_file or {}).items()
+    }
     binding_ids = [binding.id for binding in bindings]
     if any(not identifier for identifier in binding_ids) or len(binding_ids) != len(
         set(binding_ids)
@@ -152,9 +170,14 @@ def verify_with_maledictus(
             raise MaledictusVerificationError(
                 f"Maledictus source file has no bound symbols: {relative}"
             )
+        language = requested_languages.get(relative, "python")
+        if language not in {"python", "javascript", "typescript"}:
+            raise MaledictusVerificationError(
+                f"unsupported Maledictus source language {language!r} for {relative}"
+            )
         request_files.append({
             "path": relative,
-            "language": "python",
+            "language": language,
             "symbols": list(symbols),
         })
         expected_hashes[relative] = sha256(path.read_bytes()).hexdigest()
@@ -289,15 +312,32 @@ def verify_with_maledictus(
             raise MaledictusVerificationError(
                 f"Maledictus verifier identity field {key} is not a SHA-256 digest"
             )
-    _validate_python_typechecker_identity(response.get("python_typechecker"))
+    has_python = any(language == "python" for language in requested_languages.values()) or any(
+        path not in requested_languages for path in normalized_files
+    )
+    if has_python:
+        _validate_python_typechecker_identity(response.get("python_typechecker"))
+    elif response.get("python_typechecker") is not None:
+        raise MaledictusVerificationError(
+            "Maledictus returned a Python typechecker identity for a non-Python request"
+        )
+    has_javascript_family = any(
+        language in {"javascript", "typescript"}
+        for language in requested_languages.values()
+    )
+    if has_javascript_family:
+        _validate_typescript_toolchain_identity(response.get("typescript_toolchain"))
     file_results = response.get("files")
     if not isinstance(file_results, list) or len(file_results) != len(normalized_files):
         raise MaledictusVerificationError("Maledictus returned the wrong number of file results")
     returned_paths: set[str] = set()
     for result in file_results:
-        if not isinstance(result, dict) or set(result) != {
+        if not isinstance(result, dict) or set(result) not in ({
             "path", "sha256", "symbols", "scope", "result", "fragment",
-        }:
+        }, {
+            "path", "sha256", "symbols", "scope", "result", "fragment",
+            "verified_interfaces",
+        }):
             raise MaledictusVerificationError("Maledictus returned a malformed file result")
         returned_path = result.get("path")
         if not isinstance(returned_path, str) or returned_path not in expected_hashes:
@@ -326,16 +366,29 @@ def verify_with_maledictus(
             )
         else:
             expected_scope = "all-source-symbol-bodies"
+        language = requested_languages.get(returned_path, "python")
+        expected_fragment = {
+            "python": _DAGCERT_FRAGMENT,
+            "typescript": _TYPESCRIPT_FRAGMENT,
+            "javascript": _JAVASCRIPT_FRAGMENT,
+        }[language]
         if (
             result.get("sha256") != expected_hashes[returned_path]
             or result.get("symbols") != list(requested_symbols[returned_path])
             or result.get("scope") != expected_scope
             or result.get("result") != "proved"
-            or result.get("fragment") != _DAGCERT_FRAGMENT
+            or result.get("fragment") != expected_fragment
         ):
             raise MaledictusVerificationError(
-                f"Maledictus file proof does not exactly bind {returned_path!r} to {_DAGCERT_FRAGMENT}"
+                f"Maledictus file proof does not exactly bind {returned_path!r} to "
+                f"{expected_fragment}"
             )
+        _validate_verified_interfaces(
+            returned_path,
+            language,
+            result.get("verified_interfaces", []),
+            interface_assertions,
+        )
     if returned_paths != set(normalized_files):
         raise MaledictusVerificationError("Maledictus omitted a bound operation file")
     if response.get("source_imports") != [] or response.get("cross_language_bindings") != []:
@@ -352,6 +405,39 @@ def verify_with_maledictus(
         root, bindings, expected_hashes, response.get("python_callable_bindings")
     )
     return response
+
+
+def _validate_verified_interfaces(
+    path: str,
+    language: str,
+    value: object,
+    assertions: tuple[MaledictusVerifiedInterface, ...],
+) -> None:
+    expected = [item for item in assertions if Path(item.path).as_posix() == path]
+    if language == "python":
+        if value != [] or expected:
+            raise MaledictusVerificationError(
+                f"Python file {path!r} returned an unexpected verified leaf interface"
+            )
+        return
+    if not isinstance(value, list) or len(value) != len(expected):
+        raise MaledictusVerificationError(
+            f"Maledictus returned the wrong number of verified interfaces for {path!r}"
+        )
+    expected_rows = [{
+        "symbol": item.symbol,
+        "execution": "synchronous",
+        "parameters": [
+            {"name": name, "type_name": type_name}
+            for name, type_name in item.parameters
+        ],
+        "return_type": item.return_type,
+    } for item in expected]
+    if value != expected_rows:
+        raise MaledictusVerificationError(
+            f"Maledictus compiler-derived interface does not match the declared interface for "
+            f"{path!r}"
+        )
 
 
 def _validate_external_contract_results(
@@ -566,6 +652,35 @@ def _validate_python_typechecker_identity(identity: object) -> None:
         ):
             raise MaledictusVerificationError(
                 f"Maledictus Python typechecker identity field {key} is not a SHA-256 digest"
+            )
+
+
+def _validate_typescript_toolchain_identity(identity: object) -> None:
+    required_fields = {
+        "compiler", "compiler_version", "compiler_bundle_sha256", "runtime",
+        "runtime_version", "runtime_executable_sha256",
+    }
+    if not isinstance(identity, dict) or set(identity) != required_fields:
+        raise MaledictusVerificationError(
+            "Maledictus TypeScript toolchain identity is missing or malformed"
+        )
+    if (
+        identity.get("compiler") != "typescript"
+        or identity.get("compiler_version") != "5.9.3"
+        or identity.get("runtime") != "node"
+        or not isinstance(identity.get("runtime_version"), str)
+        or not identity["runtime_version"]
+    ):
+        raise MaledictusVerificationError(
+            "Maledictus did not use the required pinned TypeScript toolchain"
+        )
+    for key in ("compiler_bundle_sha256", "runtime_executable_sha256"):
+        value = identity.get(key)
+        if not isinstance(value, str) or len(value) != 64 or any(
+            character not in "0123456789abcdef" for character in value
+        ):
+            raise MaledictusVerificationError(
+                f"Maledictus TypeScript toolchain identity field {key} is not a SHA-256 digest"
             )
 
 

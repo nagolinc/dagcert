@@ -1,0 +1,94 @@
+{
+  "schema": "dagcert-english-requirements/v2",
+  "claims": [
+    {
+      "id": "composed-latency",
+      "statement": "For the retained exact-source operation timings, three jobs have a kernel-composed upper bound below 90 ms; each job is prepare, both independent branches, then publish, and no aggregate stopwatch is used.",
+      "primitive_refs": ["composition:three-jobs"],
+      "checker_refs": [],
+      "assumptions": [],
+      "basis": "derived",
+      "formula": {
+        "lte": [
+          {"composition_upper_ms": "composition:three-jobs"},
+          90
+        ]
+      }
+    },
+    {
+      "id": "finite-confidence",
+      "statement": "Under the declared per-invocation engineering error envelopes for validation and checksum, the union-bound probability that all branches succeed for three jobs is at least 0.91; no independence assumption is made.",
+      "primitive_refs": [
+        "composition:three-jobs",
+        "error-budget:validate",
+        "error-budget:checksum"
+      ],
+      "checker_refs": [],
+      "assumptions": [
+        "Each validation invocation has bad-event probability at most 0.01.",
+        "Each checksum invocation has bad-event probability at most 0.02."
+      ],
+      "basis": "chance",
+      "formula": {
+        "gte": [
+          {"composition_success_probability_lower": "composition:three-jobs"},
+          0.91
+        ]
+      }
+    },
+    {
+      "id": "lifecycle-conservation",
+      "statement": "The declared five slots are conserved across every task-start transition and every typed completion outcome.",
+      "primitive_refs": ["state-claim:slots-conserved"],
+      "checker_refs": [],
+      "assumptions": [],
+      "basis": "derived",
+      "formula": {
+        "eq": [
+          {"state_claim_proved": "state-claim:slots-conserved"},
+          1
+        ]
+      }
+    },
+    {
+      "id": "bounded-supply-and-dispatch",
+      "statement": "Conditional on the declared service and dispatch envelopes, ready-or-running inventory remains positive before each of five publication completions and ready work is dispatched within 5 ms.",
+      "primitive_refs": [
+        "state-claim:five-publications-have-supply",
+        "state-claim:ready-dispatch",
+        "timing:prepare/service-envelope",
+        "timing:publish/service-envelope",
+        "timing:publish/dispatch"
+      ],
+      "checker_refs": [],
+      "assumptions": [
+        "timing:prepare/service-envelope is an assumed duration upper bound of 10 ms.",
+        "timing:publish/service-envelope is an assumed duration range of 8 ms through 20 ms.",
+        "timing:publish/dispatch is an assumed wait upper bound of 5 ms.",
+        "Producer workers remain work-conserving during the five-publication finite horizon."
+      ],
+      "basis": "derived",
+      "formula": {
+        "and": [
+          {
+            "eq": [
+              {
+                "state_claim_proved": "state-claim:five-publications-have-supply"
+              },
+              1
+            ]
+          },
+          {
+            "eq": [
+              {"state_claim_proved": "state-claim:ready-dispatch"},
+              1
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "metadata": {
+    "purpose": "Plain-English claims for the generic structured worker-pipeline example"
+  }
+}

@@ -23,7 +23,7 @@ Required review
 2. Trace the actual implementation paths relevant to this claim. Compare them
    with the declared workers, tasks, resources, types, dependencies, and
    timings.
-   For every operation or external task, start at its v6 implementation binding and verify that
+   For every operation or external task, start at its v7 implementation binding and verify that
    the named source symbol is the boundary the production worker actually
    invokes. Reject a typed adapter, wrapper, or certification-only function
    that the real execution path bypasses.
@@ -97,7 +97,7 @@ internal verifier error, skipped function, declared `Exsures` exit on the task o
 
 Reject an operation-level Nagini `Requires`, any executable-module `Assume`, or any executable
 application implementation marked `ContractOnly`. A `ContractOnly` declaration is permitted only
-in the separate stub named by a v6 `external_contract`. Confirm that the real adapter is executable,
+in the separate stub named by a v7 `external_contract`. Confirm that the real adapter is executable,
 directly calls the sealed external provider symbol, uses the trusted `external_boundary` decorator,
 and has source types exactly matching the proof-only overlay. Reject a stub that replaces app-owned
 code, shares a module with a proved operation, changes the input/success dataclass shape, or is not
@@ -116,9 +116,24 @@ evidence stream retains every event; and that the task's engineering budget coun
 outcomes as bad. Reject a claimed p=1 contract if any retained violation exists, if production can
 bypass the decorator or evidence monitor, or if a broad catch converts a violation into success.
 
-This release has no approved JavaScript or TypeScript operation verifier. Reject any derived claim
-that treats `tsc --strict`, runtime browser evidence, or a Python wrapper as proof of exception
-freedom or totality for JavaScript/TypeScript production logic.
+For a JavaScript or TypeScript operation, require the explicit digest-pinned Maledictus backend,
+the appropriate advertised closed-total source fragment, the pinned TypeScript toolchain identity,
+and a compiler-derived interface exactly matching the contract assertion. Reject `tsc --strict`,
+runtime browser evidence, or a Python wrapper offered by itself as proof of exception freedom or
+totality. Maledictus proof of application source does not prove the browser, DOM, network, or host
+platform; those remain explicit assumptions or observed boundaries.
+
+For a structured composition, reconstruct the nesting. Confirm `sequence` boundaries are actual
+typed dataflow edges, `parallel_all` branches are independent and really have the worker/resource
+capacity required for overlap, every branch result reaches the source-typed join record, and
+`finite_repeat` has the claimed finite count. Reject a parallel maximum when hidden cross-branch
+dependencies or shared capacity force serialization.
+
+For lifecycle proofs, compare `start_resources` and every typed completion outcome with the real
+reservation and release code. Confirm conservation claims cover every start/outcome transition,
+finite non-starvation claims expose their horizon and work-conserving/service premises, and dispatch
+is proved separately from supply. Reject a state-claim result when omitted transitions, favorable
+event ordering, or a hidden scheduler assumption is required for it to pass.
 
 Confirm that the finite source return union contains every normal success and expected failure.
 An unexpected Python exception is not an outcome and must make the proof fail. Reject a certificate

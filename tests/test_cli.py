@@ -5,7 +5,32 @@ from dagcert import SourceProofBackend
 from dagcert.cli import main
 
 
-def test_cli_lint_analyze_issue_verify(project, capsys):
+def _proved_source_verification(*_args, **_kwargs):
+    return {
+        "typechecker": {
+            "checker": "mypy",
+            "version": "test",
+            "mode": "strict",
+            "files": ["app.py"],
+        },
+        "exception_verifier": {
+            "checker": "nagini",
+            "version": "test",
+            "result": "proved",
+            "scope": "test-double",
+        },
+        "external_contracts": [],
+        "signatures": [],
+    }
+
+
+def test_cli_lint_analyze_issue_verify(project, capsys, monkeypatch):
+    monkeypatch.setattr(
+        "dagcert.cli.check_python_sources", _proved_source_verification,
+    )
+    monkeypatch.setattr(
+        "dagcert.certificate.check_python_sources", _proved_source_verification,
+    )
     root = Path(project["root"])
     certificate = root / "artifacts" / "certificate.json"
     assert main(["lint", str(project["contract"]), "--requirements", str(project["requirements"])]) == 0
@@ -18,7 +43,10 @@ def test_cli_lint_analyze_issue_verify(project, capsys):
     assert main(["verify", str(certificate), "--contract", str(project["contract"]), "--evidence", str(project["evidence"]), "--requirements", str(project["requirements"]), "--source-root", str(root)]) == 0
 
 
-def test_cli_lint_rejects_incomplete_translation(project, capsys):
+def test_cli_lint_rejects_incomplete_translation(project, capsys, monkeypatch):
+    monkeypatch.setattr(
+        "dagcert.cli.check_python_sources", _proved_source_verification,
+    )
     requirements = Path(project["requirements"])
     raw = json.loads(requirements.read_text(encoding="utf-8"))
     raw["claims"][0]["primitive_refs"] = ["task:work"]
@@ -118,3 +146,26 @@ def test_installed_help_lists_and_reads_database_ui_guide(capsys):
     assert "examples.certified_database_ui" in guide
     assert "insertion" in guide and "pagination" in guide
     assert "--check-result" in guide
+
+
+def test_installed_help_exposes_generic_structured_workflow_examples(capsys):
+    assert main(["help"]) == 0
+    listing = capsys.readouterr().out
+    for topic in (
+        "fork-join",
+        "reservation-lifecycle",
+        "bounded-buffer",
+        "finite-confidence",
+        "external-verified-leaf",
+        "composed-worker-pipeline",
+    ):
+        assert topic in listing
+
+    assert main(["help", "fork-join"]) == 0
+    assert "parallel_all" in capsys.readouterr().out
+    assert main(["help", "bounded-buffer"]) == 0
+    assert "bounded_non_starvation" in capsys.readouterr().out
+    assert main(["help", "finite-confidence"]) == 0
+    confidence = capsys.readouterr().out
+    assert "union bound" in confidence
+    assert "finite_repeat" in confidence

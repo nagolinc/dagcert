@@ -25,7 +25,7 @@ from .source_types import SourceProofBackend, check_python_sources
 
 
 CONTRACT_TEMPLATE = """{
-  "schema": "dagcert-contract/v6",
+  "schema": "dagcert-contract/v7",
   "workers": [
     {"id": "app", "concurrency": 1}
   ],
@@ -43,6 +43,7 @@ CONTRACT_TEMPLATE = """{
       ],
       "error_budget": null,
       "external_contract": null,
+      "start_resources": {},
       "depends_on": [],
       "timings": {
         "replace_me": {"metric": "duration", "upper_ms": 1000, "minimum_samples": 10, "policy": "max", "safety_factor": 1.30}
@@ -50,6 +51,7 @@ CONTRACT_TEMPLATE = """{
     }
   ],
   "compositions": [],
+  "state_claims": [],
   "metadata": {}
 }
 """
@@ -99,6 +101,30 @@ HELP_TOPICS = {
     "database-ui": (
         "certified SQLite/browser example plus reusable exact-projection workflow",
         "docs/database-ui.md",
+    ),
+    "fork-join": (
+        "minimal parallel_all workflow with a source-typed join record",
+        "docs/example-fork-join.md",
+    ),
+    "reservation-lifecycle": (
+        "task-start reservations and outcome-specific completion effects",
+        "docs/example-reservation-lifecycle.md",
+    ),
+    "bounded-buffer": (
+        "finite-horizon non-starvation and bounded dispatch",
+        "docs/example-bounded-buffer.md",
+    ),
+    "finite-confidence": (
+        "union-bound confidence over parallel branches and finite repetition",
+        "docs/example-finite-confidence.md",
+    ),
+    "external-verified-leaf": (
+        "source-bound alternate-backend leaf and explicit environment assumption",
+        "docs/example-external-verified-leaf.md",
+    ),
+    "composed-worker-pipeline": (
+        "generic capstone combining the structured workflow primitives",
+        "docs/example-composed-worker-pipeline.md",
     ),
 }
 
@@ -208,8 +234,10 @@ def main(argv: list[str] | None = None) -> int:
             )
             contract = load_contract(args.contract, source_root=lint_root)
             requirements = load_requirements(args.requirements)
-            if contract.schema != "dagcert-contract/v6":
-                raise ContractError("new certificate issuance requires dagcert-contract/v6")
+            if contract.schema not in {"dagcert-contract/v6", "dagcert-contract/v7"}:
+                raise ContractError(
+                    "new certificate issuance requires dagcert-contract/v6 or v7"
+                )
             if requirements.schema != "dagcert-english-requirements/v2":
                 raise RequirementsError(
                     "new certificate issuance requires dagcert-english-requirements/v2"
@@ -249,8 +277,14 @@ def main(argv: list[str] | None = None) -> int:
                     f"{exception_result['checker']} not applicable (instrumentation-only contract)"
                 )
             else:
+                typechecker_result = cast(
+                    dict[str, object], source_verification.get("typechecker", {}),
+                )
+                python_prefix = (
+                    "strict mypy and " if typechecker_result.get("files") else ""
+                )
                 print(
-                    "source verification: strict mypy and "
+                    f"source verification: {python_prefix}"
                     f"{exception_result['checker']} {exception_result['version']} passed"
                 )
             return 0

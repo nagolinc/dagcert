@@ -25,6 +25,7 @@ from .python_verifier import PythonVerificationError, verify_exception_freedom
 from .maledictus_verifier import (
     MaledictusCallableBinding, MaledictusExternalCallableProvider,
     MaledictusSourceCallableProvider, MaledictusVerificationError,
+    MaledictusVerifiedInterface,
     verify_with_maledictus,
 )
 
@@ -71,6 +72,7 @@ def type_enforcement_descriptor() -> dict[str, object]:
         "_version.py", "__init__.py", "analysis.py", "certificate.py", "contract.py",
         "evidence.py", "formula.py", "requirements.py", "runtime.py", "runtime.pyi",
         "maledictus_verifier.py", "python_verifier.py", "source_types.py",
+        "state_model.py",
         "nagini_stubs/dagcert/__init__.pyi", "nagini_stubs/dagcert/runtime.pyi",
         "mypy_stubs/dagcert/__init__.pyi", "mypy_stubs/dagcert/runtime.pyi",
         "mypy_stubs/dagcert/surfaces.pyi",
@@ -93,6 +95,11 @@ def type_enforcement_descriptor() -> dict[str, object]:
         "external_contracts": "environment-resolved+p1-contract-only+typeguard-runtime/v3",
         "reachability": "typed-may-must/v1",
         "chance_composition": "engineering-envelope-optional-budget+exact-path+external/v4",
+        "structured_composition": "sequence+parallel-all+finite-repeat/resource-aware/v1",
+        "lifecycle_state_proofs": "two-phase-affine+bounded-non-starvation+response/v1",
+        "verified_javascript_typescript_leaves": (
+            "maledictus-compiler-interface+source+toolchain-bound/v1"
+        ),
         "kernel_manifest": manifest,
         "kernel_sha256": sha256(manifest_bytes).hexdigest(),
     }
@@ -106,6 +113,7 @@ class SourceSignature:
     input_type: str
     outcome_types: tuple[str, ...]
     line: int
+    input_fields: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,12 +158,12 @@ def check_python_sources(
         for binding in concrete_callable_bindings
         if isinstance(binding.provider, MaledictusSourceCallableProvider)
     }
-    files = tuple(sorted(
+    python_files = tuple(sorted(
         {item.path for item in bound_signatures if item.language == "python"}
         | source_callable_files
     ))
-    if not files:
-        raise SourceTypeError("source-typed contract contains no Python implementation files")
+    if not bound_signatures:
+        raise SourceTypeError("source-typed contract contains no implementation files")
     try:
         from mypy import api as mypy_api
         from mypy.version import __version__ as mypy_version
@@ -163,7 +171,7 @@ def check_python_sources(
         raise SourceTypeError("mypy is required to certify Python operation types") from exc
     root = Path(source_root).resolve()
     arguments = [
-        *(str(root / item) for item in files),
+        *(str(root / item) for item in python_files),
         "--strict",
         "--disallow-any-explicit",
         "--disallow-any-unimported",
@@ -178,30 +186,39 @@ def check_python_sources(
     # An installed Dagcert's bundled stubs can live below the selected interpreter's
     # site-package directory.  Mypy deliberately rejects any such MYPYPATH entry, so
     # give it an isolated copy instead of exposing a path inside the application venv.
-    with tempfile.TemporaryDirectory(prefix="dagcert-mypy-stubs-") as temporary_root:
-        mypy_stub_root = Path(temporary_root) / "mypy_stubs"
-        shutil.copytree(bundled_stub_root, mypy_stub_root)
-        os.environ["MYPYPATH"] = os.pathsep.join(
-            item for item in (str(mypy_stub_root), str(root), previous_path) if item
-        )
-        try:
-            stdout, stderr, status = mypy_api.run(arguments)
-        finally:
-            if previous_path is None:
-                os.environ.pop("MYPYPATH", None)
-            else:
-                os.environ["MYPYPATH"] = previous_path
-    if status != 0:
-        detail = "\n".join(item for item in (stdout.strip(), stderr.strip()) if item)
-        raise SourceTypeError("bound application source failed strict mypy checking:\n" + detail)
+    if python_files:
+        with tempfile.TemporaryDirectory(prefix="dagcert-mypy-stubs-") as temporary_root:
+            mypy_stub_root = Path(temporary_root) / "mypy_stubs"
+            shutil.copytree(bundled_stub_root, mypy_stub_root)
+            os.environ["MYPYPATH"] = os.pathsep.join(
+                item for item in (str(mypy_stub_root), str(root), previous_path) if item
+            )
+            try:
+                stdout, stderr, status = mypy_api.run(arguments)
+            finally:
+                if previous_path is None:
+                    os.environ.pop("MYPYPATH", None)
+                else:
+                    os.environ["MYPYPATH"] = previous_path
+        if status != 0:
+            detail = "\n".join(item for item in (stdout.strip(), stderr.strip()) if item)
+            raise SourceTypeError(
+                "bound application source failed strict mypy checking:\n" + detail
+            )
     signatures_result = [
-        {
+        ({
             "path": item.path,
             "symbol": item.symbol,
             "line": item.line,
             "input_type": item.input_type,
             "outcome_types": list(item.outcome_types),
-        }
+        } if item.language == "python" else {
+            "language": item.language,
+            "path": item.path,
+            "symbol": item.symbol,
+            "input_fields": [list(field) for field in item.input_fields],
+            "outcome_types": list(item.outcome_types),
+        })
         for item in sorted(bound_signatures, key=lambda value: (value.path, value.symbol))
     ]
     if not prove_exceptions:
@@ -209,7 +226,7 @@ def check_python_sources(
             "checker": "mypy",
             "version": mypy_version,
             "mode": "strict",
-            "files": list(files),
+            "files": list(python_files),
             "signatures": signatures_result,
         }
     if source_fingerprint is None:
@@ -251,6 +268,14 @@ def check_python_sources(
             for path in proof_files
         }
         if selected_backend.name == "nagini":
+            non_python = sorted(
+                item.path for item in proof_bound_signatures if item.language != "python"
+            )
+            if non_python:
+                raise SourceTypeError(
+                    "JavaScript/TypeScript operation tasks require the explicit Maledictus "
+                    f"backend; Nagini cannot prove {non_python}"
+                )
             if concrete_callable_bindings:
                 raise SourceTypeError(
                     "callable-valued operation inputs require the explicit Maledictus backend; "
@@ -278,6 +303,20 @@ def check_python_sources(
                     executable=selected_backend.executable,
                     expected_executable_sha256=selected_backend.executable_sha256,
                     callable_bindings=concrete_callable_bindings,
+                    languages_by_file={
+                        item.path: item.language for item in proof_bound_signatures
+                    },
+                    verified_interfaces=tuple(
+                        MaledictusVerifiedInterface(
+                            item.path,
+                            item.language,  # type: ignore[arg-type]
+                            item.symbol,
+                            item.input_fields,
+                            item.outcome_types[0],
+                        )
+                        for item in proof_bound_signatures
+                        if item.language in {"javascript", "typescript"}
+                    ),
                 )
                 exception_verification = {
                     **maledictus_response,
@@ -303,7 +342,7 @@ def check_python_sources(
             "version": mypy_version,
             "mode": "strict",
             "dagcert_import_surface": "sealed-type-preserving-stub",
-            "files": list(files),
+            "files": list(python_files),
         },
         "exception_verifier": exception_verification,
         "external_contracts": external_results,
@@ -407,9 +446,12 @@ def read_python_signature(
         )
     if include_legacy_unhandled:
         outcomes = (*outcomes, "dagcert.runtime.UnhandledException")
+    input_fields = _variant_field_schema(
+        root, path, tree, parameter.annotation, f"operation {symbol} input",
+    )
     return SourceSignature(
         "python", Path(relative_path).as_posix(), symbol, input_type,
-        tuple(dict.fromkeys(outcomes)), function.lineno,
+        tuple(dict.fromkeys(outcomes)), function.lineno, input_fields,
     )
 
 

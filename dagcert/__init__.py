@@ -25,9 +25,10 @@ from .checks import (
     write_check_result,
 )
 from .contract import (
-    CallableBinding, Composition, CompositionStep, Contract, ContractError, ExternalCallableProvider,
+    CallableBinding, Composition, CompositionExpression, CompositionStep, Contract,
+    ContractError, ExternalCallableProvider,
     ExternalContract, ExternalProvider, Implementation, Resource, ResourceEffect,
-    SourceCallableProvider,
+    SourceCallableProvider, StateClaim,
     Task, TaskErrorBudget, TaskOutcome, Timing, TypedDependency, Worker, load_contract,
 )
 from .evidence import ExternalEvidenceMonitor, EvidenceError, EvidenceRecorder, TimingSample, load_evidence
@@ -52,11 +53,12 @@ from .requirements import (
 
 __all__ = [
     "AnalysisReport", "CertificateError", "CertificateVerification", "CheckContext",
-    "CheckFinding", "Checker", "CheckResult", "Composition", "CompositionStep",
+    "CheckFinding", "Checker", "CheckResult", "Composition", "CompositionExpression",
+    "CompositionStep",
     "CallableBinding", "Contract", "ContractError", "ExternalCallableProvider",
     "ExternalContract", "ExternalProvider", "Implementation",
     "EnglishClaim", "EnglishRequirements", "ErrorBudgetResult", "EvidenceError", "EvidenceRecorder", "ExternalEvidenceMonitor", "Finding",
-    "RequirementsError", "Resource", "ResourceEffect", "SurfaceBinding", "SurfaceError",
+    "RequirementsError", "Resource", "ResourceEffect", "StateClaim", "SurfaceBinding", "SurfaceError",
     "StructuralProgress", "Task", "TaskErrorBudget", "TaskOutcome", "Timing", "TimingResult", "TimingSample", "TranslationAudit", "TypedDependency",
     "ExternalBoundaryEvent", "ExternalMonitorError", "ExternalRaised", "ExternalSuccess", "ExternalTypeViolation",
     "OperationTypeViolation", "SourceCallableProvider", "SourceProofBackend", "SourceSignature", "SourceTypeError", "UnhandledException", "Worker", "analyze_contract", "audit_translation", "issue_certificate",

@@ -37,7 +37,7 @@ Dagcert's primitives remain workers, tasks, resources, and timings. A hardened c
 declares finite source-outcome paths over those primitives.
 
 - `operation` tasks are real executable leaf boundaries and may have measured timings.
-- In a v6 contract, an operation binds a real source file and symbol. Dagcert extracts its one-input
+- In a v7 contract, an operation binds a real source file and symbol. Dagcert extracts its one-input
   type and closed return union and runs strict mypy itself. It then requires an explicitly selected,
   digest-pinned proof backend to prove the complete bound Python file has no undeclared exceptional
   exit. Nagini/Viper is the default; Maledictus is an alternate only for its advertised narrow
@@ -45,13 +45,18 @@ declares finite source-outcome paths over those primitives.
 - Dagcert verifies the provenance of `operation` and `dataclass`; local lookalike decorators and
   source-tree modules shadowing `dagcert` or `dataclasses` fail. The marker preserves the exact
   callable type; it does not catch exceptions or widen the outcome union.
-- A v10 certificate seals strict-mypy output, the selected proof-engine identity and proof scope, and the
+- A v11 certificate seals strict-mypy output, the selected proof-engine identity and proof scope, and the
   exact type-enforcement core-file manifest—not only a claimed Dagcert version or compiler result.
 - `instrumentation` tasks may record aggregate observations but cannot participate in a derived
   composition.
-- A v6 composition names the source outcome at every step, and adjacent steps must be a real typed
-  dependency edge. Dagcert computes its conservative bound from those leaves; it never accepts a
-  direct aggregate stopwatch as the derivation.
+- A v7 composition is built only from `leaf`, `sequence`, `parallel_all`, and `finite_repeat`.
+  Sequence boundaries are real typed dependency edges. A parallel join binds every branch output
+  to a field of the real downstream input record, and hidden cross-branch dependencies fail.
+  Dagcert computes its conservative bound from those leaves; it never accepts a direct aggregate
+  stopwatch as the derivation.
+- V7 lifecycle effects distinguish task start from typed completion outcomes. Use kernel state
+  claims for affine conservation, finite-horizon supply, and bounded dispatch; do not substitute a
+  custom checker boolean for those proofs.
 
 Reconstruct the execution graph from source before writing the contract. Represent independently
 scheduled stages, actual worker pools, queues, reservations, resource transfers, ordering rules,
@@ -61,7 +66,7 @@ names.
 
 Write the production operation boundary in its strongly typed form before modeling it. For Python,
 use an explicit input class, explicit named outcome classes, an inline closed return union, and
-`@dagcert.runtime.operation`. Every v6 dependency names an upstream outcome type and must feed a downstream
+`@dagcert.runtime.operation`. Every v7 dependency names an upstream outcome type and must feed a downstream
 callable that accepts that exact source type. Model effects for every explicit source outcome.
 Expected failures must be return variants; an unexpected exception invalidates the proof. Keep
 parsing, normalization, lookup, reservation, and other claim-relevant argument preparation inside
@@ -79,7 +84,7 @@ For passed-at-construction callable fields, declare task-local `callable_binding
 must identify the field and a real source path/symbol or an explicit external-contract overlay.
 Never replace this machine-readable provenance with prose or a checker assertion.
 
-For a real third-party or standard-library boundary that Nagini cannot translate, declare a v6
+For a real third-party or standard-library boundary that Nagini cannot translate, declare a v7
 `external` task. Put the executable adapter in its own module, mark it with
 `@dagcert.runtime.external_boundary(TASK_ID)`, and put the Nagini `ContractOnly` specification in a
 different source-owned stub named by `external_contract.stub_path`. The stub is a proof overlay, not
@@ -91,9 +96,12 @@ a p=1 premise; any observed violation then refuses issuance.
 The stub body is intentionally limited to `Ensures(Result() is not None)`; arbitrary postconditions
 could make the proof vacuous and are rejected. Put richer value validation in executable code.
 
-Do not claim a JavaScript or TypeScript task is a proved operation. This release has no approved
-exception/totality verifier for those languages; `tsc --strict` is not a substitute. Represent such
-boundaries only as observational instrumentation, and never use them in a derived composition.
+JavaScript or TypeScript operations require the explicit digest-pinned Maledictus backend and a v7
+`verified_interface`. The declaration is only an assertion: Maledictus must return the exact
+compiler-derived signature and prove the accepted source body has no undeclared exceptional exit.
+The current leaf surface is synchronous with one primitive parameter and one primitive return.
+Browser and host-platform behavior remains an explicit external assumption; `tsc --strict` alone
+is not a proof.
 
 ## Claim boundary
 
@@ -131,7 +139,8 @@ composed latency with a summary task whose measured output is the desired conclu
    exact scope and assumptions before evidence collection.
 3. Trace source paths and build the smallest faithful worker/task/resource DAG. Do not mirror every
    function, but do not omit state or scheduling boundaries material to a claim.
-4. Declare real workers, operation tasks, instrumentation, resources, and finite compositions.
+4. Declare real workers, operation tasks, instrumentation, resources, structured finite
+   compositions, and any required lifecycle state claims.
    Bind each task to the source symbol actually called by its production worker; do not write
    `input_type` or `output_type` labels in the contract.
 5. Put timing premises in `assumed` leaf timings. Model external-library behavior with a declared

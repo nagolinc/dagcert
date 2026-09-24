@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from math import isfinite
 from typing import Any, Mapping
 
 from .analysis import AnalysisReport
-from .contract import Contract
+from .contract import CompositionExpression, Contract, ResourceEffect
+from .state_model import prove_state_claim
 
 
 class FormulaError(ValueError):
@@ -72,7 +74,10 @@ def evaluate_formula(
     composition_refs = {
         reference for reference in references if reference.startswith("composition:")
     }
-    if not composition_refs and not external_probability_refs:
+    state_claim_refs = {
+        reference for reference in references if reference.startswith("state-claim:")
+    }
+    if not composition_refs and not external_probability_refs and not state_claim_refs:
         _validate_dag_surface(references, contract)
     return FormulaEvaluation(
         value, value, tuple(sorted(composition_refs)), tuple(sorted(references))
@@ -93,6 +98,7 @@ def formula_references(formula: Mapping[str, Any]) -> tuple[str, ...]:
                     "composition_success_probability_lower",
                     "external_failure_probability_upper",
                     "external_success_probability_lower",
+                    "state_claim_proved",
                 } and isinstance(operand, str):
                     references.add(operand)
                 elif operator in {"task_guaranteed_produce", "task_guaranteed_consume"}:
@@ -266,7 +272,10 @@ def _validate_dag_surface(references: set[str], contract: Contract) -> None:
         reference for reference in references
         if reference.startswith("worker:") or reference.startswith("resource:")
     }
-    if contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6"}:
+    if contract.schema in {
+        "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
+        "dagcert-contract/v7",
+    }:
         resource_ids = {
             reference.split(":", 1)[1]
             for reference in references if reference.startswith("resource:")
@@ -379,18 +388,16 @@ def _number(value: Any, state: _EvaluationState, label: str) -> float:
         composition = state.contract.composition_by_id.get(reference)
         if composition is None:
             raise FormulaError(f"{label} cites unknown composition {reference!r}")
-        total = 0.0
         timing_by_ref = {
             f"timing:{item.task_id}/{item.case}": item for item in state.analysis.timings
         }
+        if composition.expression is not None:
+            return _expression_upper_ms(
+                composition.expression, state, timing_by_ref, reference,
+            )
+        total = 0.0
         for step in composition.steps:
-            timing_ref = f"timing:{step.task}/{step.timing}"
-            timing_result = timing_by_ref.get(timing_ref)
-            if timing_result is None or not timing_result.passed or timing_result.certified_upper_ms is None:
-                raise FormulaError(
-                    f"composition {reference} lacks a passing certified upper bound for {timing_ref}"
-                )
-            total += timing_result.certified_upper_ms * step.count
+            total += _step_upper_ms(step.task, step.timing, timing_by_ref, reference) * step.count
         return total
     if operator in {
         "composition_failure_probability_upper",
@@ -445,18 +452,33 @@ def _number(value: Any, state: _EvaluationState, label: str) -> float:
             raise FormulaError(f"{label} cites unknown resource {resource_id!r}")
         kind = "produce" if operator.endswith("produce") else "consume"
         return task.guaranteed_effect(resource_id, kind)
+    if operator == "state_claim_proved":
+        reference = _reference(operand, "state-claim", f"{label}.{operator}")
+        claim = state.contract.state_claim_by_id.get(reference)
+        if claim is None:
+            raise FormulaError(f"{label} cites unknown state claim {reference!r}")
+        proof = prove_state_claim(claim, state.contract, state.analysis)
+        if not proof.passed:
+            detail = " -> ".join(proof.trace)
+            raise FormulaError(
+                f"state claim {reference} failed: {proof.summary}"
+                + (f"; counterexample: {detail}" if detail else "")
+            )
+        return 1.0
     raise FormulaError(f"{label} uses unsupported numeric operator {operator!r}")
 
 
 def _composition_failure_probability_upper(
     composition_id: str, state: _EvaluationState,
 ) -> float:
-    if state.contract.schema not in {"dagcert-contract/v5", "dagcert-contract/v6"}:
-        raise FormulaError("error-budget formulas require dagcert-contract/v5 or v6")
+    if state.contract.schema not in {
+        "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7",
+    }:
+        raise FormulaError("error-budget formulas require dagcert-contract/v5, v6, or v7")
     composition = state.contract.composition_by_id.get(composition_id)
     if composition is None:
         raise FormulaError(f"formula cites unknown composition {composition_id!r}")
-    total = 0.0
+    contributions: list[Decimal] = []
     for step in composition.steps:
         task = state.contract.task_by_id[step.task]
         budget = task.error_budget
@@ -498,15 +520,120 @@ def _composition_failure_probability_upper(
             raise FormulaError(
                 f"composition {composition_id} lacks a passing error-budget analysis for {task.id}"
             )
-        total += step.count * budget.bad_event_probability_upper
-    return min(1.0, total)
+        contributions.append(
+            Decimal(step.count) * Decimal(str(budget.bad_event_probability_upper))
+        )
+    return min(1.0, float(sum(contributions, Decimal(0))))
+
+
+def _step_upper_ms(
+    task_id: str,
+    timing: str,
+    timing_by_ref: Mapping[str, Any],
+    composition_id: str,
+) -> float:
+    timing_ref = f"timing:{task_id}/{timing}"
+    result = timing_by_ref.get(timing_ref)
+    if result is None or not result.passed or result.certified_upper_ms is None:
+        raise FormulaError(
+            f"composition {composition_id} lacks a passing certified upper bound for "
+            f"{timing_ref}"
+        )
+    return float(result.certified_upper_ms)
+
+
+def _merge_demands(
+    demands: list[dict[str, float]], *, parallel: bool,
+) -> dict[str, float]:
+    identifiers = {identifier for demand in demands for identifier in demand}
+    return {
+        identifier: (
+            sum(demand.get(identifier, 0.0) for demand in demands)
+            if parallel
+            else max(demand.get(identifier, 0.0) for demand in demands)
+        )
+        for identifier in identifiers
+    }
+
+
+def _worker_demand(
+    expression: CompositionExpression, state: _EvaluationState,
+) -> dict[str, float]:
+    if expression.kind == "leaf":
+        assert expression.step is not None
+        return {state.contract.task_by_id[expression.step.task].worker: 1.0}
+    child_demands = [_worker_demand(child, state) for child in expression.children]
+    return _merge_demands(
+        child_demands, parallel=expression.kind == "parallel_all",
+    )
+
+
+def _acquire_demand(
+    expression: CompositionExpression, state: _EvaluationState,
+) -> dict[str, float]:
+    if expression.kind == "leaf":
+        assert expression.step is not None
+        task = state.contract.task_by_id[expression.step.task]
+        effects = task.start_resources or task.resources
+        return {
+            identifier: effect.acquire
+            for identifier, effect in effects.items()
+            if effect.acquire > 0
+        }
+    child_demands = [_acquire_demand(child, state) for child in expression.children]
+    return _merge_demands(
+        child_demands, parallel=expression.kind == "parallel_all",
+    )
+
+
+def _parallel_can_overlap(
+    expression: CompositionExpression, state: _EvaluationState,
+) -> bool:
+    worker_demand = _worker_demand(expression, state)
+    if any(
+        amount > state.contract.worker_by_id[identifier].concurrency
+        for identifier, amount in worker_demand.items()
+    ):
+        return False
+    acquire_demand = _acquire_demand(expression, state)
+    return not any(
+        amount > state.contract.resource_by_id[identifier].capacity
+        for identifier, amount in acquire_demand.items()
+    )
+
+
+def _expression_upper_ms(
+    expression: CompositionExpression,
+    state: _EvaluationState,
+    timing_by_ref: Mapping[str, Any],
+    composition_id: str,
+) -> float:
+    if expression.kind == "leaf":
+        assert expression.step is not None
+        return _step_upper_ms(
+            expression.step.task,
+            expression.step.timing,
+            timing_by_ref,
+            composition_id,
+        )
+    if expression.kind == "finite_repeat":
+        return expression.count * _expression_upper_ms(
+            expression.children[0], state, timing_by_ref, composition_id,
+        )
+    values = [
+        _expression_upper_ms(child, state, timing_by_ref, composition_id)
+        for child in expression.children
+    ]
+    if expression.kind == "parallel_all" and _parallel_can_overlap(expression, state):
+        return max(values)
+    return sum(values)
 
 
 def _external_failure_probability_upper(
     task_id: str, state: _EvaluationState,
 ) -> float:
-    if state.contract.schema != "dagcert-contract/v6":
-        raise FormulaError("external-contract formulas require dagcert-contract/v6")
+    if state.contract.schema not in {"dagcert-contract/v6", "dagcert-contract/v7"}:
+        raise FormulaError("external-contract formulas require dagcert-contract/v6 or v7")
     task = state.contract.task_by_id.get(task_id)
     if task is None or task.external_contract is None:
         raise FormulaError(f"formula cites unknown external contract {task_id!r}")

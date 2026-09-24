@@ -12,7 +12,7 @@ behavioral regression merely to make a claim pass.
 
 ## 2. Contract schema
 
-New issuance uses `dagcert-contract/v5`. The loader retains v2-v4 support for verification of
+New issuance uses `dagcert-contract/v7`. The loader retains v2-v6 support for verification of
 existing certificates. JSON is built in; YAML is available with PyYAML.
 
 ### Worker
@@ -20,7 +20,6 @@ existing certificates. JSON is built in; YAML is available with PyYAML.
 - `id`: unique nonempty string.
 - `concurrency`: positive integer describing actual simultaneous task capacity.
 - `metadata`: optional opaque object.
-- `role`: `operation` for real executable work or `instrumentation` for observers/aggregate probes.
 
 ### Resource
 
@@ -37,21 +36,25 @@ resource kinds.
 ### Task
 
 - `id`: unique nonempty string.
+- `role`: `operation` for real executable work, `external` for a declared library boundary, or
+  `instrumentation` for observers/aggregate probes.
 - `worker`: declared worker ID.
 - `implementation`: language, source-root-relative path, and symbol for the real operation callable.
 - `depends_on`: typed edges naming an upstream task and one exact upstream outcome type; the graph
-  must be acyclic and the outcome must equal the downstream source input type.
+  must be acyclic. A fork/join dependency additionally names the downstream source `input_field`.
 - `outcomes`: the complete source return union, with a ResourceEffect mapping for every variant.
+- `start_resources`: reservation/acquisition effects applied before operation execution.
 - `error_budget`: null or one engineering bad-event budget over a canonical duration case and a
   nonempty subset of source outcomes classified as good.
 - `timings`: nonempty timing-case mapping containing at least one `duration` metric.
 - `metadata`: optional opaque object.
 
-A ResourceEffect contains nonnegative amounts:
+A ResourceEffect contains nonnegative amounts. V7 applies start effects first and the selected
+typed outcome's completion effects second:
 
 - `acquire`: transient capacity held while the task executes;
-- `consume`: units removed when an instance starts;
-- `produce`: units added when an instance completes.
+- `consume`: units removed in the phase containing the effect;
+- `produce`: units added in the phase containing the effect.
 
 At least one effect must be positive. No individual acquisition, consumption, or production may
 exceed resource capacity. A completed producer therefore makes work available to a downstream
@@ -80,11 +83,12 @@ mypy rejects `Any` across source-owned task boundaries. Call-site parsing, norma
 and other claim-relevant transformations must remain inside a verified operation; proving a leaf
 does not certify an exception-producing prefix in ordinary glue code.
 
-The v5 source provider is Python-specific. A Python `operation` requires strict mypy and Nagini.
-No JavaScript or TypeScript operation provider is approved in this release: `tsc --strict` is a
-useful static type check but is not an exception/totality proof. JavaScript/TypeScript behavior may
-be covered only by explicitly observational instrumentation and cannot participate in a derived
-composition.
+Python operations require strict mypy and the selected digest-pinned proof backend. A v7
+JavaScript/TypeScript operation is admitted only through Maledictus's advertised closed-total
+fragment. Its `verified_interface` supports one synchronous primitive parameter and primitive
+return. The contract declaration is an assertion: the backend returns the interface extracted by
+pinned TypeScript 5.9.3, and Dagcert requires exact equality. Browser/DOM/platform behavior remains
+an explicit assumption or observed boundary. `tsc --strict` alone is not an exception proof.
 
 Resource effects remain formal transitions, but any unconditional derived amount is the minimum
 effect across the complete source outcome union. Thus a success outcome producing one queue item
@@ -97,7 +101,7 @@ as outcome-conditional, not structurally blocked and not unconditionally guarant
 
 ### Engineering error budget
 
-A v5 task may declare one `error_budget` with exactly:
+A v7 task may declare one `error_budget` with exactly:
 
 - `basis`: `engineering_assumption`;
 - `evidence_case`: one declared duration timing used as the canonical invocation stream;
@@ -115,12 +119,32 @@ good, its complement is simply empty.
 
 ### Composition
 
-A v5 composition is a finite, typed outcome path over at least two `operation` tasks. Each step
-names an exact task duration case, source outcome, and positive integer execution count; adjacent
-steps must match an actual typed dependency edge. Instrumentation tasks are
-forbidden. Compositions have no directly measured timing: the kernel conservatively sums their
-certified leaf upper bounds. This prevents a monolithic pipeline stopwatch from substituting for a
-derivation over the actual task graph.
+A v7 composition is one expression in a deliberately small algebra:
+
+- `leaf`: one exact task, duration case, and typed outcome;
+- `sequence`: two or more expressions with real typed edges across each boundary;
+- `parallel_all`: two or more independent branches, all required before the following join; and
+- `finite_repeat`: one expression and a positive literal count.
+
+Instrumentation tasks are forbidden. Compositions have no directly measured timing. Sequence and
+repeat add leaf bounds. `parallel_all` uses the maximum branch bound only when declared worker
+concurrency and acquired-resource capacity permit overlap; otherwise it conservatively sums.
+Cross-branch dependencies fail. This prevents a monolithic pipeline stopwatch from substituting
+for a derivation over the actual task graph.
+
+### State claims
+
+V7 state claims remain fixed proof schemas rather than arbitrary temporal logic:
+
+- `linear_invariant` checks one affine resource expression in the initial state and every declared
+  start/completion transition;
+- `bounded_non_starvation` checks a finite producer/consumer horizon from initial inventory,
+  all-outcome production, worker concurrency, producer maximum duration, and consumer minimum
+  duration; tied completion events are ordered conservatively; and
+- `bounded_response` checks a separate bounded `wait` timing for the task that consumes a trigger
+  resource at start.
+
+Failures report the concrete transition or finite-horizon counterexample trace.
 
 ### Timing
 
@@ -194,15 +218,15 @@ It consumes the same mandatory requirements file and cannot substitute different
 The claim algebra is deliberately closed and small. Numeric expressions support finite literals,
 certified timing upper/lower bounds, worker concurrency, resource capacity/initial state,
 minimum all-outcome task production/consumption, composition upper bounds,
-finite-composition failure-probability upper bounds and success-probability lower bounds, addition,
+finite-composition failure-probability upper bounds and success-probability lower bounds,
+kernel-owned state-claim results, addition,
 multiplication, division, and maximum. Boolean expressions
 support comparison, conjunction, disjunction, negation, and implication. Unknown operators fail.
 
-A derived formula must use either `composition_upper_ms` or timing bounds from at least two tasks
+A derived formula must use a composition, a state claim, or timing bounds from at least two tasks
 that form one dependency/resource-connected DAG surface plus worker/resource state. A one-task
-aggregate stopwatch therefore cannot become a derived claim. Temporal reachable-state operators
-are intentionally not accepted until Dagcert has a model checker for them; such claims remain
-unsupported rather than being delegated to a checker boolean.
+aggregate stopwatch therefore cannot become a derived claim. General LTL/CTL and unbounded
+reachable-state operators remain unsupported rather than being delegated to a checker boolean.
 
 ## 4. What the four primitives can express
 
@@ -234,10 +258,11 @@ Timing evidence is JSON Lines. Each record contains:
 - exact `source_fingerprint`;
 - numeric `recorded_at` and the actual runtime `outcome_type`;
 - optional observed worker concurrency;
-- observed acquired, consumed, and produced resource amounts for declared task effects;
+- observed acquired, consumed, and produced resource amounts for declared completion effects;
+- observed start-phase acquired, consumed, and produced resource amounts;
 - optional resource levels and opaque metadata.
 
-`value_ms` may measure duration, interval, wait, or age according to its declared timing. V5 records
+`value_ms` may measure duration, interval, wait, or age according to its declared timing. V7 records
 with the correct task, case, worker, source, and source-declared outcome count. Invalid records still
 produce findings. Assumed timings require no fabricated samples and are copied into the analysis as
 conditions.
