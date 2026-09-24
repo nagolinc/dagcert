@@ -166,8 +166,10 @@ deliberately narrow JavaScript/TypeScript leaf only through the explicit Maledic
 contract's `verified_interface` is an assertion, not an authority: Maledictus asks pinned
 TypeScript 5.9.3 for the real source symbol's parameter and return types, proves the accepted body
 has no undeclared exceptional exit, and returns the compiler-derived interface for exact comparison.
-The initial surface is synchronous, one primitive parameter, and one primitive return. Unsupported
-syntax or any mismatch refuses issuance. Browser and platform behavior remain explicit external
+The initial surface is synchronous with a compiler-derived vector of primitive parameters and one
+primitive return. A DAG edge feeding one parameter names that parameter with `input_field`; no
+wrapper or packed pseudo-input is required. Unsupported syntax or any mismatch refuses issuance.
+Browser and platform behavior remain explicit external
 assumptions; `tsc --strict` alone is never misrepresented as an exception-freedom proof.
 
 Dagcert separately reports may-reachability and must-reachability. A success-only downstream branch

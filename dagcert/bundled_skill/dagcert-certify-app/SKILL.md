@@ -99,7 +99,9 @@ could make the proof vacuous and are rejected. Put richer value validation in ex
 JavaScript or TypeScript operations require the explicit digest-pinned Maledictus backend and a v7
 `verified_interface`. The declaration is only an assertion: Maledictus must return the exact
 compiler-derived signature and prove the accepted source body has no undeclared exceptional exit.
-The current leaf surface is synchronous with one primitive parameter and one primitive return.
+The current leaf surface is synchronous with a compiler-derived vector of primitive parameters and
+one primitive return. Preserve the real source parameters; never add a packing wrapper merely to
+fit the certificate. A DAG edge feeding one parameter must name it with `input_field`.
 Browser and host-platform behavior remains an explicit external assumption; `tsc --strict` alone
 is not a proof.
 

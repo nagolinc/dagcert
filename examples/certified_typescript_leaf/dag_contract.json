@@ -69,6 +69,48 @@
           "safety_factor": 1
         }
       }
+    },
+    {
+      "id": "schedule-decision",
+      "role": "operation",
+      "worker": "application",
+      "implementation": {
+        "language": "typescript",
+        "path": "pipeline.ts",
+        "symbol": "shouldSchedule"
+      },
+      "verified_interface": {
+        "execution": "synchronous",
+        "parameters": [
+          {"name": "prepared", "type": "string"},
+          {"name": "ready", "type": "boolean"},
+          {"name": "queued", "type": "number"},
+          {"name": "capacity", "type": "number"}
+        ],
+        "return_type": "boolean"
+      },
+      "outcomes": [
+        {"type": "boolean", "resources": {}, "metadata": {}}
+      ],
+      "error_budget": null,
+      "external_contract": null,
+      "start_resources": {},
+      "depends_on": [
+        {
+          "task": "prepare",
+          "outcome_type": "string",
+          "input_field": "prepared"
+        }
+      ],
+      "timings": {
+        "duration": {
+          "metric": "duration",
+          "upper_ms": 5,
+          "minimum_samples": 0,
+          "evidence": "assumed",
+          "safety_factor": 1
+        }
+      }
     }
   ],
   "compositions": [
@@ -88,6 +130,27 @@
             "task": "present",
             "timing": "duration",
             "outcome_type": "string"
+          }
+        ]
+      },
+      "metadata": {}
+    },
+    {
+      "id": "prepare-and-decide",
+      "expression": {
+        "kind": "sequence",
+        "children": [
+          {
+            "kind": "leaf",
+            "task": "prepare",
+            "timing": "duration",
+            "outcome_type": "string"
+          },
+          {
+            "kind": "leaf",
+            "task": "schedule-decision",
+            "timing": "duration",
+            "outcome_type": "boolean"
           }
         ]
       },

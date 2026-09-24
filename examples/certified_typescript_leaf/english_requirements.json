@@ -24,6 +24,30 @@
           10
         ]
       }
+    },
+    {
+      "id": "typed-multi-input-typescript-path",
+      "statement": "Given the explicit 5 ms timing premise for each leaf, a real four-parameter compiler-bound TypeScript decision consumes the named prepare output and forms a typed path with a composed upper bound of 10 ms.",
+      "primitive_refs": [
+        "composition:prepare-and-decide",
+        "timing:prepare/duration",
+        "timing:schedule-decision/duration"
+      ],
+      "checker_refs": [],
+      "assumptions": [
+        "timing:prepare/duration is an assumed duration upper bound of 5 ms.",
+        "timing:schedule-decision/duration is an assumed duration upper bound of 5 ms.",
+        "The host platform supplies the ready, queued, and capacity parameters using their compiler-verified primitive types."
+      ],
+      "basis": "derived",
+      "formula": {
+        "lte": [
+          {
+            "composition_upper_ms": "composition:prepare-and-decide"
+          },
+          10
+        ]
+      }
     }
   ],
   "metadata": {

@@ -600,6 +600,7 @@ def test_typescript_leaf_uses_a_backend_checked_interface_and_nagini_refuses_it(
     assert signature is not None
     assert signature.language == "typescript"
     assert signature.input_fields == (("value", "string"),)
+    assert contract.tasks[0].input_type == "string"
     with pytest.raises(SourceTypeError, match="require the explicit Maledictus backend"):
         check_python_sources(
             tmp_path,
@@ -607,3 +608,125 @@ def test_typescript_leaf_uses_a_backend_checked_interface_and_nagini_refuses_it(
             source_fingerprint="f" * 64,
             proof_signatures=(signature,),
         )
+
+
+def test_typescript_leaf_preserves_multi_parameter_interface_and_field_edges(
+    tmp_path: Path,
+):
+    (tmp_path / "decision.ts").write_text(
+        "export function seedText(value: string): string { return value; }\n"
+        "export function seedNumber(value: number): number { return value; }\n"
+        "export function decide(\n"
+        "  left: string, right: string, limit: number, enabled: boolean\n"
+        "): boolean { return enabled && left === right && limit > 0; }\n",
+        encoding="utf-8",
+    )
+
+    def task(
+        identifier: str,
+        symbol: str,
+        parameters: list[dict[str, str]],
+        return_type: str,
+        dependencies: list[dict[str, str]],
+    ) -> dict[str, object]:
+        return {
+            "id": identifier,
+            "role": "operation",
+            "worker": "application",
+            "implementation": {
+                "language": "typescript",
+                "path": "decision.ts",
+                "symbol": symbol,
+            },
+            "verified_interface": {
+                "execution": "synchronous",
+                "parameters": parameters,
+                "return_type": return_type,
+            },
+            "outcomes": [{"type": return_type, "resources": {}, "metadata": {}}],
+            "error_budget": None,
+            "external_contract": None,
+            "start_resources": {},
+            "depends_on": dependencies,
+            "timings": {
+                "duration": {
+                    "metric": "duration",
+                    "upper_ms": 10,
+                    "minimum_samples": 1,
+                    "safety_factor": 1,
+                }
+            },
+        }
+
+    raw = {
+        "schema": "dagcert-contract/v7",
+        "workers": [{"id": "application", "concurrency": 1}],
+        "resources": [],
+        "tasks": [
+            task(
+                "seed-text",
+                "seedText",
+                [{"name": "value", "type": "string"}],
+                "string",
+                [],
+            ),
+            task(
+                "seed-number",
+                "seedNumber",
+                [{"name": "value", "type": "number"}],
+                "number",
+                [],
+            ),
+            task(
+                "decide",
+                "decide",
+                [
+                    {"name": "left", "type": "string"},
+                    {"name": "right", "type": "string"},
+                    {"name": "limit", "type": "number"},
+                    {"name": "enabled", "type": "boolean"},
+                ],
+                "boolean",
+                [
+                    {
+                        "task": "seed-text",
+                        "outcome_type": "string",
+                        "input_field": "left",
+                    },
+                    {
+                        "task": "seed-text",
+                        "outcome_type": "string",
+                        "input_field": "right",
+                    },
+                    {
+                        "task": "seed-number",
+                        "outcome_type": "number",
+                        "input_field": "limit",
+                    },
+                ],
+            ),
+        ],
+        "compositions": [],
+        "state_claims": [],
+        "metadata": {},
+    }
+    path = tmp_path / "multi_input_typescript_contract.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    contract = load_contract(path, source_root=tmp_path)
+    decision = contract.task_by_id["decide"]
+
+    assert decision.source_signature is not None
+    assert decision.source_signature.input_fields == (
+        ("left", "string"),
+        ("right", "string"),
+        ("limit", "number"),
+        ("enabled", "boolean"),
+    )
+    assert decision.depends_on == ("seed-text", "seed-number")
+    assert len(decision.typed_dependencies) == 3
+
+    raw["tasks"][2]["depends_on"][0].pop("input_field")
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(ContractError, match="multi-parameter verified interface"):
+        load_contract(path, source_root=tmp_path)

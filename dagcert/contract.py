@@ -814,44 +814,63 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
                     interface.get("parameters"),
                     f"task {task_id}.verified_interface.parameters",
                 )
-                if len(parameter_rows) != 1:
-                    raise ContractError(
-                        f"task {task_id}.verified_interface requires exactly one parameter"
+                parameters: list[tuple[str, str]] = []
+                for parameter_index, parameter_value in enumerate(parameter_rows):
+                    parameter = _object(
+                        parameter_value,
+                        f"task {task_id}.verified_interface.parameters[{parameter_index}]",
                     )
-                parameter = _object(
-                    parameter_rows[0],
-                    f"task {task_id}.verified_interface.parameters[0]",
-                )
-                if set(parameter) != {"name", "type"}:
-                    raise ContractError(
-                        f"task {task_id}.verified_interface parameter must contain name and type"
+                    if set(parameter) != {"name", "type"}:
+                        raise ContractError(
+                            f"task {task_id}.verified_interface parameter must contain name and "
+                            "type"
+                        )
+                    parameter_name = _identifier(
+                        parameter.get("name"),
+                        f"task {task_id}.verified_interface parameter name",
                     )
-                parameter_name = _identifier(
-                    parameter.get("name"),
-                    f"task {task_id}.verified_interface parameter name",
-                )
-                parameter_type = _identifier(
-                    parameter.get("type"),
-                    f"task {task_id}.verified_interface parameter type",
-                )
+                    parameter_type = _identifier(
+                        parameter.get("type"),
+                        f"task {task_id}.verified_interface parameter type",
+                    )
+                    if any(name == parameter_name for name, _type_name in parameters):
+                        raise ContractError(
+                            f"task {task_id}.verified_interface contains duplicate parameter "
+                            f"{parameter_name!r}"
+                        )
+                    parameters.append((parameter_name, parameter_type))
                 return_type = _identifier(
                     interface.get("return_type"),
                     f"task {task_id}.verified_interface.return_type",
                 )
                 allowed_types = {"boolean", "number", "string"}
-                if parameter_type not in allowed_types or return_type not in allowed_types:
+                unsupported_types = {
+                    type_name for _name, type_name in parameters
+                    if type_name not in allowed_types
+                }
+                if return_type not in allowed_types:
+                    unsupported_types.add(return_type)
+                if unsupported_types:
                     raise ContractError(
                         f"task {task_id}.verified_interface currently supports only primitive "
-                        f"types {sorted(allowed_types)}"
+                        f"types {sorted(allowed_types)}; observed {sorted(unsupported_types)}"
                     )
+                if not parameters:
+                    input_type = "()"
+                elif len(parameters) == 1:
+                    input_type = parameters[0][1]
+                else:
+                    input_type = "{" + ", ".join(
+                        f"{name}: {type_name}" for name, type_name in parameters
+                    ) + "}"
                 source_signature = SourceSignature(
                     implementation.language,
                     Path(implementation.path).as_posix(),
                     implementation.symbol,
-                    parameter_type,
+                    input_type,
                     (return_type,),
                     1,
-                    ((parameter_name, parameter_type),),
+                    tuple(parameters),
                 )
             else:
                 raise ContractError(
@@ -988,14 +1007,30 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
                     ) if dependency.get("input_field") is not None else None,
                 ))
             typed_dependencies = tuple(parsed_dependencies)
-            dependencies = tuple(item.task for item in typed_dependencies)
+            if len(typed_dependencies) != len(set(typed_dependencies)):
+                raise ContractError(f"task {task_id}.depends_on contains duplicate typed edges")
+            outcomes_by_dependency: dict[str, set[str]] = {}
+            for typed_dependency in typed_dependencies:
+                outcomes_by_dependency.setdefault(typed_dependency.task, set()).add(
+                    typed_dependency.outcome_type
+                )
+            ambiguous_dependencies = sorted(
+                dependency_id for dependency_id, outcome_types in outcomes_by_dependency.items()
+                if len(outcome_types) > 1
+            )
+            if ambiguous_dependencies:
+                raise ContractError(
+                    f"task {task_id}.depends_on cites mutually exclusive outcomes from "
+                    f"{ambiguous_dependencies}"
+                )
+            dependencies = tuple(dict.fromkeys(item.task for item in typed_dependencies))
         else:
             dependencies = tuple(
                 _identifier(item, f"task {task_id}.dependency")
                 for item in dependency_values
             )
-        if len(dependencies) != len(set(dependencies)):
-            raise ContractError(f"task {task_id}.depends_on must not contain duplicates")
+            if len(dependencies) != len(set(dependencies)):
+                raise ContractError(f"task {task_id}.depends_on must not contain duplicates")
         start_resources = (
             parse_effects(
                 row.get("start_resources", {}), f"task {task_id}.start_resources",
@@ -1395,11 +1430,25 @@ def _validate(contract: Contract) -> None:
                         f"task {task.id} dependency cites {dependency.task} outcome "
                         f"{dependency.outcome_type!r}, which is not in the upstream source union"
                     )
-                if dependency.input_field is None and dependency.outcome_type != task.input_type:
-                    raise ContractError(
-                        f"task {task.id} source input {task.input_type!r} does not accept typed edge "
-                        f"{dependency.task}/{dependency.outcome_type}"
-                    )
+                if dependency.input_field is None:
+                    assert task.source_signature is not None
+                    if (
+                        task.source_signature.language in {"javascript", "typescript"}
+                        and len(task.source_signature.input_fields) != 1
+                    ):
+                        field_names = [
+                            name for name, _type_name in task.source_signature.input_fields
+                        ]
+                        raise ContractError(
+                            f"task {task.id} has a multi-parameter verified interface; dependency "
+                            f"{dependency.task}/{dependency.outcome_type} must select one of "
+                            f"{field_names} with input_field"
+                        )
+                    if dependency.outcome_type != task.input_type:
+                        raise ContractError(
+                            f"task {task.id} source input {task.input_type!r} does not accept "
+                            f"typed edge {dependency.task}/{dependency.outcome_type}"
+                        )
                 if dependency.input_field is not None:
                     if contract.schema != "dagcert-contract/v7":
                         raise ContractError(

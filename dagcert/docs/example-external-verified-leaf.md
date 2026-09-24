@@ -23,3 +23,9 @@ executed by the application.
 `examples/certified_typescript_leaf` is a complete v11 example. The contract's
 `verified_interface` is checked against the interface extracted by pinned TypeScript 5.9.3; it is
 not trusted as a hand-written type declaration.
+
+The example also includes a multi-parameter `shouldSchedule` leaf. Keep each real source parameter
+in `verified_interface.parameters`; do not introduce a wrapper or encode several inputs into one
+primitive. When an upstream task supplies one parameter, its typed dependency names that parameter
+with `input_field`. Parameters supplied by the host remain explicit compiler-checked inputs and any
+claim relying on host behavior must state that assumption.

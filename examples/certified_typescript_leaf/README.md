@@ -1,6 +1,9 @@
 # Certified TypeScript leaf
 
-This minimal example proves and composes two real TypeScript functions. Dagcert treats the
+This minimal example proves and composes real TypeScript functions. `shouldSchedule` demonstrates
+a four-parameter production leaf without packing its arguments into an invented wrapper. The
+upstream `prepare` outcome feeds its `prepared` parameter through an explicit `input_field`; the
+host supplies the other compiler-checked primitive parameters. Dagcert treats the
 `verified_interface` objects as assertions only; Maledictus asks pinned TypeScript 5.9.3 for each
 real source signature and refuses any mismatch. Maledictus also proves the accepted function bodies
 have no undeclared exceptional exit in its advertised TypeScript fragment.
