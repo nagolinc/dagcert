@@ -65,12 +65,14 @@ obtained by breaking the app.
 
 ## The core library and what it can certify
 
-The formal application model contains only four primitives:
+The formal application model contains five primitives:
 
 - **workers** perform work and have declared concurrency;
 - **tasks** bind real source callables whose compiler-checked input and closed outcome-union types
   form typed dependency edges;
-- **resources** have capacity and state that tasks acquire, consume, or produce; and
+- **resources** have capacity and state that tasks acquire, consume, or produce;
+- **typed channels** connect a source-typed enqueue outcome to a source-typed dequeue payload
+  field across a real asynchronous queue; and
 - **timings** describe duration, arrival interval, waiting, or age, using measurements or explicit
   assumptions.
 
@@ -84,9 +86,10 @@ Those primitives are enough to express conditional statements such as:
 - model X is never more than G generations out of date; and
 - a handler or visible action completes within its declared deadline.
 
-V11 issuance separates real `operation`, `external`, and `instrumentation` tasks and supports a
-small structured workflow algebra: `leaf`, `sequence`, `parallel_all`, and `finite_repeat`.
-Every v7 leaf names the source outcome traversed and every sequence boundary must match real typed
+V12 issuance separates real `operation`, `external`, and `instrumentation` tasks and supports a
+small structured workflow algebra: `leaf`, `sequence`, `parallel_all`, `finite_repeat`, and the
+v8-only `async_handoff`.
+Every v7+ leaf names the source outcome traversed and every sequence boundary must match real typed
 dependency edges. A fork/join binds each branch output to a field of the downstream source input
 record. A composition has no stopwatch of its own: Dagcert computes its bound from exact leaf
 duration cases, using `max` for a parallel region only when worker and acquired-resource capacity
@@ -95,13 +98,20 @@ permit the declared overlap. Claims are `observed` (retained executions only), `
 engineering error budgets). Derived and chance claims cannot delegate proof to an arbitrary checker
 boolean.
 
-V7 tasks also distinguish resource effects at task start from effects on each typed completion
+An `async_handoff` does not pretend that a queue-poll request already contains an unknown producer
+value. Its declared channel requires the producer's terminal outcome to equal the compiler-extracted
+payload type and produce one queue-resource token. The successful dequeue outcome must consume one
+token, and its named source input field must have that same extracted payload type. Dagcert then
+unions the finite path's leaf budgets normally. It still does not infer FIFO ordering, infinite
+liveness, or fairness.
+
+V7+ tasks also distinguish resource effects at task start from effects on each typed completion
 outcome. Kernel-owned state claims cover affine lifecycle invariants, finite-horizon
 producer/consumer supply, and a separate bounded dispatch wait. These deliberately restricted
 proofs return concrete failing transitions or finite-horizon traces; they are not a general temporal
 logic language.
 
-For Python, each v7 task points to the production source file and symbol. Dagcert reads the real
+For Python, each v7+ task points to the production source file and symbol. Dagcert reads the real
 one-input annotation and closed return union, rejects `Any` throughout those boundary variants,
 runs strict mypy over the real implementation body itself, and requires an explicitly selected,
 digest-pinned proof backend to prove the complete bound file has no undeclared exceptional exit.
@@ -136,7 +146,7 @@ closure and returns every source-import edge. Dagcert independently reconstructs
 the exact source files and requires the importer, module, provider, provider hash, and imported
 symbols to match; altered or omitted edges refuse issuance.
 
-The v11 certificate seals strict-mypy output, the pinned verifier image digest and proof scope, and
+The v12 certificate seals strict-mypy output, the pinned verifier image digest and proof scope, and
 a manifest hash of the source-verification kernel and typing stubs. For Maledictus, response v7
 also requires and retains the exact strict-mypy package, runtime executable, complete runtime
 bundle, configuration, and contract-support hashes. Verification reruns the digest-pinned backend
@@ -220,7 +230,7 @@ certificate.json
 1. `english_requirements.json` states every promised behavior in ordinary language. Each claim has
    a stable ID, observed/derived/chance basis, explicit assumptions, and exact references. Derived
    and chance claims have kernel formulas and cannot cite a checker as proof.
-2. `dag_contract.json` is the formal translation using the four primitives.
+2. `dag_contract.json` is the formal translation using the five primitives.
 3. Runtime evidence records real task executions, timings, worker identity, actual runtime outcome
    variants, concurrency, resource effects, and failures. Source types never come from evidence.
 4. Deterministic analysis checks graph/resource feasibility, timing coverage and bounds, retained

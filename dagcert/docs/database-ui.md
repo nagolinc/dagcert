@@ -47,7 +47,7 @@ optional and runs only when the user asks for it; it is not a build or release g
 contains the exact subscription-backed `gpt-5.6-luna` handoff sequence. Collecting new evidence
 invalidates the checked-in audit, so including a new audit requires fresh workers.
 
-## 1. Model the work with the four primitives
+## 1. Model the work with the five primitives
 
 Declare the real task that obtains and renders the data. For example, `results.render` may be
 performed by the browser worker, depend on `results.fetch`, consume a `results-snapshot` resource,

@@ -12,6 +12,7 @@ from dagcert.contract import (
 )
 from dagcert.evidence import TimingSample
 from dagcert.formula import FormulaError, evaluate_formula
+from dagcert.requirements import EnglishClaim, EnglishRequirements, audit_translation
 from dagcert.source_types import SourceTypeError, check_python_sources
 
 
@@ -61,6 +62,10 @@ class PreparedWork:
 class Delivered:
     value: str
 
+@dataclass(frozen=True)
+class ChannelDelivery:
+    payload: PreparedWork
+
 @operation
 def prepare(request: Input) -> Prepared:
     return Prepared(request.value)
@@ -88,6 +93,14 @@ def prepare_work(request: RawWork) -> PreparedWork:
 @operation
 def deliver(request: PreparedWork) -> Delivered:
     return Delivered(request.value)
+
+@operation
+def enqueue_work(request: RawWork) -> PreparedWork:
+    return PreparedWork(request.value)
+
+@operation
+def consume_work(request: ChannelDelivery) -> Delivered:
+    return Delivered(request.payload.value)
 '''
 
 
@@ -208,6 +221,158 @@ def _structured_contract(tmp_path: Path, *, shared_branch_worker: bool = False):
         )
     )
     return contract, analyze_contract(contract, samples, source_fingerprint=fingerprint)
+
+
+def _channel_contract(tmp_path: Path, *, payload_field: str = "payload"):
+    (tmp_path / "app.py").write_text(APP_SOURCE, encoding="utf-8")
+    enqueue = _task("enqueue", "producer", "enqueue_work", "PreparedWork", 5, [])
+    dequeue = _task("dequeue", "consumer", "consume_work", "Delivered", 7, [])
+    enqueue["outcomes"][0]["resources"] = {"work-items": {"produce": 1}}
+    dequeue["outcomes"][0]["resources"] = {"work-items": {"consume": 1}}
+    for task in (enqueue, dequeue):
+        task["error_budget"] = {
+            "basis": "engineering_assumption",
+            "evidence_case": "duration",
+            "good_outcomes": [task["outcomes"][0]["type"]],
+            "bad_event_probability_upper": 0.01,
+            "minimum_observations": 1,
+        }
+    raw = {
+        "schema": "dagcert-contract/v8",
+        "workers": [
+            {"id": "producer", "concurrency": 1},
+            {"id": "consumer", "concurrency": 1},
+        ],
+        "resources": [
+            {"id": "work-items", "capacity": 8, "initial": 0, "unit": "messages"},
+        ],
+        "tasks": [enqueue, dequeue],
+        "channels": [{
+            "id": "work-queue",
+            "resource": "work-items",
+            "payload_type": "PreparedWork",
+            "enqueue": {"task": "enqueue", "outcome_type": "PreparedWork"},
+            "dequeue": {
+                "task": "dequeue",
+                "outcome_type": "Delivered",
+                "input_field": payload_field,
+            },
+            "metadata": {},
+        }],
+        "compositions": [{
+            "id": "queued-delivery",
+            "expression": {
+                "kind": "async_handoff",
+                "channel": "work-queue",
+                "producer": {
+                    "kind": "leaf", "task": "enqueue", "timing": "duration",
+                    "outcome_type": "PreparedWork",
+                },
+                "consumer": {
+                    "kind": "leaf", "task": "dequeue", "timing": "duration",
+                    "outcome_type": "Delivered",
+                },
+            },
+            "metadata": {},
+        }],
+        "state_claims": [],
+        "metadata": {},
+    }
+    path = tmp_path / "dag_contract.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    return load_contract(path, source_root=tmp_path)
+
+
+def test_async_handoff_unions_linked_worker_failure_budgets(tmp_path: Path):
+    contract = _channel_contract(tmp_path)
+    fingerprint = "f" * 64
+    samples = tuple(
+        TimingSample(
+            task_id=task,
+            case="duration",
+            value_ms=value,
+            worker_id=worker,
+            source_fingerprint=fingerprint,
+            outcome_type=outcome,
+            resource_produced={"work-items": 1} if task == "enqueue" else {},
+            resource_consumed={"work-items": 1} if task == "dequeue" else {},
+        )
+        for task, value, worker, outcome in (
+            ("enqueue", 5, "producer", "PreparedWork"),
+            ("dequeue", 7, "consumer", "Delivered"),
+        )
+    )
+    analysis = analyze_contract(contract, samples, source_fingerprint=fingerprint)
+
+    probability = evaluate_formula(
+        {
+            "eq": [
+                {
+                    "composition_failure_probability_upper": (
+                        "composition:queued-delivery"
+                    ),
+                },
+                0.02,
+            ],
+        },
+        contract,
+        analysis,
+    )
+    duration = evaluate_formula(
+        {"eq": [{"composition_upper_ms": "composition:queued-delivery"}, 12]},
+        contract,
+        analysis,
+    )
+
+    assert analysis.passed
+    assert probability.passed
+    assert duration.passed
+
+
+def test_async_handoff_rejects_untyped_dequeue_payload_field(tmp_path: Path):
+    with pytest.raises(ContractError, match="has no source input field 'missing'"):
+        _channel_contract(tmp_path, payload_field="missing")
+
+
+def test_async_handoff_claim_must_name_the_channel(tmp_path: Path):
+    contract = _channel_contract(tmp_path)
+    claim = EnglishClaim(
+        "queued-delivery",
+        "One admitted work item is delivered with at least 98% engineering confidence.",
+        (
+            "composition:queued-delivery",
+            "error-budget:enqueue",
+            "error-budget:dequeue",
+        ),
+        assumptions=("The declared per-invocation engineering budgets apply.",),
+        basis="chance",
+        formula={
+            "gte": [
+                {
+                    "composition_success_probability_lower": (
+                        "composition:queued-delivery"
+                    ),
+                },
+                0.98,
+            ],
+        },
+    )
+
+    missing = audit_translation(
+        EnglishRequirements("dagcert-english-requirements/v2", (claim,)),
+        contract,
+    )
+    complete = audit_translation(
+        EnglishRequirements(
+            "dagcert-english-requirements/v2",
+            (replace(claim, primitive_refs=claim.primitive_refs + ("channel:work-queue",)),),
+        ),
+        contract,
+    )
+
+    assert not missing.passed
+    assert any("omits asynchronous channel" in finding for finding in missing.findings)
+    assert complete.passed
 
 
 def test_parallel_all_uses_max_for_disjoint_workers_and_real_join_fields(tmp_path: Path):

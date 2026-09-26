@@ -132,6 +132,35 @@ class TypedDependency:
 
 
 @dataclass(frozen=True, slots=True)
+class ChannelEnqueue:
+    """The successful task outcome that places one typed value on a channel."""
+
+    task: str
+    outcome_type: str
+
+
+@dataclass(frozen=True, slots=True)
+class ChannelDequeue:
+    """The successful consumer outcome and its source-typed payload input field."""
+
+    task: str
+    outcome_type: str
+    input_field: str
+
+
+@dataclass(frozen=True, slots=True)
+class TypedChannel:
+    """One bounded asynchronous, type-preserving application channel."""
+
+    id: str
+    resource: str
+    payload_type: str
+    enqueue: ChannelEnqueue
+    dequeue: ChannelDequeue
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
 class Task:
     id: str
     worker: str
@@ -192,6 +221,7 @@ class CompositionExpression:
     step: CompositionStep | None = None
     children: tuple[CompositionExpression, ...] = ()
     count: int = 1
+    channel: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,6 +257,7 @@ class Contract:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     compositions: tuple[Composition, ...] = ()
     state_claims: tuple[StateClaim, ...] = ()
+    channels: tuple[TypedChannel, ...] = ()
 
     @property
     def worker_by_id(self) -> Mapping[str, Worker]:
@@ -247,6 +278,10 @@ class Contract:
     @property
     def state_claim_by_id(self) -> Mapping[str, StateClaim]:
         return {item.id: item for item in self.state_claims}
+
+    @property
+    def channel_by_id(self) -> Mapping[str, TypedChannel]:
+        return {item.id: item for item in self.channels}
 
     def topological_tasks(self) -> tuple[str, ...]:
         remaining = {task.id: set(task.depends_on) for task in self.tasks}
@@ -342,7 +377,9 @@ def _python_identifier(value: Any, label: str) -> str:
     return result
 
 
-def _composition_expression(value: Any, label: str) -> CompositionExpression:
+def _composition_expression(
+    value: Any, label: str, *, allow_async_handoff: bool = False,
+) -> CompositionExpression:
     row = _object(value, label)
     kind = _identifier(row.get("kind"), f"{label}.kind")
     if kind == "leaf":
@@ -369,7 +406,11 @@ def _composition_expression(value: Any, label: str) -> CompositionExpression:
         return CompositionExpression(
             kind,
             children=tuple(
-                _composition_expression(child, f"{label}.children[{index}]")
+                _composition_expression(
+                    child,
+                    f"{label}.children[{index}]",
+                    allow_async_handoff=allow_async_handoff,
+                )
                 for index, child in enumerate(raw_children)
             ),
         )
@@ -383,11 +424,35 @@ def _composition_expression(value: Any, label: str) -> CompositionExpression:
             raise ContractError(f"{label}.count must be an integer")
         return CompositionExpression(
             kind,
-            children=(_composition_expression(row.get("body"), f"{label}.body"),),
+            children=(
+                _composition_expression(
+                    row.get("body"), f"{label}.body",
+                    allow_async_handoff=allow_async_handoff,
+                ),
+            ),
             count=int(count),
         )
+    if kind == "async_handoff":
+        if not allow_async_handoff:
+            raise ContractError(f"{label}.kind async_handoff requires dagcert-contract/v8")
+        if set(row) != {"kind", "channel", "producer", "consumer"}:
+            raise ContractError(
+                f"{label} async_handoff must contain exactly kind, channel, producer, and consumer"
+            )
+        return CompositionExpression(
+            kind,
+            children=(
+                _composition_expression(
+                    row.get("producer"), f"{label}.producer", allow_async_handoff=True,
+                ),
+                _composition_expression(
+                    row.get("consumer"), f"{label}.consumer", allow_async_handoff=True,
+                ),
+            ),
+            channel=_identifier(row.get("channel"), f"{label}.channel"),
+        )
     raise ContractError(
-        f"{label}.kind must be leaf, sequence, parallel_all, or finite_repeat"
+        f"{label}.kind must be leaf, sequence, parallel_all, finite_repeat, or async_handoff"
     )
 
 
@@ -411,22 +476,25 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
     if schema not in {
         "dagcert-contract/v2", "dagcert-contract/v3", "dagcert-contract/v4",
         "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7",
+        "dagcert-contract/v8",
     }:
         raise ContractError(
-            "contract schema must be dagcert-contract/v2, v3, v4, v5, v6, or v7"
+            "contract schema must be dagcert-contract/v2, v3, v4, v5, v6, v7, or v8"
         )
     expected_top_level = {
         "schema", "workers", "resources", "tasks", "compositions", "metadata",
     }
-    if schema == "dagcert-contract/v7":
+    if schema in {"dagcert-contract/v7", "dagcert-contract/v8"}:
         expected_top_level.add("state_claims")
+    if schema == "dagcert-contract/v8":
+        expected_top_level.add("channels")
     if schema in {
         "dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5",
-        "dagcert-contract/v6", "dagcert-contract/v7",
+        "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8",
     } and set(raw) != expected_top_level:
         raise ContractError(
             f"{schema.rsplit('/', 1)[-1]} contract must contain exactly schema, workers, resources, "
-            "tasks, compositions, metadata, and state_claims for v7"
+            "tasks, compositions, metadata, state_claims for v7+, and channels for v8"
         )
     implementation_root = Path(source_root).resolve() if source_root is not None else contract_path.resolve().parent
 
@@ -468,7 +536,8 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
         v7_task_fields = v6_task_fields | {"start_resources"}
         v7_optional_task_fields = v6_optional_task_fields | {"verified_interface"}
         allowed_task_fields = (
-            v7_task_fields | v7_optional_task_fields if schema == "dagcert-contract/v7"
+            v7_task_fields | v7_optional_task_fields
+            if schema in {"dagcert-contract/v7", "dagcert-contract/v8"}
             else v6_task_fields | v6_optional_task_fields if schema == "dagcert-contract/v6"
             else v5_task_fields if schema == "dagcert-contract/v5"
             else v4_task_fields if schema == "dagcert-contract/v4"
@@ -496,30 +565,30 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             raise ContractError(
                 f"v6 task fields mismatch: unexpected={sorted(unexpected_task_fields)}, missing={missing}"
             )
-        if schema == "dagcert-contract/v7" and (
+        if schema in {"dagcert-contract/v7", "dagcert-contract/v8"} and (
             unexpected_task_fields or v7_task_fields - (set(row) - {"metadata"})
         ):
             missing = sorted(v7_task_fields - set(row))
             raise ContractError(
-                f"v7 task fields mismatch: unexpected={sorted(unexpected_task_fields)}, "
+                f"v7+ task fields mismatch: unexpected={sorted(unexpected_task_fields)}, "
                 f"missing={missing}"
             )
         task_id = _identifier(row.get("id"), "task.id")
         role = _identifier(
             row.get("role") if schema in {
                 "dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5",
-                "dagcert-contract/v6", "dagcert-contract/v7",
+                "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8",
             } else row.get("role", "operation"),
             f"task {task_id}.role",
         )
         allowed_roles = (
             {"operation", "instrumentation", "external"}
-            if schema in {"dagcert-contract/v6", "dagcert-contract/v7"}
+            if schema in {"dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8"}
             else {"operation", "instrumentation"}
         )
         if schema in {
             "dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5",
-            "dagcert-contract/v6", "dagcert-contract/v7",
+            "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8",
         } and role not in allowed_roles:
             raise ContractError(
                 f"task {task_id}.role must be one of {sorted(allowed_roles)}"
@@ -595,7 +664,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
         source_signature: SourceSignature | None = None
         external_contract: ExternalContract | None = None
         callable_bindings: tuple[CallableBinding, ...] = ()
-        if schema in {"dagcert-contract/v6", "dagcert-contract/v7"} and row.get("external_contract") is not None:
+        if schema in {"dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8"} and row.get("external_contract") is not None:
             external = _object(
                 row.get("external_contract"), f"task {task_id}.external_contract"
             )
@@ -655,7 +724,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             raise ContractError(
                 f"non-external task {task_id} must set external_contract to null"
             )
-        if schema in {"dagcert-contract/v6", "dagcert-contract/v7"}:
+        if schema in {"dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8"}:
             parsed_bindings: list[CallableBinding] = []
             for binding_value in _array(
                 row.get("callable_bindings", ()), f"task {task_id}.callable_bindings"
@@ -749,7 +818,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             callable_bindings = tuple(parsed_bindings)
         if schema in {
             "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
-            "dagcert-contract/v7",
+            "dagcert-contract/v7", "dagcert-contract/v8",
         }:
             binding = _object(row.get("implementation"), f"task {task_id}.implementation")
             if set(binding) != {"language", "path", "symbol"}:
@@ -789,7 +858,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
                 except SourceTypeError as exc:
                     raise ContractError(f"task {task_id} source type error: {exc}") from exc
             elif (
-                schema == "dagcert-contract/v7"
+                schema in {"dagcert-contract/v7", "dagcert-contract/v8"}
                 and implementation.language in {"javascript", "typescript"}
             ):
                 if role != "operation":
@@ -926,7 +995,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             input_type = _identifier(row.get("input_type"), f"task {task_id}.input_type")
             output_type = _identifier(row.get("output_type"), f"task {task_id}.output_type")
         error_budget: TaskErrorBudget | None = None
-        if schema in {"dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7"} and row.get("error_budget") is not None:
+        if schema in {"dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8"} and row.get("error_budget") is not None:
             budget = _object(row.get("error_budget"), f"task {task_id}.error_budget")
             required_budget_fields = {
                 "basis", "evidence_case", "good_outcomes",
@@ -978,14 +1047,14 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
         dependency_values = _array(row.get("depends_on", ()), f"task {task_id}.depends_on")
         if schema in {
             "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
-            "dagcert-contract/v7",
+            "dagcert-contract/v7", "dagcert-contract/v8",
         }:
             parsed_dependencies: list[TypedDependency] = []
             for dependency_value in dependency_values:
                 dependency = _object(dependency_value, f"task {task_id}.dependency")
                 allowed_dependency_fields = (
                     {"task", "outcome_type", "input_field"}
-                    if schema == "dagcert-contract/v7"
+                    if schema in {"dagcert-contract/v7", "dagcert-contract/v8"}
                     else {"task", "outcome_type"}
                 )
                 if set(dependency) not in (
@@ -1035,7 +1104,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             parse_effects(
                 row.get("start_resources", {}), f"task {task_id}.start_resources",
             )
-            if schema == "dagcert-contract/v7"
+            if schema in {"dagcert-contract/v7", "dagcert-contract/v8"}
             else {}
         )
         tasks.append(Task(
@@ -1061,14 +1130,15 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
     compositions: list[Composition] = []
     for value in _array(raw.get("compositions", ()), "compositions"):
         row = _object(value, "composition")
-        if schema == "dagcert-contract/v7":
+        if schema in {"dagcert-contract/v7", "dagcert-contract/v8"}:
             if set(row) != {"id", "expression", "metadata"}:
                 raise ContractError(
-                    "v7 composition must contain exactly id, expression, and metadata"
+                    "v7+ composition must contain exactly id, expression, and metadata"
                 )
             composition_id = _identifier(row.get("id"), "composition.id")
             expression = _composition_expression(
                 row.get("expression"), f"composition {composition_id}.expression",
+                allow_async_handoff=schema == "dagcert-contract/v8",
             )
             v7_steps = composition_steps(expression)
             if len({step.task for step in v7_steps}) < 2:
@@ -1251,11 +1321,63 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             dict(_object(row.get("metadata", {}), f"state_claim {claim_id}.metadata")),
         ))
 
+    channels: list[TypedChannel] = []
+    for value in _array(raw.get("channels", ()), "channels"):
+        row = _object(value, "channel")
+        if set(row) != {
+            "id", "resource", "payload_type", "enqueue", "dequeue", "metadata",
+        }:
+            raise ContractError(
+                "channel must contain exactly id, resource, payload_type, enqueue, dequeue, "
+                "and metadata"
+            )
+        channel_id = _identifier(row.get("id"), "channel.id")
+        enqueue_row = _object(row.get("enqueue"), f"channel {channel_id}.enqueue")
+        if set(enqueue_row) != {"task", "outcome_type"}:
+            raise ContractError(
+                f"channel {channel_id}.enqueue must contain exactly task and outcome_type"
+            )
+        dequeue_row = _object(row.get("dequeue"), f"channel {channel_id}.dequeue")
+        if set(dequeue_row) != {"task", "outcome_type", "input_field"}:
+            raise ContractError(
+                f"channel {channel_id}.dequeue must contain exactly task, outcome_type, and "
+                "input_field"
+            )
+        channels.append(TypedChannel(
+            channel_id,
+            _identifier(row.get("resource"), f"channel {channel_id}.resource"),
+            _identifier(row.get("payload_type"), f"channel {channel_id}.payload_type"),
+            ChannelEnqueue(
+                _identifier(
+                    enqueue_row.get("task"), f"channel {channel_id}.enqueue.task",
+                ),
+                _identifier(
+                    enqueue_row.get("outcome_type"),
+                    f"channel {channel_id}.enqueue.outcome_type",
+                ),
+            ),
+            ChannelDequeue(
+                _identifier(
+                    dequeue_row.get("task"), f"channel {channel_id}.dequeue.task",
+                ),
+                _identifier(
+                    dequeue_row.get("outcome_type"),
+                    f"channel {channel_id}.dequeue.outcome_type",
+                ),
+                _python_identifier(
+                    dequeue_row.get("input_field"),
+                    f"channel {channel_id}.dequeue.input_field",
+                ),
+            ),
+            dict(_object(row.get("metadata", {}), f"channel {channel_id}.metadata")),
+        ))
+
     contract = Contract(
         str(schema), tuple(workers), tuple(tasks), tuple(resources),
         dict(_object(raw.get("metadata", {}), "metadata")),
         tuple(compositions),
         tuple(state_claims),
+        tuple(channels),
     )
     _validate(contract)
     return contract
@@ -1271,6 +1393,8 @@ def _expression_entries(expression: CompositionExpression) -> tuple[CompositionS
         return tuple(
             step for child in expression.children for step in _expression_entries(child)
         )
+    if expression.kind == "async_handoff":
+        return _expression_entries(expression.children[0])
     return _expression_entries(expression.children[0])
 
 
@@ -1284,7 +1408,21 @@ def _expression_exits(expression: CompositionExpression) -> tuple[CompositionSte
         return tuple(
             step for child in expression.children for step in _expression_exits(child)
         )
+    if expression.kind == "async_handoff":
+        return _expression_exits(expression.children[1])
     return _expression_exits(expression.children[0])
+
+
+def composition_channels(expression: CompositionExpression) -> tuple[str, ...]:
+    """Return every typed channel crossed by a structured finite path."""
+
+    result: list[str] = []
+    if expression.kind == "async_handoff":
+        assert expression.channel is not None
+        result.append(expression.channel)
+    for child in expression.children:
+        result.extend(composition_channels(child))
+    return tuple(result)
 
 
 def _require_expression_edges(
@@ -1311,10 +1449,11 @@ def _require_expression_edges(
 def _validate_composition_expression_edges(
     expression: CompositionExpression,
     tasks: Mapping[str, Task],
+    channels: Mapping[str, TypedChannel],
     composition_id: str,
 ) -> None:
     for child in expression.children:
-        _validate_composition_expression_edges(child, tasks, composition_id)
+        _validate_composition_expression_edges(child, tasks, channels, composition_id)
     if expression.kind == "sequence":
         for upstream, downstream in zip(
             expression.children, expression.children[1:], strict=False,
@@ -1343,6 +1482,38 @@ def _validate_composition_expression_edges(
                     f"composition {composition_id} parallel_all branches are not independent: "
                     f"{edge[0]} feeds {edge[1]} across branches"
                 )
+    if expression.kind == "async_handoff":
+        channel_id = expression.channel
+        assert channel_id is not None
+        channel = channels.get(channel_id)
+        if channel is None:
+            raise ContractError(
+                f"composition {composition_id} cites unknown typed channel {channel_id!r}"
+            )
+        producer, consumer = expression.children
+        producer_exits = _expression_exits(producer)
+        matching_exits = [
+            step for step in producer_exits
+            if step.task == channel.enqueue.task
+            and step.outcome_type == channel.enqueue.outcome_type
+            and step.count == 1
+        ]
+        if len(producer_exits) != 1 or len(matching_exits) != 1:
+            raise ContractError(
+                f"composition {composition_id} async_handoff {channel_id!r} producer must end "
+                f"exactly at {channel.enqueue.task}/{channel.enqueue.outcome_type}"
+            )
+        matching_dequeues = [
+            step for step in composition_steps(consumer)
+            if step.task == channel.dequeue.task
+            and step.outcome_type == channel.dequeue.outcome_type
+            and step.count == 1
+        ]
+        if len(matching_dequeues) != 1:
+            raise ContractError(
+                f"composition {composition_id} async_handoff {channel_id!r} consumer must "
+                f"traverse exactly one {channel.dequeue.task}/{channel.dequeue.outcome_type}"
+            )
 
 
 def _validate(contract: Contract) -> None:
@@ -1350,17 +1521,19 @@ def _validate(contract: Contract) -> None:
         ("worker", [item.id for item in contract.workers]),
         ("task", [item.id for item in contract.tasks]),
         ("resource", [item.id for item in contract.resources]),
+        ("channel", [item.id for item in contract.channels]),
         ("composition", [item.id for item in contract.compositions]),
         ("state claim", [item.id for item in contract.state_claims]),
     ):
-        if label not in {"resource", "composition", "state claim"} and not identifiers:
+        if label not in {"resource", "channel", "composition", "state claim"} and not identifiers:
             raise ContractError(f"contract must declare at least one {label}")
         if len(identifiers) != len(set(identifiers)):
             raise ContractError(f"{label} IDs must be unique")
     workers = contract.worker_by_id
     tasks = contract.task_by_id
     resources = contract.resource_by_id
-    if contract.schema in {"dagcert-contract/v6", "dagcert-contract/v7"}:
+    channels = contract.channel_by_id
+    if contract.schema in {"dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8"}:
         callable_binding_ids = [
             binding.id for task in contract.tasks for binding in task.callable_bindings
         ]
@@ -1419,7 +1592,7 @@ def _validate(contract: Contract) -> None:
             raise ContractError(f"task {task.id} depends on itself")
         if contract.schema in {
             "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
-            "dagcert-contract/v7",
+            "dagcert-contract/v7", "dagcert-contract/v8",
         }:
             for dependency in task.typed_dependencies:
                 upstream = tasks.get(dependency.task)
@@ -1450,7 +1623,7 @@ def _validate(contract: Contract) -> None:
                             f"typed edge {dependency.task}/{dependency.outcome_type}"
                         )
                 if dependency.input_field is not None:
-                    if contract.schema != "dagcert-contract/v7":
+                    if contract.schema not in {"dagcert-contract/v7", "dagcert-contract/v8"}:
                         raise ContractError(
                             f"task {task.id} dependency input_field requires v7"
                         )
@@ -1470,6 +1643,7 @@ def _validate(contract: Contract) -> None:
                         )
             if contract.schema in {
                 "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7",
+                "dagcert-contract/v8",
             } and task.error_budget is not None:
                 budget = task.error_budget
                 unknown_good = set(budget.good_outcomes) - set(task.outcome_by_type)
@@ -1528,6 +1702,68 @@ def _validate(contract: Contract) -> None:
     for resource in contract.resources:
         if resource.initial > resource.capacity:
             raise ContractError(f"resource {resource.id} initial amount exceeds capacity")
+    for channel in contract.channels:
+        channel_resource = resources.get(channel.resource)
+        if channel_resource is None:
+            raise ContractError(
+                f"channel {channel.id} references unknown queue resource {channel.resource!r}"
+            )
+        enqueue_task = tasks.get(channel.enqueue.task)
+        dequeue_task = tasks.get(channel.dequeue.task)
+        if enqueue_task is None:
+            raise ContractError(
+                f"channel {channel.id} references unknown enqueue task {channel.enqueue.task!r}"
+            )
+        if dequeue_task is None:
+            raise ContractError(
+                f"channel {channel.id} references unknown dequeue task {channel.dequeue.task!r}"
+            )
+        enqueue_outcome = enqueue_task.outcome_by_type.get(channel.enqueue.outcome_type)
+        if enqueue_outcome is None:
+            raise ContractError(
+                f"channel {channel.id} enqueue task {enqueue_task.id} has no source outcome "
+                f"{channel.enqueue.outcome_type!r}"
+            )
+        if channel.enqueue.outcome_type != channel.payload_type:
+            raise ContractError(
+                f"channel {channel.id} payload type {channel.payload_type!r} must equal the "
+                f"source enqueue outcome {channel.enqueue.outcome_type!r}"
+            )
+        enqueue_effect = enqueue_outcome.resources.get(channel.resource, ResourceEffect())
+        if enqueue_effect.produce != 1:
+            raise ContractError(
+                f"channel {channel.id} enqueue outcome must produce exactly one "
+                f"{channel.resource!r} token"
+            )
+        dequeue_outcome = dequeue_task.outcome_by_type.get(channel.dequeue.outcome_type)
+        if dequeue_outcome is None:
+            raise ContractError(
+                f"channel {channel.id} dequeue task {dequeue_task.id} has no source outcome "
+                f"{channel.dequeue.outcome_type!r}"
+            )
+        dequeue_effect = dequeue_outcome.resources.get(channel.resource, ResourceEffect())
+        if dequeue_effect.consume != 1:
+            raise ContractError(
+                f"channel {channel.id} dequeue outcome must consume exactly one "
+                f"{channel.resource!r} token"
+            )
+        signature = dequeue_task.source_signature
+        if signature is None:
+            raise ContractError(
+                f"channel {channel.id} dequeue task {dequeue_task.id} lacks a compiler-extracted "
+                "source signature"
+            )
+        actual_payload_type = dict(signature.input_fields).get(channel.dequeue.input_field)
+        if actual_payload_type is None:
+            raise ContractError(
+                f"channel {channel.id} dequeue task {dequeue_task.id} has no source input field "
+                f"{channel.dequeue.input_field!r}"
+            )
+        if actual_payload_type != channel.payload_type:
+            raise ContractError(
+                f"channel {channel.id} dequeue field {channel.dequeue.input_field!r} expects "
+                f"{actual_payload_type!r}, not channel payload {channel.payload_type!r}"
+            )
     for composition in contract.compositions:
         unknown = set(composition.task_refs) - set(tasks)
         if unknown:
@@ -1555,7 +1791,7 @@ def _validate(contract: Contract) -> None:
                 )
             if contract.schema in {
                 "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
-                "dagcert-contract/v7",
+                "dagcert-contract/v7", "dagcert-contract/v8",
             }:
                 if step.outcome_type not in task.outcome_by_type:
                     raise ContractError(
@@ -1563,7 +1799,7 @@ def _validate(contract: Contract) -> None:
                         f"{step.outcome_type!r} outside the task's source union"
                     )
                 if (
-                    contract.schema != "dagcert-contract/v7"
+                    contract.schema not in {"dagcert-contract/v7", "dagcert-contract/v8"}
                     and step.count > 1
                     and step.outcome_type != task.input_type
                 ):
@@ -1583,10 +1819,10 @@ def _validate(contract: Contract) -> None:
                         f"{upstream_step.task}/{upstream_step.outcome_type} does not feed "
                         f"{downstream_step.task}/{downstream.input_type}"
                     )
-        if contract.schema == "dagcert-contract/v7":
+        if contract.schema in {"dagcert-contract/v7", "dagcert-contract/v8"}:
             assert composition.expression is not None
             _validate_composition_expression_edges(
-                composition.expression, tasks, composition.id,
+                composition.expression, tasks, channels, composition.id,
             )
         selected = set(composition.task_refs)
         connected = {composition.task_refs[0]}

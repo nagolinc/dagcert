@@ -10,7 +10,9 @@ from dagcert.formula import evaluate_formula
 from dagcert.requirements import audit_translation, load_requirements
 
 
-def _assert_example_claims(root: Path) -> None:
+def _assert_example_claims(
+    root: Path, *, certificate_schema: str = "dagcert-certificate/v11",
+) -> None:
     contract = load_contract(root / "dag_contract.json", source_root=root)
     requirements = load_requirements(root / "english_requirements.json")
     evidence = load_evidence(root / "artifacts" / "timings.jsonl")
@@ -23,7 +25,7 @@ def _assert_example_claims(root: Path) -> None:
         source_fingerprint=certificate["source_fingerprint"],
     )
 
-    assert certificate["schema"] == "dagcert-certificate/v11"
+    assert certificate["schema"] == certificate_schema
     assert analysis.passed
     assert audit_translation(requirements, contract, selected_checkers=()).passed
     for claim in requirements.claims:
@@ -39,3 +41,8 @@ def test_structured_worker_pipeline_v11_example_passes() -> None:
 def test_typescript_leaf_v11_example_passes() -> None:
     root = Path(__file__).parents[1] / "examples" / "certified_typescript_leaf"
     _assert_example_claims(root)
+
+
+def test_async_channel_v12_example_passes() -> None:
+    root = Path(__file__).parents[1] / "examples" / "certified_async_channel"
+    _assert_example_claims(root, certificate_schema="dagcert-certificate/v12")

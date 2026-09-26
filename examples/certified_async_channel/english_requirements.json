@@ -1,0 +1,36 @@
+{
+  "schema": "dagcert-english-requirements/v2",
+  "claims": [
+    {
+      "id": "one-queued-delivery-confidence",
+      "statement": "Conditional on the declared per-invocation engineering budgets, one prepared job crosses the real asynchronous queue and is delivered with probability at least 0.98.",
+      "primitive_refs": [
+        "composition:one-queued-delivery",
+        "channel:prepared-jobs",
+        "external-contract:stdlib.queue.put",
+        "external-contract:stdlib.queue.get",
+        "error-budget:stdlib.queue.put",
+        "error-budget:queue.put.classify",
+        "error-budget:stdlib.queue.get",
+        "error-budget:queue.take.classify"
+      ],
+      "checker_refs": [],
+      "assumptions": [
+        "The 0.01 queue-admission and 0.01 queue-take bad-event limits are engineering envelope assumptions, not statistical estimates.",
+        "The p=1 standard-library boundary assumptions mean an unexpected exception or wrong return type is a retained Dagcert violation rather than a silent success."
+      ],
+      "basis": "chance",
+      "formula": {
+        "gte": [
+          {
+            "composition_success_probability_lower": "composition:one-queued-delivery"
+          },
+          0.98
+        ]
+      }
+    }
+  ],
+  "metadata": {
+    "purpose": "Plain-English promise for the typed asynchronous channel example"
+  }
+}

@@ -18,7 +18,9 @@ Use the focused examples together:
 2. `reservation-lifecycle` proves conservation across starts, successes, and failures.
 3. `bounded-buffer` proves finite-horizon supply and a separate scheduler wait bound.
 4. `finite-confidence` composes typed bad-event budgets without independence assumptions.
-5. `external-verified-leaf` binds any non-Python application stage to a registered verifier and
+5. `async-channel` connects independently scheduled producer and consumer paths without inventing
+   a synchronous function argument.
+6. `external-verified-leaf` binds any non-Python application stage to a registered verifier and
    leaves platform behavior as an explicit assumption.
 
 The capstone must not add an aggregate observer task or a measured pipeline stopwatch. End-to-end

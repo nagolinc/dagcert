@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dagcert"
-version = "0.13.2"
+version = "0.14.0"
 description = "Plain-English certificates over workers, tasks, resources, and timings"
 readme = "readme.md"
 requires-python = ">=3.12"
@@ -59,6 +59,11 @@ examples = [
     "certified_external_url/*.md",
     "certified_external_url/artifacts/*.json",
     "certified_external_url/artifacts/*.jsonl",
+    "certified_async_channel/*.py",
+    "certified_async_channel/*.json",
+    "certified_async_channel/*.md",
+    "certified_async_channel/artifacts/*.json",
+    "certified_async_channel/artifacts/*.jsonl",
     "certified_structured_pipeline/*.py",
     "certified_structured_pipeline/*.json",
     "certified_structured_pipeline/*.md",

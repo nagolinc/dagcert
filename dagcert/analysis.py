@@ -128,10 +128,10 @@ def analyze_contract(
         if timing is not None and timing.metric == "duration":
             if contract.schema in {
                 "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
-                "dagcert-contract/v7",
+                "dagcert-contract/v7", "dagcert-contract/v8",
             }:
                 _check_typed_outcome_observation(task, sample, contract, findings)
-                if contract.schema == "dagcert-contract/v7":
+                if contract.schema in {"dagcert-contract/v7", "dagcert-contract/v8"}:
                     _check_start_resource_observation(task, sample, findings)
             elif sample.succeeded:
                 _check_execution_observation(task, sample, contract, findings)
@@ -147,9 +147,9 @@ def analyze_contract(
             usable = [
                 sample for sample in evidence
                 if sample.task_id == task.id and sample.case == case
-                and (contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7"} or sample.succeeded)
+                and (contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8"} or sample.succeeded)
                 and (
-                    contract.schema not in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7"}
+                    contract.schema not in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8"}
                     or sample.outcome_type in task.outcome_by_type
                 )
                 and sample.worker_id == task.worker and sample.source_fingerprint == source_fingerprint
@@ -187,7 +187,7 @@ def analyze_contract(
                 requirement.lower_ms, requirement.upper_ms, passed,
             ))
 
-    if contract.schema in {"dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7"}:
+    if contract.schema in {"dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8"}:
         for task in contract.tasks:
             budget = task.error_budget
             if budget is None:

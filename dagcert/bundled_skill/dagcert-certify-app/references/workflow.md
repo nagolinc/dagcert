@@ -37,11 +37,18 @@ that opt-out in the handoff. Run `python -m dagcert help app-surfaces` for the i
 
 ## Contract
 
-The hardened `dagcert-contract/v7` JSON or YAML object contains `workers`, `tasks`, `resources`,
-task-local `timings`, structured finite `compositions`, `state_claims`, and metadata. Composition
-expressions contain only `leaf`, `sequence`, `parallel_all`, and `finite_repeat`. Every leaf names
+The hardened `dagcert-contract/v8` JSON or YAML object contains `workers`, `tasks`, `resources`,
+typed asynchronous `channels`, task-local `timings`, structured finite `compositions`,
+`state_claims`, and metadata. Composition expressions contain only `leaf`, `sequence`,
+`parallel_all`, `finite_repeat`, and `async_handoff`. Every leaf names
 the source outcome it traverses, sequence boundaries must match real typed dependency edges, and a
 fork/join binds branch outputs to fields of the real downstream source input record.
+An `async_handoff` binds independently scheduled producer and consumer expressions through one
+declared channel. The producer must end at the channel's source-derived payload outcome; the
+consumer must traverse its declared successful dequeue outcome exactly once, and the declared
+payload input field must have that same compiler-extracted type. Both endpoints move exactly one
+token through the named queue resource. Do not make a dequeue policy/request carry a value that is
+unknown until the queue returns it.
 Each task has an `implementation` binding
 with `language`, source-root-relative `path`, and `symbol`. For Python, Dagcert parses that exact
 callable, requires one explicit source-defined input class and an inline closed union of explicit

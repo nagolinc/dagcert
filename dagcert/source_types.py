@@ -85,7 +85,7 @@ def type_enforcement_descriptor() -> dict[str, object]:
         manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
     ).encode("utf-8")
     return {
-        "provider": "dagcert.python/v8",
+        "provider": "dagcert.python/v9",
         "dagcert_version": VERSION,
         "static_analysis": "source-ast+strict-mypy/v1",
         "mypy_import_surface": "sealed-type-preserving-dagcert-stub/v1",
@@ -94,8 +94,10 @@ def type_enforcement_descriptor() -> dict[str, object]:
         "exception_verification": "selectable-nagini-viper-v3-or-maledictus-v2",
         "external_contracts": "environment-resolved+p1-contract-only+typeguard-runtime/v3",
         "reachability": "typed-may-must/v1",
-        "chance_composition": "engineering-envelope-optional-budget+exact-path+external/v4",
-        "structured_composition": "sequence+parallel-all+finite-repeat/resource-aware/v1",
+        "chance_composition": "engineering-envelope-optional-budget+exact-path+external/v5",
+        "structured_composition": (
+            "sequence+parallel-all+finite-repeat+typed-async-handoff/resource-aware/v2"
+        ),
         "lifecycle_state_proofs": "two-phase-affine+bounded-non-starvation+response/v1",
         "verified_javascript_typescript_leaves": (
             "maledictus-compiler-interface+source+toolchain-bound/v1"
@@ -176,6 +178,7 @@ def check_python_sources(
         "--disallow-any-explicit",
         "--disallow-any-unimported",
         "--no-incremental",
+        "--explicit-package-bases",
         "--show-error-codes",
         "--no-error-summary",
         "--python-executable",

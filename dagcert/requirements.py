@@ -92,6 +92,7 @@ def audit_translation(
     valid_primitives = {f"worker:{item.id}" for item in contract.workers}
     valid_primitives.update(f"task:{item.id}" for item in contract.tasks)
     valid_primitives.update(f"resource:{item.id}" for item in contract.resources)
+    valid_primitives.update(f"channel:{item.id}" for item in contract.channels)
     valid_primitives.update(
         f"timing:{task.id}/{case}" for task in contract.tasks for case in task.timings
     )
@@ -143,10 +144,17 @@ def audit_translation(
     for composition in contract.compositions:
         if f"composition:{composition.id}" not in referenced_primitives:
             continue
+        from .contract import composition_channels
+
         coverage_primitives.update(f"task:{step.task}" for step in composition.steps)
         coverage_primitives.update(
             f"timing:{step.task}/{step.timing}" for step in composition.steps
         )
+        if composition.expression is not None:
+            coverage_primitives.update(
+                f"channel:{channel_id}"
+                for channel_id in composition_channels(composition.expression)
+            )
     for state_claim in contract.state_claims:
         if f"state-claim:{state_claim.id}" not in referenced_primitives:
             continue
@@ -233,6 +241,29 @@ def audit_translation(
                         f"derived claim {claim.id} formula references are not declared: "
                         f"{sorted(missing_formula_refs)}"
                     )
+                composition_ids = {
+                    reference.split(":", 1)[1]
+                    for reference in formula_refs
+                    if reference.startswith("composition:")
+                }
+                channel_refs: set[str] = set()
+                from .contract import composition_channels
+
+                for composition_id in composition_ids:
+                    referenced_composition = contract.composition_by_id.get(composition_id)
+                    if referenced_composition is not None and referenced_composition.expression is not None:
+                        channel_refs.update(
+                            f"channel:{channel_id}"
+                            for channel_id in composition_channels(
+                                referenced_composition.expression,
+                            )
+                        )
+                missing_channels = channel_refs - set(claim.primitive_refs)
+                if missing_channels:
+                    findings.append(
+                        f"{claim.basis} claim {claim.id} omits asynchronous channel references: "
+                        f"{sorted(missing_channels)}"
+                    )
                 uses_budgets = formula_uses_error_budgets(claim.formula)
                 if claim.basis == "chance" and not uses_budgets:
                     findings.append(
@@ -247,11 +278,6 @@ def audit_translation(
                         findings.append(
                             f"chance claim {claim.id} must state its engineering assumptions"
                         )
-                    composition_ids = {
-                        reference.split(":", 1)[1]
-                        for reference in formula_refs
-                        if reference.startswith("composition:")
-                    }
                     budget_refs: set[str] = set()
                     for composition_id in composition_ids:
                         referenced_composition = contract.composition_by_id.get(composition_id)

@@ -156,6 +156,7 @@ def test_installed_help_exposes_generic_structured_workflow_examples(capsys):
         "reservation-lifecycle",
         "bounded-buffer",
         "finite-confidence",
+        "async-channel",
         "external-verified-leaf",
         "composed-worker-pipeline",
     ):
@@ -169,3 +170,6 @@ def test_installed_help_exposes_generic_structured_workflow_examples(capsys):
     confidence = capsys.readouterr().out
     assert "union bound" in confidence
     assert "finite_repeat" in confidence
+    assert main(["help", "async-channel"]) == 0
+    channel = capsys.readouterr().out
+    assert "async_handoff" in channel

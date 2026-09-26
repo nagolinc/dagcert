@@ -1,0 +1,478 @@
+{
+  "schema": "dagcert-contract/v8",
+  "workers": [
+    {
+      "id": "producer",
+      "concurrency": 1
+    },
+    {
+      "id": "consumer",
+      "concurrency": 1
+    }
+  ],
+  "resources": [
+    {
+      "id": "prepared-job-count",
+      "capacity": 16,
+      "initial": 0,
+      "unit": "messages"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "job.prepare",
+      "role": "operation",
+      "worker": "producer",
+      "implementation": {
+        "language": "python",
+        "path": "app.py",
+        "symbol": "prepare_job"
+      },
+      "outcomes": [
+        {
+          "type": "PreparedJob",
+          "resources": {},
+          "metadata": {}
+        }
+      ],
+      "error_budget": null,
+      "external_contract": null,
+      "start_resources": {},
+      "depends_on": [],
+      "timings": {
+        "completion": {
+          "metric": "duration",
+          "upper_ms": 50,
+          "minimum_samples": 10,
+          "policy": "max",
+          "safety_factor": 1
+        }
+      }
+    },
+    {
+      "id": "queue.put-request.build",
+      "role": "operation",
+      "worker": "producer",
+      "implementation": {
+        "language": "python",
+        "path": "app.py",
+        "symbol": "build_put_request"
+      },
+      "outcomes": [
+        {
+          "type": "QueuePutRequest",
+          "resources": {},
+          "metadata": {}
+        }
+      ],
+      "error_budget": null,
+      "external_contract": null,
+      "start_resources": {},
+      "depends_on": [
+        {
+          "task": "job.prepare",
+          "outcome_type": "PreparedJob"
+        }
+      ],
+      "timings": {
+        "completion": {
+          "metric": "duration",
+          "upper_ms": 50,
+          "minimum_samples": 10,
+          "policy": "max",
+          "safety_factor": 1
+        }
+      }
+    },
+    {
+      "id": "stdlib.queue.put",
+      "role": "external",
+      "worker": "producer",
+      "implementation": {
+        "language": "python",
+        "path": "external_put.py",
+        "symbol": "put_job"
+      },
+      "outcomes": [
+        {
+          "type": "QueuePutResponse",
+          "resources": {},
+          "metadata": {}
+        },
+        {
+          "type": "dagcert.runtime.ExternalRaised",
+          "resources": {},
+          "metadata": {}
+        },
+        {
+          "type": "dagcert.runtime.ExternalTypeViolation",
+          "resources": {},
+          "metadata": {}
+        }
+      ],
+      "error_budget": {
+        "basis": "engineering_assumption",
+        "evidence_case": "call",
+        "good_outcomes": [
+          "QueuePutResponse"
+        ],
+        "bad_event_probability_upper": 0,
+        "minimum_observations": 10
+      },
+      "external_contract": {
+        "stub_path": "external_put_contract.py",
+        "assumption": "The standard-library queue put returns the declared response or the runtime boundary records a violation.",
+        "provider": {
+          "module": "queue",
+          "symbols": [
+            "Queue.put_nowait"
+          ]
+        },
+        "success_outcome": "QueuePutResponse",
+        "evidence_case": "call"
+      },
+      "start_resources": {},
+      "depends_on": [
+        {
+          "task": "queue.put-request.build",
+          "outcome_type": "QueuePutRequest"
+        }
+      ],
+      "timings": {
+        "call": {
+          "metric": "duration",
+          "upper_ms": 50,
+          "minimum_samples": 10,
+          "policy": "max",
+          "safety_factor": 1
+        }
+      }
+    },
+    {
+      "id": "queue.put.classify",
+      "role": "operation",
+      "worker": "producer",
+      "implementation": {
+        "language": "python",
+        "path": "app.py",
+        "symbol": "classify_put"
+      },
+      "outcomes": [
+        {
+          "type": "PreparedJob",
+          "resources": {
+            "prepared-job-count": {
+              "produce": 1
+            }
+          },
+          "metadata": {}
+        },
+        {
+          "type": "QueuePutFailed",
+          "resources": {},
+          "metadata": {}
+        }
+      ],
+      "error_budget": {
+        "basis": "engineering_assumption",
+        "evidence_case": "completion",
+        "good_outcomes": [
+          "PreparedJob"
+        ],
+        "bad_event_probability_upper": 0.01,
+        "minimum_observations": 10
+      },
+      "external_contract": null,
+      "start_resources": {},
+      "depends_on": [
+        {
+          "task": "stdlib.queue.put",
+          "outcome_type": "QueuePutResponse"
+        }
+      ],
+      "timings": {
+        "completion": {
+          "metric": "duration",
+          "upper_ms": 50,
+          "minimum_samples": 10,
+          "policy": "max",
+          "safety_factor": 1
+        }
+      }
+    },
+    {
+      "id": "queue.take-request.build",
+      "role": "operation",
+      "worker": "consumer",
+      "implementation": {
+        "language": "python",
+        "path": "app.py",
+        "symbol": "build_take_request"
+      },
+      "outcomes": [
+        {
+          "type": "QueueTakeRequest",
+          "resources": {},
+          "metadata": {}
+        }
+      ],
+      "error_budget": null,
+      "external_contract": null,
+      "start_resources": {},
+      "depends_on": [],
+      "timings": {
+        "completion": {
+          "metric": "duration",
+          "upper_ms": 50,
+          "minimum_samples": 10,
+          "policy": "max",
+          "safety_factor": 1
+        }
+      }
+    },
+    {
+      "id": "stdlib.queue.get",
+      "role": "external",
+      "worker": "consumer",
+      "implementation": {
+        "language": "python",
+        "path": "external_get.py",
+        "symbol": "get_job"
+      },
+      "outcomes": [
+        {
+          "type": "QueueTakeResponse",
+          "resources": {},
+          "metadata": {}
+        },
+        {
+          "type": "dagcert.runtime.ExternalRaised",
+          "resources": {},
+          "metadata": {}
+        },
+        {
+          "type": "dagcert.runtime.ExternalTypeViolation",
+          "resources": {},
+          "metadata": {}
+        }
+      ],
+      "error_budget": {
+        "basis": "engineering_assumption",
+        "evidence_case": "call",
+        "good_outcomes": [
+          "QueueTakeResponse"
+        ],
+        "bad_event_probability_upper": 0,
+        "minimum_observations": 10
+      },
+      "external_contract": {
+        "stub_path": "external_get_contract.py",
+        "assumption": "The standard-library queue get returns the declared response or the runtime boundary records a violation.",
+        "provider": {
+          "module": "queue",
+          "symbols": [
+            "Queue.get"
+          ]
+        },
+        "success_outcome": "QueueTakeResponse",
+        "evidence_case": "call"
+      },
+      "start_resources": {},
+      "depends_on": [
+        {
+          "task": "queue.take-request.build",
+          "outcome_type": "QueueTakeRequest"
+        }
+      ],
+      "timings": {
+        "call": {
+          "metric": "duration",
+          "upper_ms": 50,
+          "minimum_samples": 10,
+          "policy": "max",
+          "safety_factor": 1
+        }
+      }
+    },
+    {
+      "id": "queue.take.classify",
+      "role": "operation",
+      "worker": "consumer",
+      "implementation": {
+        "language": "python",
+        "path": "app.py",
+        "symbol": "classify_take"
+      },
+      "outcomes": [
+        {
+          "type": "JobTaken",
+          "resources": {
+            "prepared-job-count": {
+              "consume": 1
+            }
+          },
+          "metadata": {}
+        },
+        {
+          "type": "QueueTakeFailed",
+          "resources": {},
+          "metadata": {}
+        }
+      ],
+      "error_budget": {
+        "basis": "engineering_assumption",
+        "evidence_case": "completion",
+        "good_outcomes": [
+          "JobTaken"
+        ],
+        "bad_event_probability_upper": 0.01,
+        "minimum_observations": 10
+      },
+      "external_contract": null,
+      "start_resources": {},
+      "depends_on": [
+        {
+          "task": "stdlib.queue.get",
+          "outcome_type": "QueueTakeResponse"
+        }
+      ],
+      "timings": {
+        "completion": {
+          "metric": "duration",
+          "upper_ms": 50,
+          "minimum_samples": 10,
+          "policy": "max",
+          "safety_factor": 1
+        }
+      }
+    },
+    {
+      "id": "job.deliver",
+      "role": "operation",
+      "worker": "consumer",
+      "implementation": {
+        "language": "python",
+        "path": "app.py",
+        "symbol": "deliver"
+      },
+      "outcomes": [
+        {
+          "type": "Delivered",
+          "resources": {},
+          "metadata": {}
+        }
+      ],
+      "error_budget": null,
+      "external_contract": null,
+      "start_resources": {},
+      "depends_on": [
+        {
+          "task": "queue.take.classify",
+          "outcome_type": "JobTaken"
+        }
+      ],
+      "timings": {
+        "completion": {
+          "metric": "duration",
+          "upper_ms": 50,
+          "minimum_samples": 10,
+          "policy": "max",
+          "safety_factor": 1
+        }
+      }
+    }
+  ],
+  "channels": [
+    {
+      "id": "prepared-jobs",
+      "resource": "prepared-job-count",
+      "payload_type": "PreparedJob",
+      "enqueue": {
+        "task": "queue.put.classify",
+        "outcome_type": "PreparedJob"
+      },
+      "dequeue": {
+        "task": "queue.take.classify",
+        "outcome_type": "JobTaken",
+        "input_field": "job"
+      },
+      "metadata": {
+        "implementation": "one shared queue.Queue[PreparedJob]"
+      }
+    }
+  ],
+  "compositions": [
+    {
+      "id": "one-queued-delivery",
+      "expression": {
+        "kind": "async_handoff",
+        "channel": "prepared-jobs",
+        "producer": {
+          "kind": "sequence",
+          "children": [
+            {
+              "kind": "leaf",
+              "task": "job.prepare",
+              "timing": "completion",
+              "outcome_type": "PreparedJob"
+            },
+            {
+              "kind": "leaf",
+              "task": "queue.put-request.build",
+              "timing": "completion",
+              "outcome_type": "QueuePutRequest"
+            },
+            {
+              "kind": "leaf",
+              "task": "stdlib.queue.put",
+              "timing": "call",
+              "outcome_type": "QueuePutResponse"
+            },
+            {
+              "kind": "leaf",
+              "task": "queue.put.classify",
+              "timing": "completion",
+              "outcome_type": "PreparedJob"
+            }
+          ]
+        },
+        "consumer": {
+          "kind": "sequence",
+          "children": [
+            {
+              "kind": "leaf",
+              "task": "queue.take-request.build",
+              "timing": "completion",
+              "outcome_type": "QueueTakeRequest"
+            },
+            {
+              "kind": "leaf",
+              "task": "stdlib.queue.get",
+              "timing": "call",
+              "outcome_type": "QueueTakeResponse"
+            },
+            {
+              "kind": "leaf",
+              "task": "queue.take.classify",
+              "timing": "completion",
+              "outcome_type": "JobTaken"
+            },
+            {
+              "kind": "leaf",
+              "task": "job.deliver",
+              "timing": "completion",
+              "outcome_type": "Delivered"
+            }
+          ]
+        }
+      },
+      "metadata": {
+        "scope": "one successfully enqueued message matched to one successful dequeue"
+      }
+    }
+  ],
+  "state_claims": [],
+  "metadata": {
+    "purpose": "Minimal typed asynchronous channel example"
+  }
+}

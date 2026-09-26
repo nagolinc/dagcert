@@ -49,11 +49,13 @@ declares finite source-outcome paths over those primitives.
   cross-file operation-record imports as explicit source edges, and Dagcert checks those edges
   against the exact bound files and hashes. Do not duplicate or flatten records to make operation
   files artificially self-contained.
-- A v11 certificate seals strict-mypy output, the selected proof-engine identity and proof scope, and the
+- A v12 certificate seals strict-mypy output, the selected proof-engine identity and proof scope, and the
   exact type-enforcement core-file manifest—not only a claimed Dagcert version or compiler result.
 - `instrumentation` tasks may record aggregate observations but cannot participate in a derived
   composition.
-- A v7 composition is built only from `leaf`, `sequence`, `parallel_all`, and `finite_repeat`.
+- A v8 composition is built only from `leaf`, `sequence`, `parallel_all`, `finite_repeat`, and
+  `async_handoff`. Use `async_handoff` for a real queue between independently scheduled workers;
+  declare its typed channel instead of feeding the unknown producer value into the dequeue request.
   Sequence boundaries are real typed dependency edges. A parallel join binds every branch output
   to a field of the real downstream input record, and hidden cross-branch dependencies fail.
   Dagcert computes its conservative bound from those leaves; it never accepts a direct aggregate
@@ -70,7 +72,7 @@ names.
 
 Write the production operation boundary in its strongly typed form before modeling it. For Python,
 use an explicit input class, explicit named outcome classes, an inline closed return union, and
-`@dagcert.runtime.operation`. Every v7 dependency names an upstream outcome type and must feed a downstream
+`@dagcert.runtime.operation`. Every v7+ dependency names an upstream outcome type and must feed a downstream
 callable that accepts that exact source type. Model effects for every explicit source outcome.
 Expected failures must be return variants; an unexpected exception invalidates the proof. Keep
 parsing, normalization, lookup, reservation, and other claim-relevant argument preparation inside

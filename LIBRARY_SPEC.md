@@ -3,7 +3,8 @@
 ## 1. Purpose
 
 Dagcert creates a tamper-evident, source-bound report about an application's workers, tasks,
-resources, and timings. Those are its only application-model primitives.
+resources, typed asynchronous channels, and timings. Those are its only application-model
+primitives.
 
 The library is not a scheduler, runtime, queue, HTTP framework, browser harness, retry manager,
 rate limiter, or deployment gate. Certification observes and reports by default. It must not add a
@@ -12,7 +13,7 @@ behavioral regression merely to make a claim pass.
 
 ## 2. Contract schema
 
-New issuance uses `dagcert-contract/v7`. The loader retains v2-v6 support for verification of
+New issuance uses `dagcert-contract/v8`. The loader retains v2-v7 support for verification of
 existing certificates. JSON is built in; YAML is available with PyYAML.
 
 ### Worker
@@ -32,6 +33,23 @@ existing certificates. JSON is built in; YAML is available with PyYAML.
 A resource can represent transient capacity (CPU/GPU slots, connections, locks), flowing work
 (prompts, messages), or a bounded quantity (generations of model lag). Dagcert does not register
 resource kinds.
+
+### Typed channel
+
+A v8 typed channel represents one real asynchronous queue boundary:
+
+- `id`: unique nonempty string;
+- `resource`: the queue-inventory resource;
+- `payload_type`: the source-derived payload record type;
+- `enqueue`: a task and successful outcome equal to `payload_type` that produces exactly one queue
+  resource token;
+- `dequeue`: a task, successful outcome, and real source input field whose compiler-extracted type
+  equals `payload_type` and whose outcome consumes exactly one queue resource token; and
+- `metadata`: optional opaque object.
+
+The channel states a type-preserving asynchronous handoff. It does not make a queue-poll request
+carry a value that is unknown until dequeue, and it does not by itself claim FIFO order, fairness,
+or unbounded liveness.
 
 ### Task
 
@@ -119,12 +137,15 @@ good, its complement is simply empty.
 
 ### Composition
 
-A v7 composition is one expression in a deliberately small algebra:
+A v8 composition is one expression in a deliberately small algebra:
 
 - `leaf`: one exact task, duration case, and typed outcome;
 - `sequence`: two or more expressions with real typed edges across each boundary;
 - `parallel_all`: two or more independent branches, all required before the following join; and
-- `finite_repeat`: one expression and a positive literal count.
+- `finite_repeat`: one expression and a positive literal count; and
+- `async_handoff`: a producer expression and consumer expression linked by one declared typed
+  channel. The producer must end at the enqueue outcome and the consumer must traverse the dequeue
+  outcome exactly once.
 
 Instrumentation tasks are forbidden. Compositions have no directly measured timing. Sequence and
 repeat add leaf bounds. `parallel_all` uses the maximum branch bound only when declared worker
@@ -181,7 +202,7 @@ supporting documentation. It contains at least one claim. Each claim has:
 
 - a stable unique `id`;
 - a complete plain-English `statement` describing the scoped behavior promised to the user;
-- `primitive_refs` naming the workers, tasks, resources, and timings that support it;
+- `primitive_refs` naming the workers, tasks, resources, channels, and timings that support it;
 - `checker_refs` naming any application checkers required to establish it;
 - explicit `assumptions`, including workload or environment limits.
 - `basis`: `observed`, `derived`, or `chance`;
@@ -196,7 +217,7 @@ Chance claims also cannot name checkers as proof. They must use a finite composi
 participating `error-budget:TASK`, state the engineering premise in English, and use the kernel's
 union-bound operators. A deterministic claim cannot silently use those probabilistic operators.
 
-The requirements document does not enlarge the four-primitive ontology. It is the certificate's
+The requirements document does not enlarge the five-primitive ontology. It is the certificate's
 mandatory human-readable promise and traceability map. Issuance embeds its complete normalized
 contents and byte digest. Verification requires the exact file and rejects changed wording,
 assumptions, or references, even if the formal contract is unchanged.
@@ -228,11 +249,12 @@ that form one dependency/resource-connected DAG surface plus worker/resource sta
 aggregate stopwatch therefore cannot become a derived claim. General LTL/CTL and unbounded
 reachable-state operators remain unsupported rather than being delegated to a checker boolean.
 
-## 4. What the four primitives can express
+## 4. What the five primitives can express
 
 The primitives intentionally have flow semantics:
 
 - work-producing tasks add units to resources;
+- typed channels connect one source payload across an independently scheduled queue boundary;
 - downstream tasks consume those units;
 - interval timings bound supply cadence;
 - duration timings bound worker consumption rates;
@@ -245,7 +267,7 @@ Consequently analyzers can derive statements such as:
 - every declared task has a feasible worker/resource path and no structural blocked state;
 - `model.update` remains at most G generation units behind its producer.
 
-These are results over the four primitives, not additional `proof`, `queue`, `blocked_state`, or
+These are results over the five primitives, not additional `proof`, `blocked_state`, or
 `staleness` primitives. Domain-specific helpers may construct formula syntax, but their boolean
 results are not trusted proof. The kernel evaluates the normalized fixed-algebra formula.
 

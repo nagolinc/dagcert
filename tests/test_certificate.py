@@ -98,7 +98,9 @@ def test_certificate_embeds_and_digest_binds_plain_english_requirements(project)
     assert document["type_enforcement"]["external_contracts"] == (
         "environment-resolved+p1-contract-only+typeguard-runtime/v3"
     )
-    assert document["type_enforcement"]["chance_composition"] == "engineering-envelope-optional-budget+exact-path+external/v4"
+    assert document["type_enforcement"]["chance_composition"] == (
+        "engineering-envelope-optional-budget+exact-path+external/v5"
+    )
     assert set(document["type_enforcement"]["kernel_manifest"]) >= {
         "analysis.py", "certificate.py", "contract.py", "maledictus_verifier.py",
         "runtime.py", "source_types.py", "mypy_stubs/dagcert/surfaces.pyi",

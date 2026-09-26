@@ -25,7 +25,7 @@ from .source_types import SourceProofBackend, check_python_sources
 
 
 CONTRACT_TEMPLATE = """{
-  "schema": "dagcert-contract/v7",
+  "schema": "dagcert-contract/v8",
   "workers": [
     {"id": "app", "concurrency": 1}
   ],
@@ -50,6 +50,7 @@ CONTRACT_TEMPLATE = """{
       }
     }
   ],
+  "channels": [],
   "compositions": [],
   "state_claims": [],
   "metadata": {}
@@ -117,6 +118,10 @@ HELP_TOPICS = {
     "finite-confidence": (
         "union-bound confidence over parallel branches and finite repetition",
         "docs/example-finite-confidence.md",
+    ),
+    "async-channel": (
+        "typed queue handoff between independently scheduled producer and consumer workers",
+        "docs/example-async-channel.md",
     ),
     "external-verified-leaf": (
         "source-bound alternate-backend leaf and explicit environment assumption",
@@ -234,9 +239,11 @@ def main(argv: list[str] | None = None) -> int:
             )
             contract = load_contract(args.contract, source_root=lint_root)
             requirements = load_requirements(args.requirements)
-            if contract.schema not in {"dagcert-contract/v6", "dagcert-contract/v7"}:
+            if contract.schema not in {
+                "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8",
+            }:
                 raise ContractError(
-                    "new certificate issuance requires dagcert-contract/v6 or v7"
+                    "new certificate issuance requires dagcert-contract/v6, v7, or v8"
                 )
             if requirements.schema != "dagcert-english-requirements/v2":
                 raise RequirementsError(
