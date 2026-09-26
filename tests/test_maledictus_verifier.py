@@ -262,7 +262,7 @@ def test_maledictus_executable_digest_mismatch_refuses_before_execution(
         ),
         (
             lambda response: response.update(source_imports=[{"untrusted": True}]),
-            "returned undeclared source",
+            "malformed source import",
         ),
         (
             lambda response: response["python_typechecker"].update(
@@ -310,6 +310,133 @@ def test_maledictus_tampered_or_weaker_response_refuses(
             root,
             ["app.py"],
             {"app.py": ("work",)},
+            source_fingerprint="source-fingerprint",
+            executable=executable,
+            expected_executable_sha256=digest,
+        )
+
+
+def _source_import_fixture(
+    tmp_path: Path,
+) -> tuple[Path, Path, str, dict[str, object]]:
+    root = tmp_path / "source-import-app"
+    root.mkdir()
+    provider = root / "produced.py"
+    provider.write_text(
+        "from dataclasses import dataclass\n"
+        "from dagcert.runtime import operation\n\n"
+        "@dataclass(frozen=True)\n"
+        "class Candidate:\n"
+        "    value: str\n\n"
+        "@dataclass(frozen=True)\n"
+        "class Request:\n"
+        "    value: str\n\n"
+        "@operation\n"
+        "def build(request: Request) -> Candidate:\n"
+        "    return Candidate(request.value)\n",
+        encoding="utf-8",
+    )
+    consumer = root / "consume.py"
+    consumer.write_text(
+        "from dataclasses import dataclass\n"
+        "from dagcert.runtime import operation\n"
+        "from produced import Candidate\n\n"
+        "@dataclass(frozen=True)\n"
+        "class Request:\n"
+        "    candidate: Candidate\n\n"
+        "@dataclass(frozen=True)\n"
+        "class Completed:\n"
+        "    value: str\n\n"
+        "@operation\n"
+        "def consume(request: Request) -> Completed:\n"
+        "    return Completed(request.candidate.value)\n",
+        encoding="utf-8",
+    )
+    executable = tmp_path / "source-import-maledictus.exe"
+    executable.write_bytes(b"source import verifier")
+    digest = sha256(executable.read_bytes()).hexdigest()
+    (root / "app.py").write_text("# response template\n", encoding="utf-8")
+    response = _proved_response(root, digest)
+    response["files"] = [
+        {
+            "path": "consume.py",
+            "sha256": sha256(consumer.read_bytes()).hexdigest(),
+            "symbols": ["consume"],
+            "scope": "all-source-symbol-bodies",
+            "result": "proved",
+            "fragment": "dagcert-closed-typed-operations/v3",
+        },
+        {
+            "path": "produced.py",
+            "sha256": sha256(provider.read_bytes()).hexdigest(),
+            "symbols": ["build"],
+            "scope": "all-source-symbol-bodies",
+            "result": "proved",
+            "fragment": "dagcert-closed-typed-operations/v3",
+        },
+    ]
+    response["source_imports"] = [{
+        "importer_path": "consume.py",
+        "module": "produced",
+        "provider_path": "produced.py",
+        "provider_sha256": sha256(provider.read_bytes()).hexdigest(),
+        "imported_symbols": ["Candidate"],
+    }]
+    return root, executable, digest, response
+
+
+def test_maledictus_source_import_edge_is_recomputed_from_bound_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    root, executable, digest, response = _source_import_fixture(tmp_path)
+    monkeypatch.setattr(
+        "dagcert.maledictus_verifier.run",
+        lambda arguments, **_kwargs: CompletedProcess(
+            arguments, 0, json.dumps(response), "",
+        ),
+    )
+
+    result = verify_with_maledictus(
+        root,
+        ["consume.py", "produced.py"],
+        {"consume.py": ("consume",), "produced.py": ("build",)},
+        source_fingerprint="source-fingerprint",
+        executable=executable,
+        expected_executable_sha256=digest,
+    )
+
+    assert result["source_imports"] == response["source_imports"]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda edge: edge.update(provider_sha256="0" * 64),
+        lambda edge: edge.update(imported_symbols=["Other"]),
+        lambda edge: edge.update(importer_path="produced.py"),
+        lambda edge: edge.update(module="other"),
+    ],
+)
+def test_maledictus_tampered_source_import_edge_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation,
+):
+    root, executable, digest, response = _source_import_fixture(tmp_path)
+    edges = response["source_imports"]
+    assert isinstance(edges, list)
+    assert isinstance(edges[0], dict)
+    mutation(edges[0])
+    monkeypatch.setattr(
+        "dagcert.maledictus_verifier.run",
+        lambda arguments, **_kwargs: CompletedProcess(
+            arguments, 0, json.dumps(response), "",
+        ),
+    )
+
+    with pytest.raises(MaledictusVerificationError, match="bound source graph"):
+        verify_with_maledictus(
+            root,
+            ["consume.py", "produced.py"],
+            {"consume.py": ("consume",), "produced.py": ("build",)},
             source_fingerprint="source-fingerprint",
             executable=executable,
             expected_executable_sha256=digest,

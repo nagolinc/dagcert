@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass
 from hashlib import sha256
 import json
@@ -391,9 +392,16 @@ def verify_with_maledictus(
         )
     if returned_paths != set(normalized_files):
         raise MaledictusVerificationError("Maledictus omitted a bound operation file")
-    if response.get("source_imports") != [] or response.get("cross_language_bindings") != []:
+    _validate_source_import_results(
+        root,
+        normalized_files,
+        requested_languages,
+        expected_hashes,
+        response.get("source_imports"),
+    )
+    if response.get("cross_language_bindings") != []:
         raise MaledictusVerificationError(
-            "Dagcert callable operation proof returned undeclared source or cross-language edges"
+            "Dagcert callable operation proof returned undeclared cross-language edges"
         )
     _validate_external_contract_results(
         root,
@@ -405,6 +413,117 @@ def verify_with_maledictus(
         root, bindings, expected_hashes, response.get("python_callable_bindings")
     )
     return response
+
+
+def _validate_source_import_results(
+    root: Path,
+    normalized_files: tuple[str, ...],
+    requested_languages: Mapping[str, str],
+    expected_hashes: Mapping[str, str],
+    value: object,
+) -> None:
+    if not isinstance(value, list):
+        raise MaledictusVerificationError(
+            "Maledictus source import results must be a list"
+        )
+    python_paths = [
+        path
+        for path in normalized_files
+        if requested_languages.get(path, "python") == "python"
+    ]
+    module_to_path: dict[str, str] = {}
+    for path in python_paths:
+        module = _python_module_name(path)
+        if module in module_to_path:
+            raise MaledictusVerificationError(
+                f"bound Python files have duplicate module name {module!r}"
+            )
+        module_to_path[module] = path
+
+    imports: dict[tuple[str, str, str], set[str]] = {}
+    for importer_path in python_paths:
+        source_path = root / importer_path
+        try:
+            tree = ast.parse(source_path.read_bytes(), filename=importer_path)
+        except (OSError, SyntaxError) as exc:
+            raise MaledictusVerificationError(
+                f"cannot reconstruct source imports for {importer_path!r}: {exc}"
+            ) from exc
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom) or node.level != 0:
+                continue
+            imported_module = node.module
+            if imported_module is None or imported_module not in module_to_path:
+                continue
+            provider_path = module_to_path[imported_module]
+            key = (importer_path, imported_module, provider_path)
+            imported = imports.setdefault(key, set())
+            for alias in node.names:
+                if alias.name == "*":
+                    raise MaledictusVerificationError(
+                        f"proved source import {importer_path!r} uses unsupported wildcard import"
+                    )
+                imported.add(alias.name)
+
+    expected_rows = [
+        {
+            "importer_path": importer_path,
+            "module": module,
+            "provider_path": provider_path,
+            "provider_sha256": expected_hashes[provider_path],
+            "imported_symbols": sorted(symbols),
+        }
+        for (importer_path, module, provider_path), symbols in sorted(imports.items())
+    ]
+    required_fields = {
+        "importer_path",
+        "module",
+        "provider_path",
+        "provider_sha256",
+        "imported_symbols",
+    }
+    returned_rows: list[dict[str, object]] = []
+    for row in value:
+        if not isinstance(row, dict) or set(row) != required_fields:
+            raise MaledictusVerificationError(
+                "Maledictus returned a malformed source import result"
+            )
+        imported_symbols = row.get("imported_symbols")
+        if (
+            not isinstance(row.get("importer_path"), str)
+            or not isinstance(row.get("module"), str)
+            or not isinstance(row.get("provider_path"), str)
+            or not isinstance(row.get("provider_sha256"), str)
+            or not isinstance(imported_symbols, list)
+            or any(not isinstance(symbol, str) for symbol in imported_symbols)
+            or imported_symbols != sorted(set(imported_symbols))
+        ):
+            raise MaledictusVerificationError(
+                "Maledictus returned a malformed source import result"
+            )
+        returned_rows.append(row)
+    returned_rows.sort(
+        key=lambda row: (
+            str(row["importer_path"]),
+            str(row["module"]),
+            str(row["provider_path"]),
+        )
+    )
+    if returned_rows != expected_rows:
+        raise MaledictusVerificationError(
+            "Maledictus source import results do not exactly match the bound source graph"
+        )
+
+
+def _python_module_name(path: str) -> str:
+    parts = list(Path(path).with_suffix("").parts)
+    if parts and parts[-1] == "__init__":
+        parts.pop()
+    if not parts or any(not part.isidentifier() for part in parts):
+        raise MaledictusVerificationError(
+            f"bound Python source path has no importable module name: {path!r}"
+        )
+    return ".".join(parts)
 
 
 def _validate_verified_interfaces(

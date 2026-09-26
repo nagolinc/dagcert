@@ -45,6 +45,10 @@ declares finite source-outcome paths over those primitives.
 - Dagcert verifies the provenance of `operation` and `dataclass`; local lookalike decorators and
   source-tree modules shadowing `dagcert` or `dataclasses` fail. The marker preserves the exact
   callable type; it does not catch exceptions or widen the outcome union.
+- Keep shared frozen record types in their natural source-owned modules. Maledictus proves
+  cross-file operation-record imports as explicit source edges, and Dagcert checks those edges
+  against the exact bound files and hashes. Do not duplicate or flatten records to make operation
+  files artificially self-contained.
 - A v11 certificate seals strict-mypy output, the selected proof-engine identity and proof scope, and the
   exact type-enforcement core-file manifest—not only a claimed Dagcert version or compiler result.
 - `instrumentation` tasks may record aggregate observations but cannot participate in a derived

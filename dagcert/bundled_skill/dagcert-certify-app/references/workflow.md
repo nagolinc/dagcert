@@ -81,6 +81,10 @@ array of `{id, field, provider}` objects. A source provider is
 consumer path, operation symbol, and input record from the task's real source signature. Maledictus
 hash-binds those edges and composes provider exception outcomes; an absent or abstract binding,
 signature mismatch, unknown provider, or altered response evidence refuses certification.
+Operation modules may also import frozen record types from other Python files included in the same
+Maledictus request. Maledictus proves the provider record closure before the consumer and returns
+the exact source-import edges. Dagcert reconstructs the real imports and requires exact path,
+module, provider hash, and symbol equality; a missing, extra, or altered edge refuses issuance.
 
 Task operations also may not declare `Requires`, because a task must be total over its complete
 source input type. Executable application modules may not use Nagini `Assume` or `ContractOnly`.

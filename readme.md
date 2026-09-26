@@ -130,6 +130,11 @@ or an explicit external module/symbol/stub overlay. Dagcert derives the consumer
 input record from source rather than prose. Maledictus hash-binds every consumer, source provider,
 and external stub, composes the provider's normal and exceptional outcomes, and rejects missing,
 duplicate, unknown, or tampered edges.
+Maledictus operation files may import frozen record types from other operation files in the same
+bound proof request. The backend proves the provider and the consumer against one transitive record
+closure and returns every source-import edge. Dagcert independently reconstructs those imports from
+the exact source files and requires the importer, module, provider, provider hash, and imported
+symbols to match; altered or omitted edges refuse issuance.
 
 The v11 certificate seals strict-mypy output, the pinned verifier image digest and proof scope, and
 a manifest hash of the source-verification kernel and typing stubs. For Maledictus, response v7
