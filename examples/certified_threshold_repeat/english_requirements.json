@@ -1,0 +1,54 @@
+{
+  "schema": "dagcert-english-requirements/v2",
+  "claims": [
+    {
+      "id": "seven-items-confidence",
+      "statement": "Under the declared per-attempt engineering envelope, at least seven of ten finite preparation attempts produce PreparedItem values with probability at least 0.75.",
+      "primitive_refs": [
+        "composition:prepare-seven-of-ten",
+        "error-budget:item.prepare",
+        "resource:prepared-items"
+      ],
+      "checker_refs": [],
+      "assumptions": [
+        "Each attempt has bad-event probability at most 0.1 under the engineering envelope.",
+        "The bound uses Markov's inequality over the number of bad outcomes and does not assume independent attempts."
+      ],
+      "basis": "chance",
+      "formula": {
+        "gte": [
+          {
+            "composition_success_probability_lower": "composition:prepare-seven-of-ten"
+          },
+          0.75
+        ]
+      }
+    },
+    {
+      "id": "finite-batch-decision-time",
+      "statement": "All ten finite attempts reach typed outcomes within 15 ms under the declared four-worker and five-millisecond leaf bounds.",
+      "primitive_refs": [
+        "composition:prepare-seven-of-ten",
+        "worker:preparation-worker",
+        "timing:item.prepare/completion"
+      ],
+      "checker_refs": [],
+      "assumptions": [
+        "Ten already-dispatched attempts are available to the four-worker pool.",
+        "Every attempt reaches one declared typed outcome within five milliseconds."
+      ],
+      "basis": "derived",
+      "formula": {
+        "lte": [
+          {
+            "composition_upper_ms": "composition:prepare-seven-of-ten"
+          },
+          15
+        ]
+      }
+    }
+  ],
+  "metadata": {
+    "purpose": "Plain-English promises for the finite threshold example"
+  }
+}

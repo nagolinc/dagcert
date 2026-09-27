@@ -56,3 +56,8 @@ def test_browser_fetch_v13_example_passes() -> None:
 def test_alternative_producers_v14_example_passes() -> None:
     root = Path(__file__).parents[1] / "examples" / "certified_alternative_producers"
     _assert_example_claims(root, certificate_schema="dagcert-certificate/v14")
+
+
+def test_threshold_repeat_v15_example_passes() -> None:
+    root = Path(__file__).parents[1] / "examples" / "certified_threshold_repeat"
+    _assert_example_claims(root, certificate_schema="dagcert-certificate/v15")

@@ -37,13 +37,16 @@ that opt-out in the handoff. Run `python -m dagcert help app-surfaces` for the i
 
 ## Contract
 
-The hardened `dagcert-contract/v10` JSON or YAML object contains `workers`, `tasks`, `resources`,
+The hardened `dagcert-contract/v11` JSON or YAML object contains `workers`, `tasks`, `resources`,
 typed asynchronous `channels`, task-local `timings`, structured finite `compositions`,
 cross-language `external_handoffs`, `state_claims`, and metadata. Composition expressions contain
-only `leaf`, `sequence`, `parallel_all`, `finite_repeat`, `async_handoff`, and
+only `leaf`, `sequence`, `parallel_all`, `finite_repeat`, `threshold_repeat`, `async_handoff`, and
 `external_handoff`. Every leaf names
 the source outcome it traverses, sequence boundaries must match real typed dependency edges, and a
 fork/join binds branch outputs to fields of the real downstream source input record.
+A `threshold_repeat` names one task, finite attempts N, required successes K, one qualifying source
+outcome, and the resource unit produced only by that outcome. Dagcert applies its fixed
+correlation-free engineering-envelope bound; it is not an arbitrary reducer or infinite retry loop.
 An `async_handoff` binds independently scheduled producer and consumer expressions through one
 declared channel. The producer must end at the channel's source-derived payload outcome; the
 consumer must traverse its declared successful dequeue outcome exactly once, and the declared

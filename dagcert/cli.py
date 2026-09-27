@@ -25,7 +25,7 @@ from .source_types import SourceProofBackend, check_python_sources
 
 
 CONTRACT_TEMPLATE = """{
-  "schema": "dagcert-contract/v10",
+  "schema": "dagcert-contract/v11",
   "workers": [
     {"id": "app", "concurrency": 1}
   ],
@@ -119,6 +119,10 @@ HELP_TOPICS = {
     "finite-confidence": (
         "union-bound confidence over parallel branches and finite repetition",
         "docs/example-finite-confidence.md",
+    ),
+    "threshold-repeat": (
+        "finite K-of-N typed outcomes with a correlation-free engineering envelope",
+        "docs/example-threshold-repeat.md",
     ),
     "async-channel": (
         "typed queue handoff between independently scheduled producer and consumer workers",
@@ -250,10 +254,10 @@ def main(argv: list[str] | None = None) -> int:
             requirements = load_requirements(args.requirements)
             if contract.schema not in {
                 "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8",
-                "dagcert-contract/v9", "dagcert-contract/v10",
+                "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11",
             }:
                 raise ContractError(
-                    "new certificate issuance requires dagcert-contract/v6 through v10"
+                    "new certificate issuance requires dagcert-contract/v6 through v11"
                 )
             if requirements.schema != "dagcert-english-requirements/v2":
                 raise RequirementsError(

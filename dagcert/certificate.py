@@ -154,18 +154,18 @@ def _serialized_primitives(contract: Contract, analysis_mapping: dict[str, Any])
     """Return the exact JSON shape stored in a certificate (tuples become arrays)."""
     tasks = [asdict(item) for item in contract.tasks]
     for task in tasks:
-        if contract.schema not in {"dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"} or not task["callable_bindings"]:
+        if contract.schema not in {"dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11"} or not task["callable_bindings"]:
             task.pop("callable_bindings", None)
-        if contract.schema not in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"}:
+        if contract.schema not in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11"}:
             task.pop("start_resources", None)
             signature = task.get("source_signature")
             if isinstance(signature, dict):
                 signature.pop("input_fields", None)
-        if contract.schema not in {"dagcert-contract/v9", "dagcert-contract/v10"}:
+        if contract.schema not in {"dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11"}:
             signature = task.get("source_signature")
             if isinstance(signature, dict):
                 signature.pop("outcome_fields", None)
-    if contract.schema not in {"dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"}:
+    if contract.schema not in {"dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11"}:
         for task in tasks:
             task.pop("external_contract", None)
     if contract.schema in {"dagcert-contract/v2", "dagcert-contract/v3"}:
@@ -174,7 +174,7 @@ def _serialized_primitives(contract: Contract, analysis_mapping: dict[str, Any])
             task.pop("outcomes", None)
             task.pop("source_signature", None)
             task.pop("typed_dependencies", None)
-    if contract.schema != "dagcert-contract/v10":
+    if contract.schema not in {"dagcert-contract/v10", "dagcert-contract/v11"}:
         for task in tasks:
             external = task.get("external_contract")
             if isinstance(external, dict):
@@ -193,7 +193,7 @@ def _serialized_primitives(contract: Contract, analysis_mapping: dict[str, Any])
     if contract.schema in {
         "dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5",
         "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8",
-        "dagcert-contract/v9", "dagcert-contract/v10",
+        "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11",
     }:
         compositions = [asdict(item) for item in contract.compositions]
         def clean_expression(expression: dict[str, Any]) -> None:
@@ -201,6 +201,10 @@ def _serialized_primitives(contract: Contract, analysis_mapping: dict[str, Any])
                 expression.pop("channel", None)
             if expression.get("handoff") is None:
                 expression.pop("handoff", None)
+            if contract.schema != "dagcert-contract/v11" or expression.get("kind") != "threshold_repeat":
+                expression.pop("attempts", None)
+                expression.pop("required", None)
+                expression.pop("resource", None)
             for child in expression.get("children", []):
                 clean_expression(child)
 
@@ -208,23 +212,23 @@ def _serialized_primitives(contract: Contract, analysis_mapping: dict[str, Any])
             expression = composition.get("expression")
             if isinstance(expression, dict):
                 clean_expression(expression)
-        if contract.schema not in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"}:
+        if contract.schema not in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11"}:
             for composition in compositions:
                 composition.pop("expression", None)
         if contract.schema not in {
             "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
             "dagcert-contract/v7", "dagcert-contract/v8",
-            "dagcert-contract/v9", "dagcert-contract/v10",
+            "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11",
         }:
             for composition in compositions:
                 for step in composition["steps"]:
                     step.pop("outcome_type", None)
         value["compositions"] = compositions
-    if contract.schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"}:
+    if contract.schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11"}:
         value["state_claims"] = [asdict(item) for item in contract.state_claims]
-    if contract.schema in {"dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"}:
+    if contract.schema in {"dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11"}:
         value["channels"] = [asdict(item) for item in contract.channels]
-    if contract.schema in {"dagcert-contract/v9", "dagcert-contract/v10"}:
+    if contract.schema in {"dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11"}:
         value["external_handoffs"] = [asdict(item) for item in contract.external_handoffs]
     return cast(dict[str, Any], json.loads(canonical_json(value)))
 
@@ -406,9 +410,9 @@ def issue_certificate(
     fingerprint = sha256(canonical_json(manifest)).hexdigest()
     contract = load_contract(contract_path, source_root=root)
     requirements = load_requirements(requirements_path)
-    if contract.schema not in {"dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"}:
+    if contract.schema not in {"dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11"}:
         raise CertificateError(
-            "new certificate issuance requires dagcert-contract/v6 through v10 with source-owned operation "
+            "new certificate issuance requires dagcert-contract/v6 through v11 with source-owned operation "
             "types and explicit external-contract boundaries"
         )
     if requirements.schema != "dagcert-english-requirements/v2":
@@ -453,7 +457,9 @@ def issue_certificate(
     claim_analysis = _claim_analysis(requirements, contract, analysis)
     document: dict[str, Any] = {
         "schema": (
-            "dagcert-certificate/v14"
+            "dagcert-certificate/v15"
+            if contract.schema == "dagcert-contract/v11"
+            else "dagcert-certificate/v14"
             if contract.schema == "dagcert-contract/v10"
             else "dagcert-certificate/v13"
             if contract.schema == "dagcert-contract/v9"
@@ -509,10 +515,10 @@ def verify_certificate(
         "dagcert-certificate/v4", "dagcert-certificate/v5", "dagcert-certificate/v6",
         "dagcert-certificate/v7", "dagcert-certificate/v8", "dagcert-certificate/v9",
         "dagcert-certificate/v10", "dagcert-certificate/v11", "dagcert-certificate/v12",
-        "dagcert-certificate/v13", "dagcert-certificate/v14",
+        "dagcert-certificate/v13", "dagcert-certificate/v14", "dagcert-certificate/v15",
     }:
         return CertificateVerification(False, (
-            "certificate schema must be dagcert-certificate/v4 through v14",
+            "certificate schema must be dagcert-certificate/v4 through v15",
         ))
     certificate_schema = raw["schema"]
     expected_fields = {
@@ -521,13 +527,13 @@ def verify_certificate(
         "english_requirements", "translation_audit", "primitives", "analysis", "checks",
         "check_result_sha256", "certificate_sha256",
     }
-    if certificate_schema in {"dagcert-certificate/v5", "dagcert-certificate/v6", "dagcert-certificate/v7", "dagcert-certificate/v8", "dagcert-certificate/v9", "dagcert-certificate/v10", "dagcert-certificate/v11", "dagcert-certificate/v12", "dagcert-certificate/v13", "dagcert-certificate/v14"}:
+    if certificate_schema in {"dagcert-certificate/v5", "dagcert-certificate/v6", "dagcert-certificate/v7", "dagcert-certificate/v8", "dagcert-certificate/v9", "dagcert-certificate/v10", "dagcert-certificate/v11", "dagcert-certificate/v12", "dagcert-certificate/v13", "dagcert-certificate/v14", "dagcert-certificate/v15"}:
         expected_fields.add("claim_analysis")
     if certificate_schema in {"dagcert-certificate/v6", "dagcert-certificate/v7", "dagcert-certificate/v8"}:
         expected_fields.add("source_typing")
-    if certificate_schema in {"dagcert-certificate/v9", "dagcert-certificate/v10", "dagcert-certificate/v11", "dagcert-certificate/v12", "dagcert-certificate/v13", "dagcert-certificate/v14"}:
+    if certificate_schema in {"dagcert-certificate/v9", "dagcert-certificate/v10", "dagcert-certificate/v11", "dagcert-certificate/v12", "dagcert-certificate/v13", "dagcert-certificate/v14", "dagcert-certificate/v15"}:
         expected_fields.add("source_verification")
-    if certificate_schema in {"dagcert-certificate/v7", "dagcert-certificate/v8", "dagcert-certificate/v9", "dagcert-certificate/v10", "dagcert-certificate/v11", "dagcert-certificate/v12", "dagcert-certificate/v13", "dagcert-certificate/v14"}:
+    if certificate_schema in {"dagcert-certificate/v7", "dagcert-certificate/v8", "dagcert-certificate/v9", "dagcert-certificate/v10", "dagcert-certificate/v11", "dagcert-certificate/v12", "dagcert-certificate/v13", "dagcert-certificate/v14", "dagcert-certificate/v15"}:
         expected_fields.add("type_enforcement")
     if set(raw) != expected_fields:
         unexpected = sorted(set(raw) - expected_fields)
@@ -573,7 +579,7 @@ def verify_certificate(
                     problems.append("source type analysis no longer matches")
             except SourceTypeError as exc:
                 problems.append(f"current source type analysis failed: {exc}")
-        if certificate_schema in {"dagcert-certificate/v9", "dagcert-certificate/v10", "dagcert-certificate/v11", "dagcert-certificate/v12", "dagcert-certificate/v13", "dagcert-certificate/v14"}:
+        if certificate_schema in {"dagcert-certificate/v9", "dagcert-certificate/v10", "dagcert-certificate/v11", "dagcert-certificate/v12", "dagcert-certificate/v13", "dagcert-certificate/v14", "dagcert-certificate/v15"}:
             stored_source_verification = raw.get("source_verification")
             stored_exception_verifier = (
                 stored_source_verification.get("exception_verifier")
@@ -613,7 +619,7 @@ def verify_certificate(
                 except SourceTypeError as exc:
                     problems.append(f"current source verification failed: {exc}")
         if (
-            certificate_schema in {"dagcert-certificate/v7", "dagcert-certificate/v8", "dagcert-certificate/v9", "dagcert-certificate/v10", "dagcert-certificate/v11", "dagcert-certificate/v12", "dagcert-certificate/v13", "dagcert-certificate/v14"}
+            certificate_schema in {"dagcert-certificate/v7", "dagcert-certificate/v8", "dagcert-certificate/v9", "dagcert-certificate/v10", "dagcert-certificate/v11", "dagcert-certificate/v12", "dagcert-certificate/v13", "dagcert-certificate/v14", "dagcert-certificate/v15"}
             and raw.get("type_enforcement") != type_enforcement_descriptor()
         ):
             problems.append("source/runtime type enforcement kernel no longer matches")
@@ -639,9 +645,10 @@ def verify_certificate(
         problems.extend(translation_audit.findings)
         if raw.get("translation_audit") != translation_audit.to_mapping():
             problems.append("English-to-formal translation audit no longer matches")
-        if certificate_schema in {"dagcert-certificate/v5", "dagcert-certificate/v6", "dagcert-certificate/v7", "dagcert-certificate/v8", "dagcert-certificate/v9", "dagcert-certificate/v10", "dagcert-certificate/v11", "dagcert-certificate/v12", "dagcert-certificate/v13", "dagcert-certificate/v14"}:
+        if certificate_schema in {"dagcert-certificate/v5", "dagcert-certificate/v6", "dagcert-certificate/v7", "dagcert-certificate/v8", "dagcert-certificate/v9", "dagcert-certificate/v10", "dagcert-certificate/v11", "dagcert-certificate/v12", "dagcert-certificate/v13", "dagcert-certificate/v14", "dagcert-certificate/v15"}:
             expected_contract_schema = (
-                "dagcert-contract/v10" if certificate_schema == "dagcert-certificate/v14"
+                "dagcert-contract/v11" if certificate_schema == "dagcert-certificate/v15"
+                else "dagcert-contract/v10" if certificate_schema == "dagcert-certificate/v14"
                 else "dagcert-contract/v9" if certificate_schema == "dagcert-certificate/v13"
                 else "dagcert-contract/v8" if certificate_schema == "dagcert-certificate/v12"
                 else "dagcert-contract/v7" if certificate_schema == "dagcert-certificate/v11"

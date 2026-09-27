@@ -13,7 +13,7 @@ behavioral regression merely to make a claim pass.
 
 ## 2. Contract schema
 
-New issuance uses `dagcert-contract/v10`. The loader retains v2-v9 support for verification of
+New issuance uses `dagcert-contract/v11`. The loader retains v2-v10 support for verification of
 existing certificates. JSON is built in; YAML is available with PyYAML.
 
 ### Worker
@@ -148,12 +148,14 @@ good, its complement is simply empty.
 
 ### Composition
 
-A v8 composition is one expression in a deliberately small algebra:
+A v11 composition is one expression in a deliberately small algebra:
 
 - `leaf`: one exact task, duration case, and typed outcome;
 - `sequence`: two or more expressions with real typed edges across each boundary;
 - `parallel_all`: two or more independent branches, all required before the following join; and
-- `finite_repeat`: one expression and a positive literal count; and
+- `finite_repeat`: one expression and a positive literal count;
+- `threshold_repeat`: one real task, a finite literal attempt count N, a required count K, one
+  qualifying typed outcome, and one resource produced exactly once only by that outcome; and
 - `async_handoff`: a producer expression and consumer expression linked by one declared typed
   channel. The producer must end at the enqueue outcome and the consumer must traverse the dequeue
   outcome exactly once.
@@ -163,6 +165,13 @@ repeat add leaf bounds. `parallel_all` uses the maximum branch bound only when d
 concurrency and acquired-resource capacity permit overlap; otherwise it conservatively sums.
 Cross-branch dependencies fail. This prevents a monolithic pipeline stopwatch from substituting
 for a derivation over the actual task graph.
+
+`threshold_repeat` is not a general reducer or retry language. For per-attempt bad-event envelope
+`q`, its threshold-miss envelope is `min(1, N*q/(N-K+1))`, a Markov bound on the count of bad
+outcomes that makes no independence assumption. Its duration bound is
+`ceil(N/effective_concurrency)` times the leaf upper bound; worker concurrency is capped by
+acquired-resource capacity. It describes an already-dispatched finite batch and does not prove
+input arrival, an unbounded retry policy, or queue liveness.
 
 ### State claims
 
@@ -378,7 +387,7 @@ SHA-256 hashes it. It ignores common generated directories and `.dagcertignore` 
 selected checker artifacts inside the source root are automatically excluded to avoid
 self-reference.
 
-`dagcert-certificate/v14` records source identity, exclusions, contract/evidence/requirements
+`dagcert-certificate/v15` records source identity, exclusions, contract/evidence/requirements
 digests, source signature extraction, strict-mypy result, digest-pinned Nagini/Viper proof result
 and scope, the exact Dagcert source-verification kernel descriptor and source-file manifest hash, the complete normalized English
 requirements, the mandatory translation audit, serialized

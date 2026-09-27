@@ -1,0 +1,91 @@
+{
+  "schema": "dagcert-contract/v11",
+  "workers": [
+    {
+      "id": "preparation-worker",
+      "concurrency": 4
+    }
+  ],
+  "resources": [
+    {
+      "id": "prepared-items",
+      "capacity": 10,
+      "initial": 0,
+      "unit": "items"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "item.prepare",
+      "role": "operation",
+      "worker": "preparation-worker",
+      "implementation": {
+        "language": "python",
+        "path": "app.py",
+        "symbol": "prepare"
+      },
+      "outcomes": [
+        {
+          "type": "PreparedItem",
+          "resources": {
+            "prepared-items": {
+              "produce": 1
+            }
+          },
+          "metadata": {}
+        },
+        {
+          "type": "PreparationRejected",
+          "resources": {},
+          "metadata": {}
+        }
+      ],
+      "error_budget": {
+        "basis": "engineering_assumption",
+        "evidence_case": "completion",
+        "good_outcomes": [
+          "PreparedItem"
+        ],
+        "bad_event_probability_upper": 0.1,
+        "minimum_observations": 10
+      },
+      "external_contract": null,
+      "callable_bindings": [],
+      "start_resources": {},
+      "depends_on": [],
+      "timings": {
+        "completion": {
+          "metric": "duration",
+          "evidence": "assumed",
+          "upper_ms": 5,
+          "minimum_samples": 0,
+          "policy": "max",
+          "safety_factor": 1
+        }
+      }
+    }
+  ],
+  "channels": [],
+  "external_handoffs": [],
+  "compositions": [
+    {
+      "id": "prepare-seven-of-ten",
+      "expression": {
+        "kind": "threshold_repeat",
+        "attempts": 10,
+        "required": 7,
+        "task": "item.prepare",
+        "timing": "completion",
+        "qualifying_outcome": "PreparedItem",
+        "resource": "prepared-items"
+      },
+      "metadata": {
+        "scope": "ten dispatched attempts with seven prepared items required"
+      }
+    }
+  ],
+  "state_claims": [],
+  "metadata": {
+    "purpose": "Minimal finite K-of-N typed outcome example"
+  }
+}

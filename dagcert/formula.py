@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from math import isfinite
+from math import ceil, floor, isfinite
 from typing import Any, Mapping
 
 from .analysis import AnalysisReport
 from .contract import (
-    CompositionExpression, Contract, ResourceEffect, composition_external_handoffs,
+    CompositionExpression, CompositionStep, Contract, ResourceEffect,
+    composition_external_handoffs,
 )
 from .state_model import prove_state_claim
 
@@ -292,6 +293,7 @@ def _validate_dag_surface(references: set[str], contract: Contract) -> None:
     if contract.schema in {
         "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
         "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10",
+        "dagcert-contract/v11",
     }:
         resource_ids = {
             reference.split(":", 1)[1]
@@ -491,67 +493,111 @@ def _composition_failure_probability_upper(
     if state.contract.schema not in {
         "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7",
         "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10",
+        "dagcert-contract/v11",
     }:
         raise FormulaError(
-            "error-budget formulas require dagcert-contract/v5 through v10"
+            "error-budget formulas require dagcert-contract/v5 through v11"
         )
     composition = state.contract.composition_by_id.get(composition_id)
     if composition is None:
         raise FormulaError(f"formula cites unknown composition {composition_id!r}")
-    contributions: list[Decimal] = []
-    for step in composition.steps:
-        task = state.contract.task_by_id[step.task]
-        budget = task.error_budget
-        if budget is None:
-            if (
-                task.external_contract is None
-                and len(task.outcomes) == 1
-                and task.outcomes[0].type == step.outcome_type
-            ):
-                # The source-closed outcome union proves this exact path result. A task may
-                # still declare a conservative engineering budget, but the kernel must not
-                # force one merely to participate in a chance composition.
-                continue
-            raise FormulaError(
-                f"composition {composition_id} task {task.id} has no error budget and "
-                f"does not structurally guarantee its selected outcome {step.outcome_type!r}"
-            )
-        if step.timing != budget.evidence_case:
-            raise FormulaError(
-                f"composition {composition_id} step {task.id}/{step.timing} does not use "
-                f"its error-budget evidence case {budget.evidence_case}"
-            )
-        if step.outcome_type not in budget.good_outcomes:
-            raise FormulaError(
-                f"composition {composition_id} selects {task.id}/{step.outcome_type}, "
-                "which its error budget does not classify as good"
-            )
-        if set(budget.good_outcomes) != {step.outcome_type}:
-            raise FormulaError(
-                f"composition {composition_id} requires exactly {task.id}/{step.outcome_type}, "
-                f"but its error budget treats {list(budget.good_outcomes)} as good; the budget "
-                "therefore does not bound failure of this typed path"
-            )
-        result = next(
-            (item for item in state.analysis.error_budgets if item.task_id == task.id),
-            None,
+    if composition.expression is None:
+        return min(1.0, float(sum(
+            (
+                Decimal(step.count)
+                * _step_failure_probability_upper(step, state, composition_id)
+                for step in composition.steps
+            ),
+            Decimal(0),
+        )))
+    return float(_expression_failure_probability_upper(
+        composition.expression, state, composition_id,
+    ))
+
+
+def _step_failure_probability_upper(
+    step: CompositionStep, state: _EvaluationState, composition_id: str,
+) -> Decimal:
+    task = state.contract.task_by_id[step.task]
+    budget = task.error_budget
+    if budget is None:
+        if (
+            task.external_contract is None
+            and len(task.outcomes) == 1
+            and task.outcomes[0].type == step.outcome_type
+        ):
+            return Decimal(0)
+        raise FormulaError(
+            f"composition {composition_id} task {task.id} has no error budget and "
+            f"does not structurally guarantee its selected outcome {step.outcome_type!r}"
         )
-        if result is None or not result.passed:
-            raise FormulaError(
-                f"composition {composition_id} lacks a passing error-budget analysis for {task.id}"
-            )
-        contributions.append(
-            Decimal(step.count) * Decimal(str(budget.bad_event_probability_upper))
+    if step.timing != budget.evidence_case:
+        raise FormulaError(
+            f"composition {composition_id} step {task.id}/{step.timing} does not use "
+            f"its error-budget evidence case {budget.evidence_case}"
         )
-    if composition.expression is not None:
-        for handoff_id in composition_external_handoffs(composition.expression):
-            handoff = state.contract.external_handoff_by_id.get(handoff_id)
-            if handoff is None:  # pragma: no cover - contract validation owns this invariant
-                raise FormulaError(
-                    f"composition {composition_id} cites unknown external handoff {handoff_id!r}"
-                )
-            contributions.append(Decimal(str(handoff.bad_event_probability_upper)))
-    return min(1.0, float(sum(contributions, Decimal(0))))
+    if step.outcome_type not in budget.good_outcomes:
+        raise FormulaError(
+            f"composition {composition_id} selects {task.id}/{step.outcome_type}, "
+            "which its error budget does not classify as good"
+        )
+    if set(budget.good_outcomes) != {step.outcome_type}:
+        raise FormulaError(
+            f"composition {composition_id} requires exactly {task.id}/{step.outcome_type}, "
+            f"but its error budget treats {list(budget.good_outcomes)} as good; the budget "
+            "therefore does not bound failure of this typed path"
+        )
+    result = next(
+        (item for item in state.analysis.error_budgets if item.task_id == task.id), None,
+    )
+    if result is None or not result.passed:
+        raise FormulaError(
+            f"composition {composition_id} lacks a passing error-budget analysis for {task.id}"
+        )
+    return Decimal(str(budget.bad_event_probability_upper))
+
+
+def _expression_failure_probability_upper(
+    expression: CompositionExpression,
+    state: _EvaluationState,
+    composition_id: str,
+) -> Decimal:
+    if expression.kind == "leaf":
+        assert expression.step is not None
+        return min(
+            Decimal(1),
+            Decimal(expression.step.count)
+            * _step_failure_probability_upper(expression.step, state, composition_id),
+        )
+    if expression.kind == "threshold_repeat":
+        assert expression.step is not None
+        per_attempt = _step_failure_probability_upper(
+            expression.step, state, composition_id,
+        )
+        failures_needed = expression.attempts - expression.required + 1
+        return min(
+            Decimal(1),
+            Decimal(expression.attempts) * per_attempt / Decimal(failures_needed),
+        )
+    if expression.kind == "finite_repeat":
+        return min(
+            Decimal(1),
+            Decimal(expression.count) * _expression_failure_probability_upper(
+                expression.children[0], state, composition_id,
+            ),
+        )
+    contribution = sum(
+        (
+            _expression_failure_probability_upper(child, state, composition_id)
+            for child in expression.children
+        ),
+        Decimal(0),
+    )
+    if expression.kind == "external_handoff":
+        assert expression.handoff is not None
+        handoff = state.contract.external_handoff_by_id[expression.handoff]
+        contribution += Decimal(str(handoff.bad_event_probability_upper))
+    return min(Decimal(1), contribution)
 
 
 def _step_upper_ms(
@@ -587,7 +633,7 @@ def _merge_demands(
 def _worker_demand(
     expression: CompositionExpression, state: _EvaluationState,
 ) -> dict[str, float]:
-    if expression.kind == "leaf":
+    if expression.kind in {"leaf", "threshold_repeat"}:
         assert expression.step is not None
         return {state.contract.task_by_id[expression.step.task].worker: 1.0}
     child_demands = [_worker_demand(child, state) for child in expression.children]
@@ -599,7 +645,7 @@ def _worker_demand(
 def _acquire_demand(
     expression: CompositionExpression, state: _EvaluationState,
 ) -> dict[str, float]:
-    if expression.kind == "leaf":
+    if expression.kind in {"leaf", "threshold_repeat"}:
         assert expression.step is not None
         task = state.contract.task_by_id[expression.step.task]
         effects = task.start_resources or task.resources
@@ -648,6 +694,34 @@ def _expression_upper_ms(
         return expression.count * _expression_upper_ms(
             expression.children[0], state, timing_by_ref, composition_id,
         )
+    if expression.kind == "threshold_repeat":
+        assert expression.step is not None
+        task = state.contract.task_by_id[expression.step.task]
+        parallelism = state.contract.worker_by_id[task.worker].concurrency
+        resource_ids = set(task.start_resources) | set(task.resources)
+        for resource_id in resource_ids:
+            demand = max(
+                task.start_resources.get(resource_id, ResourceEffect()).acquire,
+                task.resources.get(resource_id, ResourceEffect()).acquire,
+            )
+            if demand > 0:
+                parallelism = min(
+                    parallelism,
+                    floor(state.contract.resource_by_id[resource_id].capacity / demand),
+                )
+        if parallelism < 1:  # pragma: no cover - contract validation owns this invariant
+            raise FormulaError(
+                f"composition {composition_id} threshold_repeat task {task.id} has no "
+                "feasible worker/resource execution slot"
+            )
+        attempt_ms = _step_upper_ms(
+            expression.step.task,
+            expression.step.timing,
+            timing_by_ref,
+            composition_id,
+        )
+        waves = ceil(expression.attempts / parallelism)
+        return waves * attempt_ms
     values = [
         _expression_upper_ms(child, state, timing_by_ref, composition_id)
         for child in expression.children
@@ -671,10 +745,10 @@ def _external_failure_probability_upper(
 ) -> float:
     if state.contract.schema not in {
         "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8",
-        "dagcert-contract/v9", "dagcert-contract/v10",
+        "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11",
     }:
         raise FormulaError(
-            "external-contract formulas require dagcert-contract/v6 through v10"
+            "external-contract formulas require dagcert-contract/v6 through v11"
         )
     task = state.contract.task_by_id.get(task_id)
     if task is None or task.external_contract is None:

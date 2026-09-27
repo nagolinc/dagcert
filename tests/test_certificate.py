@@ -100,7 +100,7 @@ def test_certificate_embeds_and_digest_binds_plain_english_requirements(project)
         "p1-contract-only+typeguard-runtime/v4"
     )
     assert document["type_enforcement"]["chance_composition"] == (
-        "engineering-envelope-optional-budget+exact-path+external/v5"
+        "engineering-envelope-optional-budget+exact-path+external+threshold-markov/v6"
     )
     assert set(document["type_enforcement"]["kernel_manifest"]) >= {
         "analysis.py", "certificate.py", "contract.py", "maledictus_verifier.py",
