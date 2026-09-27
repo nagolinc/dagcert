@@ -1,0 +1,60 @@
+{
+  "schema": "dagcert-english-requirements/v2",
+  "claims": [
+    {
+      "id": "browser-fetch-round-trip-latency",
+      "statement": "Under the two stated browser/HTTP platform assumptions, the source-proved request decision, Python admission, and source-proved response decision complete within 44 ms.",
+      "basis": "derived",
+      "formula": {
+        "lte": [
+          {
+            "composition_upper_ms": "composition:browser-fetch-round-trip"
+          },
+          44
+        ]
+      },
+      "primitive_refs": [
+        "composition:browser-fetch-round-trip",
+        "external-handoff:fetch-json-request",
+        "external-handoff:fetch-json-response",
+        "task:browser.request.accept",
+        "timing:browser.request.accept/decision",
+        "task:server.request.admit",
+        "timing:server.request.admit/completion",
+        "task:browser.response.accept",
+        "timing:browser.response.accept/decision"
+      ],
+      "checker_refs": [],
+      "assumptions": [
+        "Each JSON request and response crossing completes within its declared 20 ms platform bound.",
+        "The browser, HTTP stack, and Flask preserve the named JSON boolean fields or report a failed crossing."
+      ]
+    },
+    {
+      "id": "browser-fetch-round-trip-confidence",
+      "statement": "Under the declared engineering envelopes for the two platform crossings, the complete typed round trip succeeds with probability at least 0.98.",
+      "basis": "chance",
+      "formula": {
+        "gte": [
+          {
+            "composition_success_probability_lower": "composition:browser-fetch-round-trip"
+          },
+          0.98
+        ]
+      },
+      "primitive_refs": [
+        "composition:browser-fetch-round-trip",
+        "external-handoff:fetch-json-request",
+        "external-handoff:fetch-json-response"
+      ],
+      "checker_refs": [],
+      "assumptions": [
+        "Each transport bad-event probability is an engineering envelope of 0.01 per crossing, not a statistically inferred independence claim.",
+        "Dagcert uses the finite union bound, so no independence assumption is required."
+      ]
+    }
+  ],
+  "metadata": {
+    "purpose": "Plain-English promises for the typed browser fetch example"
+  }
+}

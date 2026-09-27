@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dagcert"
-version = "0.14.0"
+version = "0.15.0"
 description = "Plain-English certificates over workers, tasks, resources, and timings"
 readme = "readme.md"
 requires-python = ">=3.12"
@@ -75,6 +75,12 @@ examples = [
     "certified_typescript_leaf/*.md",
     "certified_typescript_leaf/artifacts/*.json",
     "certified_typescript_leaf/artifacts/*.jsonl",
+    "certified_browser_fetch/*.py",
+    "certified_browser_fetch/*.js",
+    "certified_browser_fetch/*.json",
+    "certified_browser_fetch/*.md",
+    "certified_browser_fetch/artifacts/*.json",
+    "certified_browser_fetch/artifacts/*.jsonl",
     "stats_viewer/*.html",
     "stats_viewer/*.css",
     "stats_viewer/*.js",

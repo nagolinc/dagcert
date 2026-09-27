@@ -28,10 +28,11 @@ from .contract import (
     CallableBinding, ChannelDequeue, ChannelEnqueue, Composition, CompositionExpression,
     CompositionStep, Contract,
     ContractError, ExternalCallableProvider,
-    ExternalContract, ExternalProvider, Implementation, Resource, ResourceEffect,
+    ExternalContract, ExternalHandoff, ExternalHandoffDestination, ExternalHandoffSource,
+    ExternalProvider, Implementation, Resource, ResourceEffect,
     SourceCallableProvider, StateClaim,
     Task, TaskErrorBudget, TaskOutcome, Timing, TypedChannel, TypedDependency, Worker,
-    composition_channels, load_contract,
+    composition_channels, composition_external_handoffs, load_contract,
 )
 from .evidence import ExternalEvidenceMonitor, EvidenceError, EvidenceRecorder, TimingSample, load_evidence
 from .runtime import (
@@ -60,12 +61,13 @@ __all__ = [
     "CompositionStep",
     "CallableBinding", "Contract", "ContractError", "ExternalCallableProvider",
     "ExternalContract", "ExternalProvider", "Implementation",
+    "ExternalHandoff", "ExternalHandoffDestination", "ExternalHandoffSource",
     "EnglishClaim", "EnglishRequirements", "ErrorBudgetResult", "EvidenceError", "EvidenceRecorder", "ExternalEvidenceMonitor", "Finding",
     "RequirementsError", "Resource", "ResourceEffect", "StateClaim", "SurfaceBinding", "SurfaceError",
     "StructuralProgress", "Task", "TaskErrorBudget", "TaskOutcome", "Timing", "TimingResult", "TimingSample", "TranslationAudit", "TypedChannel", "TypedDependency",
     "ExternalBoundaryEvent", "ExternalMonitorError", "ExternalRaised", "ExternalSuccess", "ExternalTypeViolation",
     "OperationTypeViolation", "SourceCallableProvider", "SourceProofBackend", "SourceSignature", "SourceTypeError", "UnhandledException", "Worker", "analyze_contract", "audit_translation", "issue_certificate",
-    "composition_channels", "load_check_result", "load_contract", "load_evidence", "load_requirements", "run_checker", "sha256_file",
+    "composition_channels", "composition_external_handoffs", "load_check_result", "load_contract", "load_evidence", "load_requirements", "run_checker", "sha256_file",
     "banner", "check_python_sources", "clear_runtime_violations", "external_boundary", "monitor_external_boundaries", "operation", "outcome_type", "runtime_violations", "source_fingerprint", "source_manifest", "stats", "verify_certificate", "write_check_result",
 ]
 

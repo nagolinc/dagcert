@@ -157,6 +157,7 @@ def test_installed_help_exposes_generic_structured_workflow_examples(capsys):
         "bounded-buffer",
         "finite-confidence",
         "async-channel",
+        "browser-fetch",
         "external-verified-leaf",
         "composed-worker-pipeline",
     ):
@@ -173,3 +174,7 @@ def test_installed_help_exposes_generic_structured_workflow_examples(capsys):
     assert main(["help", "async-channel"]) == 0
     channel = capsys.readouterr().out
     assert "async_handoff" in channel
+    assert main(["help", "browser-fetch"]) == 0
+    browser_fetch = capsys.readouterr().out
+    assert "real JavaScript `fetch` request" in browser_fetch
+    assert "JavaScript `boolean` to Python `bool`" in browser_fetch

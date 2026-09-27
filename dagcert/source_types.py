@@ -85,7 +85,7 @@ def type_enforcement_descriptor() -> dict[str, object]:
         manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
     ).encode("utf-8")
     return {
-        "provider": "dagcert.python/v9",
+        "provider": "dagcert.python/v10",
         "dagcert_version": VERSION,
         "static_analysis": "source-ast+strict-mypy/v1",
         "mypy_import_surface": "sealed-type-preserving-dagcert-stub/v1",
@@ -96,7 +96,8 @@ def type_enforcement_descriptor() -> dict[str, object]:
         "reachability": "typed-may-must/v1",
         "chance_composition": "engineering-envelope-optional-budget+exact-path+external/v5",
         "structured_composition": (
-            "sequence+parallel-all+finite-repeat+typed-async-handoff/resource-aware/v2"
+            "sequence+parallel-all+finite-repeat+typed-async-handoff+"
+            "external-transport-handoff/resource-aware/v3"
         ),
         "lifecycle_state_proofs": "two-phase-affine+bounded-non-starvation+response/v1",
         "verified_javascript_typescript_leaves": (
@@ -116,6 +117,7 @@ class SourceSignature:
     outcome_types: tuple[str, ...]
     line: int
     input_fields: tuple[tuple[str, str], ...] = ()
+    outcome_fields: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -452,9 +454,26 @@ def read_python_signature(
     input_fields = _variant_field_schema(
         root, path, tree, parameter.annotation, f"operation {symbol} input",
     )
+    outcome_fields = tuple(
+        (
+            outcome_name,
+            _variant_field_schema(
+                root,
+                path,
+                tree,
+                outcome_node,
+                f"operation {symbol} outcome {outcome_name}",
+            ),
+        )
+        for outcome_name, outcome_node in zip(
+            tuple(_annotation(item, f"operation {symbol} outcome") for item in outcome_nodes),
+            outcome_nodes,
+            strict=True,
+        )
+    )
     return SourceSignature(
         "python", Path(relative_path).as_posix(), symbol, input_type,
-        tuple(dict.fromkeys(outcomes)), function.lineno, input_fields,
+        tuple(dict.fromkeys(outcomes)), function.lineno, input_fields, outcome_fields,
     )
 
 

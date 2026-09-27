@@ -46,3 +46,8 @@ def test_typescript_leaf_v11_example_passes() -> None:
 def test_async_channel_v12_example_passes() -> None:
     root = Path(__file__).parents[1] / "examples" / "certified_async_channel"
     _assert_example_claims(root, certificate_schema="dagcert-certificate/v12")
+
+
+def test_browser_fetch_v13_example_passes() -> None:
+    root = Path(__file__).parents[1] / "examples" / "certified_browser_fetch"
+    _assert_example_claims(root, certificate_schema="dagcert-certificate/v13")

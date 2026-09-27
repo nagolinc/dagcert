@@ -1,0 +1,223 @@
+{
+  "schema": "dagcert-contract/v9",
+  "workers": [
+    {
+      "id": "browser",
+      "concurrency": 1,
+      "metadata": {}
+    },
+    {
+      "id": "server",
+      "concurrency": 1,
+      "metadata": {}
+    }
+  ],
+  "resources": [],
+  "tasks": [
+    {
+      "id": "browser.request.accept",
+      "role": "operation",
+      "worker": "browser",
+      "implementation": {
+        "language": "javascript",
+        "path": "browser.js",
+        "symbol": "requestAccepted"
+      },
+      "verified_interface": {
+        "execution": "synchronous",
+        "parameters": [
+          {
+            "name": "prompt",
+            "type": "string"
+          }
+        ],
+        "return_type": "boolean"
+      },
+      "outcomes": [
+        {
+          "type": "boolean",
+          "resources": {},
+          "metadata": {}
+        }
+      ],
+      "depends_on": [],
+      "timings": {
+        "decision": {
+          "metric": "duration",
+          "upper_ms": 1,
+          "minimum_samples": 0,
+          "safety_factor": 1.0,
+          "evidence": "assumed"
+        }
+      },
+      "error_budget": null,
+      "external_contract": null,
+      "start_resources": {},
+      "metadata": {}
+    },
+    {
+      "id": "server.request.admit",
+      "role": "operation",
+      "worker": "server",
+      "implementation": {
+        "language": "python",
+        "path": "server.py",
+        "symbol": "admit"
+      },
+      "outcomes": [
+        {
+          "type": "AdmissionResult",
+          "resources": {},
+          "metadata": {}
+        }
+      ],
+      "depends_on": [
+        {
+          "task": "browser.request.accept",
+          "outcome_type": "boolean",
+          "input_field": "requestAccepted"
+        }
+      ],
+      "timings": {
+        "completion": {
+          "metric": "duration",
+          "upper_ms": 2,
+          "minimum_samples": 0,
+          "safety_factor": 1.0,
+          "evidence": "assumed"
+        }
+      },
+      "error_budget": null,
+      "external_contract": null,
+      "start_resources": {},
+      "metadata": {}
+    },
+    {
+      "id": "browser.response.accept",
+      "role": "operation",
+      "worker": "browser",
+      "implementation": {
+        "language": "javascript",
+        "path": "browser.js",
+        "symbol": "responseAccepted"
+      },
+      "verified_interface": {
+        "execution": "synchronous",
+        "parameters": [
+          {
+            "name": "accepted",
+            "type": "boolean"
+          }
+        ],
+        "return_type": "boolean"
+      },
+      "outcomes": [
+        {
+          "type": "boolean",
+          "resources": {},
+          "metadata": {}
+        }
+      ],
+      "depends_on": [
+        {
+          "task": "server.request.admit",
+          "outcome_type": "AdmissionResult",
+          "input_field": "accepted"
+        }
+      ],
+      "timings": {
+        "decision": {
+          "metric": "duration",
+          "upper_ms": 1,
+          "minimum_samples": 0,
+          "safety_factor": 1.0,
+          "evidence": "assumed"
+        }
+      },
+      "error_budget": null,
+      "external_contract": null,
+      "start_resources": {},
+      "metadata": {}
+    }
+  ],
+  "channels": [],
+  "external_handoffs": [
+    {
+      "id": "fetch-json-request",
+      "transport": "json",
+      "wire_field": "requestAccepted",
+      "source": {
+        "task": "browser.request.accept",
+        "outcome_type": "boolean"
+      },
+      "destination": {
+        "task": "server.request.admit",
+        "input_field": "requestAccepted"
+      },
+      "assumption": "Browser JSON serialization, fetch, HTTP delivery, and Flask JSON decoding preserve the requestAccepted boolean field or report a failed crossing.",
+      "upper_ms": 20,
+      "bad_event_probability_upper": 0.01,
+      "metadata": {
+        "direction": "JavaScript browser to Python server"
+      }
+    },
+    {
+      "id": "fetch-json-response",
+      "transport": "json",
+      "wire_field": "accepted",
+      "source": {
+        "task": "server.request.admit",
+        "outcome_type": "AdmissionResult",
+        "output_field": "accepted"
+      },
+      "destination": {
+        "task": "browser.response.accept",
+        "input_field": "accepted"
+      },
+      "assumption": "Flask JSON serialization, HTTP delivery, fetch, and response.json preserve the accepted boolean field or report a failed crossing.",
+      "upper_ms": 20,
+      "bad_event_probability_upper": 0.01,
+      "metadata": {
+        "direction": "Python server to JavaScript browser"
+      }
+    }
+  ],
+  "compositions": [
+    {
+      "id": "browser-fetch-round-trip",
+      "expression": {
+        "kind": "external_handoff",
+        "handoff": "fetch-json-response",
+        "producer": {
+          "kind": "external_handoff",
+          "handoff": "fetch-json-request",
+          "producer": {
+            "kind": "leaf",
+            "task": "browser.request.accept",
+            "timing": "decision",
+            "outcome_type": "boolean"
+          },
+          "consumer": {
+            "kind": "leaf",
+            "task": "server.request.admit",
+            "timing": "completion",
+            "outcome_type": "AdmissionResult"
+          }
+        },
+        "consumer": {
+          "kind": "leaf",
+          "task": "browser.response.accept",
+          "timing": "decision",
+          "outcome_type": "boolean"
+        }
+      },
+      "metadata": {
+        "scope": "one JSON fetch request and response with source-proved decisions on both sides"
+      }
+    }
+  ],
+  "state_claims": [],
+  "metadata": {
+    "purpose": "Demonstrate an explicit cross-language browser fetch transport boundary"
+  }
+}

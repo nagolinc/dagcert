@@ -94,6 +94,9 @@ def audit_translation(
     valid_primitives.update(f"resource:{item.id}" for item in contract.resources)
     valid_primitives.update(f"channel:{item.id}" for item in contract.channels)
     valid_primitives.update(
+        f"external-handoff:{item.id}" for item in contract.external_handoffs
+    )
+    valid_primitives.update(
         f"timing:{task.id}/{case}" for task in contract.tasks for case in task.timings
     )
     valid_primitives.update(f"composition:{item.id}" for item in contract.compositions)
@@ -247,7 +250,7 @@ def audit_translation(
                     if reference.startswith("composition:")
                 }
                 channel_refs: set[str] = set()
-                from .contract import composition_channels
+                from .contract import composition_channels, composition_external_handoffs
 
                 for composition_id in composition_ids:
                     referenced_composition = contract.composition_by_id.get(composition_id)
@@ -263,6 +266,25 @@ def audit_translation(
                     findings.append(
                         f"{claim.basis} claim {claim.id} omits asynchronous channel references: "
                         f"{sorted(missing_channels)}"
+                    )
+                handoff_refs: set[str] = set()
+                for composition_id in composition_ids:
+                    referenced_composition = contract.composition_by_id.get(composition_id)
+                    if (
+                        referenced_composition is not None
+                        and referenced_composition.expression is not None
+                    ):
+                        handoff_refs.update(
+                            f"external-handoff:{handoff_id}"
+                            for handoff_id in composition_external_handoffs(
+                                referenced_composition.expression,
+                            )
+                        )
+                missing_handoffs = handoff_refs - set(claim.primitive_refs)
+                if missing_handoffs:
+                    findings.append(
+                        f"{claim.basis} claim {claim.id} omits external handoff references: "
+                        f"{sorted(missing_handoffs)}"
                     )
                 uses_budgets = formula_uses_error_budgets(claim.formula)
                 if claim.basis == "chance" and not uses_budgets:
@@ -292,6 +314,7 @@ def audit_translation(
                         for reference in formula_refs
                         if reference.startswith("external-contract:")
                     )
+                    budget_refs.update(handoff_refs)
                     missing_budgets = budget_refs - set(claim.primitive_refs)
                     if missing_budgets:
                         findings.append(
@@ -327,6 +350,19 @@ def audit_translation(
         findings.append(
             "external contracts lack explicit English assumptions: "
             f"{external_assumption_gaps}"
+        )
+    handoff_assumption_gaps = [
+        f"external-handoff:{handoff.id}"
+        for handoff in contract.external_handoffs
+        if not any(
+            f"external-handoff:{handoff.id}" in claim.primitive_refs and claim.assumptions
+            for claim in requirements.claims
+        )
+    ]
+    if handoff_assumption_gaps:
+        findings.append(
+            "external handoffs lack explicit English assumptions: "
+            f"{handoff_assumption_gaps}"
         )
 
     supplementary = () if selected is None else tuple(sorted(selected - required_checkers))

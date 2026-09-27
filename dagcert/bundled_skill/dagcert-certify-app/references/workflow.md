@@ -37,10 +37,11 @@ that opt-out in the handoff. Run `python -m dagcert help app-surfaces` for the i
 
 ## Contract
 
-The hardened `dagcert-contract/v8` JSON or YAML object contains `workers`, `tasks`, `resources`,
+The hardened `dagcert-contract/v9` JSON or YAML object contains `workers`, `tasks`, `resources`,
 typed asynchronous `channels`, task-local `timings`, structured finite `compositions`,
-`state_claims`, and metadata. Composition expressions contain only `leaf`, `sequence`,
-`parallel_all`, `finite_repeat`, and `async_handoff`. Every leaf names
+cross-language `external_handoffs`, `state_claims`, and metadata. Composition expressions contain
+only `leaf`, `sequence`, `parallel_all`, `finite_repeat`, `async_handoff`, and
+`external_handoff`. Every leaf names
 the source outcome it traverses, sequence boundaries must match real typed dependency edges, and a
 fork/join binds branch outputs to fields of the real downstream source input record.
 An `async_handoff` binds independently scheduled producer and consumer expressions through one
@@ -49,6 +50,11 @@ consumer must traverse its declared successful dequeue outcome exactly once, and
 payload input field must have that same compiler-extracted type. Both endpoints move exactly one
 token through the named queue resource. Do not make a dequeue policy/request carry a value that is
 unknown until the queue returns it.
+An `external_handoff` is reserved for a real platform transport between source-proved endpoints.
+Name the exact source outcome (and output field for a record), destination input field, wire field,
+transport kind, explicit platform assumption, latency bound, and engineering failure budget. Do not
+replace application code with a fake same-language adapter. Use only Dagcert's fixed primitive
+mapping table; `dagcert help browser-fetch` shows a JavaScript `fetch`/JSON/Python round trip.
 Each task has an `implementation` binding
 with `language`, source-root-relative `path`, and `symbol`. For Python, Dagcert parses that exact
 callable, requires one explicit source-defined input class and an inline closed union of explicit

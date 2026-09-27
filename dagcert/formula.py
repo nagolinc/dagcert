@@ -8,7 +8,9 @@ from math import isfinite
 from typing import Any, Mapping
 
 from .analysis import AnalysisReport
-from .contract import CompositionExpression, Contract, ResourceEffect
+from .contract import (
+    CompositionExpression, Contract, ResourceEffect, composition_external_handoffs,
+)
 from .state_model import prove_state_claim
 
 
@@ -49,6 +51,16 @@ def evaluate_formula(
     state = _EvaluationState(contract, analysis)
     value = _boolean(formula, state, "formula")
     references = set(formula_references(formula))
+    referenced_compositions = {
+        reference for reference in references if reference.startswith("composition:")
+    }
+    for composition_ref in referenced_compositions:
+        composition = contract.composition_by_id.get(composition_ref.split(":", 1)[1])
+        if composition is not None and composition.expression is not None:
+            references.update(
+                f"external-handoff:{handoff_id}"
+                for handoff_id in composition_external_handoffs(composition.expression)
+            )
     probability_compositions = {
         reference for reference in references
         if reference.startswith("composition:")
@@ -62,6 +74,11 @@ def evaluate_formula(
                 for step in composition.steps
                 if contract.task_by_id[step.task].error_budget is not None
             )
+            if composition.expression is not None:
+                references.update(
+                    f"external-handoff:{handoff_id}"
+                    for handoff_id in composition_external_handoffs(composition.expression)
+                )
     external_probability_refs = {
         reference for reference in references
         if reference.startswith("external-contract:")
@@ -274,7 +291,7 @@ def _validate_dag_surface(references: set[str], contract: Contract) -> None:
     }
     if contract.schema in {
         "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
-        "dagcert-contract/v7", "dagcert-contract/v8",
+        "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9",
     }:
         resource_ids = {
             reference.split(":", 1)[1]
@@ -473,10 +490,10 @@ def _composition_failure_probability_upper(
 ) -> float:
     if state.contract.schema not in {
         "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7",
-        "dagcert-contract/v8",
+        "dagcert-contract/v8", "dagcert-contract/v9",
     }:
         raise FormulaError(
-            "error-budget formulas require dagcert-contract/v5, v6, v7, or v8"
+            "error-budget formulas require dagcert-contract/v5, v6, v7, v8, or v9"
         )
     composition = state.contract.composition_by_id.get(composition_id)
     if composition is None:
@@ -526,6 +543,14 @@ def _composition_failure_probability_upper(
         contributions.append(
             Decimal(step.count) * Decimal(str(budget.bad_event_probability_upper))
         )
+    if composition.expression is not None:
+        for handoff_id in composition_external_handoffs(composition.expression):
+            handoff = state.contract.external_handoff_by_id.get(handoff_id)
+            if handoff is None:  # pragma: no cover - contract validation owns this invariant
+                raise FormulaError(
+                    f"composition {composition_id} cites unknown external handoff {handoff_id!r}"
+                )
+            contributions.append(Decimal(str(handoff.bad_event_probability_upper)))
     return min(1.0, float(sum(contributions, Decimal(0))))
 
 
@@ -627,6 +652,15 @@ def _expression_upper_ms(
         _expression_upper_ms(child, state, timing_by_ref, composition_id)
         for child in expression.children
     ]
+    if expression.kind == "external_handoff":
+        assert expression.handoff is not None
+        handoff = state.contract.external_handoff_by_id.get(expression.handoff)
+        if handoff is None:  # pragma: no cover - contract validation owns this invariant
+            raise FormulaError(
+                f"composition {composition_id} cites unknown external handoff "
+                f"{expression.handoff!r}"
+            )
+        return sum(values) + handoff.upper_ms
     if expression.kind == "parallel_all" and _parallel_can_overlap(expression, state):
         return max(values)
     return sum(values)
@@ -637,9 +671,10 @@ def _external_failure_probability_upper(
 ) -> float:
     if state.contract.schema not in {
         "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8",
+        "dagcert-contract/v9",
     }:
         raise FormulaError(
-            "external-contract formulas require dagcert-contract/v6, v7, or v8"
+            "external-contract formulas require dagcert-contract/v6, v7, v8, or v9"
         )
     task = state.contract.task_by_id.get(task_id)
     if task is None or task.external_contract is None:

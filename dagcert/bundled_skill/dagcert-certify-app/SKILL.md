@@ -49,17 +49,21 @@ declares finite source-outcome paths over those primitives.
   cross-file operation-record imports as explicit source edges, and Dagcert checks those edges
   against the exact bound files and hashes. Do not duplicate or flatten records to make operation
   files artificially self-contained.
-- A v12 certificate seals strict-mypy output, the selected proof-engine identity and proof scope, and the
+- A v13 certificate seals strict-mypy output, the selected proof-engine identity and proof scope, and the
   exact type-enforcement core-file manifest—not only a claimed Dagcert version or compiler result.
 - `instrumentation` tasks may record aggregate observations but cannot participate in a derived
   composition.
-- A v8 composition is built only from `leaf`, `sequence`, `parallel_all`, `finite_repeat`, and
-  `async_handoff`. Use `async_handoff` for a real queue between independently scheduled workers;
+- A v9 composition is built only from `leaf`, `sequence`, `parallel_all`, `finite_repeat`,
+  `async_handoff`, and `external_handoff`. Use `async_handoff` for a real queue between independently scheduled workers;
   declare its typed channel instead of feeding the unknown producer value into the dequeue request.
   Sequence boundaries are real typed dependency edges. A parallel join binds every branch output
   to a field of the real downstream input record, and hidden cross-branch dependencies fail.
   Dagcert computes its conservative bound from those leaves; it never accepts a direct aggregate
   stopwatch as the derivation.
+- Use `external_handoff` only for a real cross-language platform transport between source-proved
+  endpoints. Bind the exact wire field and compiler-extracted endpoint types, state the platform
+  assumption, and include its latency and engineering failure budget. See
+  `dagcert help browser-fetch`; never invent a same-language browser adapter.
 - V7 lifecycle effects distinguish task start from typed completion outcomes. Use kernel state
   claims for affine conservation, finite-horizon supply, and bounded dispatch; do not substitute a
   custom checker boolean for those proofs.

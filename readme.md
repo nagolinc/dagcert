@@ -86,9 +86,9 @@ Those primitives are enough to express conditional statements such as:
 - model X is never more than G generations out of date; and
 - a handler or visible action completes within its declared deadline.
 
-V12 issuance separates real `operation`, `external`, and `instrumentation` tasks and supports a
+V13 issuance separates real `operation`, `external`, and `instrumentation` tasks and supports a
 small structured workflow algebra: `leaf`, `sequence`, `parallel_all`, `finite_repeat`, and the
-v8-only `async_handoff`.
+v8+ `async_handoff` plus the v9-only `external_handoff`.
 Every v7+ leaf names the source outcome traversed and every sequence boundary must match real typed
 dependency edges. A fork/join binds each branch output to a field of the downstream source input
 record. A composition has no stopwatch of its own: Dagcert computes its bound from exact leaf
@@ -104,6 +104,15 @@ payload type and produce one queue-resource token. The successful dequeue outcom
 token, and its named source input field must have that same extracted payload type. Dagcert then
 unions the finite path's leaf budgets normally. It still does not infer FIFO ordering, infinite
 liveness, or fairness.
+
+An `external_handoff` is a narrow cross-language platform edge. It binds one source task/outcome
+(and, for record outcomes, one compiler-extracted output field) to one destination task/input field,
+plus the exact wire-field name. The kernel accepts only fixed representation-preserving mappings:
+JSON `boolean`/`string` between JavaScript or TypeScript and Python `bool`/`str`, and URL-query
+`string` to Python `str`. The handoff carries an explicit platform assumption, duration upper
+bound, and engineering bad-event budget. Those terms are added to structured-composition latency
+and union-bound calculations; they cannot be hidden inside an observer task. See
+`dagcert help browser-fetch` for a runnable real `fetch` round trip.
 
 V7+ tasks also distinguish resource effects at task start from effects on each typed completion
 outcome. Kernel-owned state claims cover affine lifecycle invariants, finite-horizon
@@ -146,7 +155,7 @@ closure and returns every source-import edge. Dagcert independently reconstructs
 the exact source files and requires the importer, module, provider, provider hash, and imported
 symbols to match; altered or omitted edges refuse issuance.
 
-The v12 certificate seals strict-mypy output, the pinned verifier image digest and proof scope, and
+The v13 certificate seals strict-mypy output, the pinned verifier identity and proof scope, and
 a manifest hash of the source-verification kernel and typing stubs. For Maledictus, response v7
 also requires and retains the exact strict-mypy package, runtime executable, complete runtime
 bundle, configuration, and contract-support hashes. Verification reruns the digest-pinned backend
