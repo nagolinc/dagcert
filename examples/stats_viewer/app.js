@@ -78,10 +78,16 @@
         || (timing.lower_ms != null && row.value_ms < timing.lower_ms);
     });
     if (runtimeViolation) {
-      return { healthy: false, detail: violationDetail(runtimeViolation), samples: samples.length };
+      return {
+        state: "unhealthy",
+        healthy: false,
+        detail: violationDetail(runtimeViolation),
+        samples: samples.length,
+      };
     }
     if (failedSample) {
       return {
+        state: "unhealthy",
         healthy: false,
         detail: `Failed ${failedSample.case || "runtime"} sample`,
         samples: samples.length,
@@ -89,15 +95,24 @@
     }
     if (boundBreach) {
       return {
+        state: "unhealthy",
         healthy: false,
         detail: `${boundBreach.case} exceeded its declared bound`,
         samples: samples.length,
       };
     }
     if (samples.length === 0) {
-      return { healthy: false, detail: "No retained runtime evidence", samples: 0 };
+      const timings = Object.values(task.timings || {}),
+        assumed = timings.length > 0 && timings.every((timing) => timing.evidence === "assumed"),
+        detail = assumed
+          ? "Source-proved task with explicit assumed timing bounds; not runtime-observed"
+          : task.role === "instrumentation"
+            ? "Instrumentation task has no retained runtime observations"
+            : "Source-proved task has no retained runtime observations";
+      return { state: "unobserved", healthy: false, detail, samples: 0 };
     }
     return {
+      state: "healthy",
       healthy: true,
       detail: `${samples.length} observations within declared bounds`,
       samples: samples.length,
@@ -114,16 +129,24 @@
       const directViolation = violations.find(
         (violation) => activeViolation(violation) && referencedId(violation, "worker") === worker.id,
       );
-      const unhealthy = assigned.filter((row) => !row.healthy);
-      const healthy = !directViolation && assigned.length > 0 && unhealthy.length === 0;
+      const failed = assigned.filter((row) => row.state === "unhealthy"),
+        unobserved = assigned.filter((row) => row.state === "unobserved"),
+        state = directViolation || failed.length > 0
+          ? "unhealthy"
+          : assigned.length === 0 || unobserved.length > 0
+            ? "unobserved"
+            : "healthy",
+        healthy = state === "healthy";
       const detail = directViolation
         ? violationDetail(directViolation)
         : assigned.length === 0
           ? "No declared tasks"
-          : healthy
+          : state === "healthy"
             ? `${assigned.length} assigned task${assigned.length === 1 ? "" : "s"} healthy`
-            : `${unhealthy.length} of ${assigned.length} assigned tasks need attention`;
-      return [worker.id, { worker, healthy, detail, assigned }];
+            : state === "unobserved"
+              ? `${unobserved.length} of ${assigned.length} assigned tasks not runtime-observed`
+              : `${failed.length} of ${assigned.length} assigned tasks need attention`;
+      return [worker.id, { worker, state, healthy, detail, assigned }];
     }));
     return { violations, tasks, workers };
   }
@@ -181,14 +204,16 @@
     }).join("");
   }
 
-  function healthCard(id, type, healthy, detail, extra) {
+  function healthCard(id, type, state, detail, extra) {
+    const icon = state === "healthy" ? "✓" : state === "unhealthy" ? "!" : "—",
+      label = state === "healthy" ? "Healthy" : state === "unhealthy" ? "Attention" : "Not observed";
     return [
-      `<article class="health-card ${healthy ? "is-healthy" : "is-unhealthy"}">`,
-      `<span class="health-icon">${healthy ? "✓" : "!"}</span>`,
+      `<article class="health-card is-${state}">`,
+      `<span class="health-icon">${icon}</span>`,
       '<div class="health-copy">',
       `<div><span class="health-kind">${esc(type)}</span><strong>${esc(id)}</strong></div>`,
       `<p>${esc(detail)}</p>${extra || ""}</div>`,
-      `<span class="health-state">${healthy ? "Healthy" : "Attention"}</span>`,
+      `<span class="health-state">${label}</span>`,
       "</article>",
     ].join("");
   }
@@ -196,21 +221,23 @@
   function renderHealth(health) {
     const workers = [...health.workers.values()];
     const tasks = [...health.tasks.values()];
-    const healthyWorkers = workers.filter((row) => row.healthy).length;
-    const healthyTasks = tasks.filter((row) => row.healthy).length;
-    $("worker-health-count").textContent = `${healthyWorkers} / ${workers.length} healthy`;
-    $("task-health-count").textContent = `${healthyTasks} / ${tasks.length} healthy`;
+    const healthyWorkers = workers.filter((row) => row.state === "healthy").length,
+      healthyTasks = tasks.filter((row) => row.state === "healthy").length,
+      unobservedWorkers = workers.filter((row) => row.state === "unobserved").length,
+      unobservedTasks = tasks.filter((row) => row.state === "unobserved").length;
+    $("worker-health-count").textContent = `${healthyWorkers} healthy · ${unobservedWorkers} not observed`;
+    $("task-health-count").textContent = `${healthyTasks} healthy · ${unobservedTasks} not observed`;
     $("worker-health").innerHTML = workers.map((row) => healthCard(
       row.worker.id,
       "worker",
-      row.healthy,
+      row.state,
       row.detail,
       `<span class="health-extra">${row.worker.concurrency} concurrent slot${row.worker.concurrency === 1 ? "" : "s"}</span>`,
     )).join("");
     $("task-health").innerHTML = tasks.map((row) => healthCard(
       row.task.id,
       "task",
-      row.healthy,
+      row.state,
       row.detail,
       `<a class="health-extra health-link" href="${esc(graphHref(row.task.id))}">worker · ${esc(row.task.worker)}</a>`,
     )).join("");
@@ -219,16 +246,33 @@
   function renderSummary(health) {
     const c = data.contract,
       a = data.certificate?.analysis || {};
-    const unhealthyWorkers = [...health.workers.values()].filter((row) => !row.healthy).length;
-    const unhealthyTasks = [...health.tasks.values()].filter((row) => !row.healthy).length;
+    const unhealthyWorkers = [...health.workers.values()].filter(
+        (row) => row.state === "unhealthy",
+      ).length,
+      unhealthyTasks = [...health.tasks.values()].filter(
+        (row) => row.state === "unhealthy",
+      ).length,
+      unobservedWorkers = [...health.workers.values()].filter(
+        (row) => row.state === "unobserved",
+      ).length,
+      unobservedTasks = [...health.tasks.values()].filter(
+        (row) => row.state === "unobserved",
+      ).length;
     const issueCount = unhealthyWorkers + unhealthyTasks;
+    const unobservedCount = unobservedWorkers + unobservedTasks;
     const status = document.querySelector(".status");
-    status.dataset.health = issueCount || a.passed === false ? "unhealthy" : "healthy";
+    status.dataset.health = issueCount || a.passed === false
+      ? "unhealthy"
+      : unobservedCount
+        ? "unobserved"
+        : "healthy";
     $("header-status").textContent = a.passed === false
       ? "Certificate not passing"
       : issueCount
         ? `${issueCount} worker/task issue${issueCount === 1 ? "" : "s"}`
-        : "All workers and tasks healthy";
+        : unobservedCount
+          ? `Certificate valid · ${unobservedCount} worker/task status${unobservedCount === 1 ? "" : "es"} not runtime-observed`
+          : "All workers and tasks healthy";
     const timingCount = c.tasks.reduce(
       (n, t) => n + Object.keys(t.timings || {}).length,
       0,
@@ -237,12 +281,12 @@
       [
         c.workers.length,
         "workers",
-        `${c.workers.length - unhealthyWorkers} healthy · ${c.workers.reduce((n, w) => n + w.concurrency, 0)} slots`,
+        `${c.workers.length - unhealthyWorkers - unobservedWorkers} healthy · ${unobservedWorkers} not observed`,
       ],
       [
         c.tasks.length,
         "tasks",
-        `${c.tasks.length - unhealthyTasks} healthy · ${c.tasks.filter((t) => (t.depends_on || []).length === 0).length} source task`,
+        `${c.tasks.length - unhealthyTasks - unobservedTasks} healthy · ${unobservedTasks} not observed`,
       ],
       [
         c.resources.length,
@@ -323,7 +367,7 @@
     tasks.forEach((t) => {
       const p = pos[t.id],
         taskState = health.tasks.get(t.id),
-        healthClass = taskState?.healthy ? " is-healthy" : " is-unhealthy",
+        healthClass = ` is-${taskState?.state || "unobserved"}`,
         effects = Object.entries(t.resources || {})
           .map(
             ([id, e]) =>

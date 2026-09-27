@@ -30,10 +30,14 @@ banner(app)
 
 Add `<script src="/dagcert/banner.js"></script>` to every user-facing shell. `banner(app)` only
 serves that script and `/dagcert/runtime-events`; it does not rewrite HTML. `/stats` must contain a
-1:1 mapping to the bound certificate's task IDs, not the three-task standalone demo. Verify the real
-task set, violation appearance, linked red task/worker health, dismissal, and reappearance for a
-later violation in the browser. Omit either surface only after an explicit user opt-out and record
-that opt-out in the handoff. Run `python -m dagcert help app-surfaces` for the installed contract.
+1:1 mapping to the bound certificate's task IDs, not the three-task standalone demo. It verifies
+the certificate self-digest, the displayed evidence's sealed digest, and each sample's source
+fingerprint; missing or substituted evidence refuses registration. A sealed task with no retained
+sample is neutral **not observed**, not failed and not healthy. Verify the real task set, refusal of
+changed evidence, neutral unobserved state, violation appearance, linked red task/worker health,
+dismissal, and reappearance for a later violation in the browser. Omit either surface only after an
+explicit user opt-out and record that opt-out in the handoff. Run
+`python -m dagcert help app-surfaces` for the installed contract.
 
 ## Contract
 

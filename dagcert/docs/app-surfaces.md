@@ -12,10 +12,17 @@ stats(app, certificate="artifacts/certificate.json", evidence="artifacts/timings
 banner(app)
 ```
 
-`stats(...)` registers `/stats` and binds its initial data to that exact certificate. It must show
-one DAG node per sealed task, the sealed workers/resources, matching source fingerprint, available
-evidence, recent violations first, and obvious red/green task and worker health. If `evidence` is
-omitted, Dagcert uses `timings.jsonl` beside the certificate when present.
+`stats(...)` registers `/stats` and binds its initial data to that exact certificate. It verifies
+the certificate's self-digest, requires the displayed evidence file to match the certificate's
+sealed `evidence_sha256`, and requires every retained sample to carry the certificate's exact source
+fingerprint. A missing explicit evidence path, a missing default file, substituted evidence, or
+cross-source evidence refuses surface registration. If `evidence` is omitted, Dagcert requires
+`timings.jsonl` beside the certificate.
+
+The page shows one DAG node per sealed task, the sealed workers/resources, recent violations first,
+and explicit task and worker health. A retained failure or bound violation is unhealthy; valid
+sealed evidence with no sample for a task is neutral **not observed**, not a runtime failure and not
+a healthy observation.
 
 `banner(...)` registers `/dagcert/banner.js` and `/dagcert/runtime-events`, serving the packaged
 `dagcert-violation-banner.js` component. It does not inject or rewrite HTML responses. Include the
@@ -38,7 +45,8 @@ and standalone preview. In particular, `sample-data.js` is a visual demo only. N
 application, never expose its three demo tasks as real stats, and never hand-build substitute route
 or banner behavior when these APIs are available.
 
-Verify the installed integration in the real browser: `/stats` has exactly the sealed task IDs; a
-forced violation makes the matching task and worker red; the banner appears; its dismiss button
-hides only the current violation; and a later violation makes it reappear. Omit either surface only
-on explicit user request and record that opt-out in the certification handoff.
+Verify the installed integration in the real browser: `/stats` has exactly the sealed task IDs;
+missing or changed evidence prevents startup; an unobserved task is neutral; a forced violation
+makes the matching task and worker red; the banner appears; its dismiss button hides only the
+current violation; and a later violation makes it reappear. Omit either surface only on explicit
+user request and record that opt-out in the certification handoff.

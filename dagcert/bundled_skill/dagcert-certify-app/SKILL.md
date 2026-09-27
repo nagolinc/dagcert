@@ -15,13 +15,17 @@ APIS, NOT EXAMPLE CODE TO COPY, MODIFY, OR REIMPLEMENT.**
 
 - After the normal `pip install dagcert`, call `stats(app, certificate=..., evidence=...)` and
   `banner(app)`; there is no separate installer.
+- Pass the issued certificate's sealed evidence file. `stats(...)` refuses a missing file, an
+  evidence digest mismatch, a certificate digest mismatch, or a sample from another source
+  fingerprint. Never pass a nonexistent or substitute file to reduce the page payload.
 - Include exactly `<script src="/dagcert/banner.js"></script>` on every user-facing shell.
 - Verify `/stats` contains one node for every task in the bound certificate. Never serve the
   bundled three-task `sample-data.js` demo as application data.
 
 `banner(app)` serves the script and event feed; it does not inject HTML. Test in the real browser
-that `/stats` loads the real certificate, a forced violation produces the red warning and red
-task/worker state, the dismiss button hides that warning, and a later violation makes it reappear.
+that `/stats` loads the real certificate and sealed evidence, a task without a retained sample is
+neutral rather than failed, a forced violation produces the red warning and red task/worker state,
+the dismiss button hides that warning, and a later violation makes it reappear.
 Omit a surface only after an explicit user opt-out, and report that opt-out in the handoff. Read the
 **Required application surfaces** section of the workflow reference before integrating them.
 

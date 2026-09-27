@@ -36,7 +36,7 @@ return both a certificate and an honest account of anything it could not prove.
 
 > **UNLESS THE USER EXPLICITLY ASKS YOU NOT TO, THE AGENT MUST USE DAGCERT'S SUPPLIED `/stats`
 > VIEWER AND DISMISSIBLE RED VIOLATION BANNER LITERALLY. THEY ARE APPLICATION APIS, NOT EXAMPLE CODE
-> TO COPY OR MODIFY.** Call `stats(app, certificate=...)` and `banner(app)`, then include exactly
+> TO COPY OR MODIFY.** Call `stats(app, certificate=..., evidence=...)` and `banner(app)`, then include exactly
 > `<script src="/dagcert/banner.js"></script>` on every user-facing app shell. Never serve the
 > bundled three-task demo as an application's `/stats` data.
 
@@ -331,8 +331,11 @@ banner(app)
 ```
 
 This makes `/stats` render one DAG node for every sealed task and serves the banner script and
-retained event feed. The examples directory is only a standalone visual preview; its bundled
-three-task dataset must never be served as application stats.
+retained event feed. Surface registration fails if the certificate self-digest, sealed evidence
+digest, or sample source fingerprint does not match; evidence is not optional or substitutable. A
+task with no retained sample is shown as neutral **not observed**, not failed or healthy. The
+examples directory is only a standalone visual preview; its bundled three-task dataset must never
+be served as application stats.
 
 ### Runtime violations: make failed guarantees impossible to miss
 

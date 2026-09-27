@@ -14,6 +14,9 @@
   --danger: #b42318;
   --danger-bg: #fff0ee;
   --danger-line: #f1a29a;
+  --unobserved: #526079;
+  --unobserved-bg: #f4f6f9;
+  --unobserved-line: #b8c2d1;
   --shadow: 0 8px 24px rgba(16, 24, 40, 0.06);
 }
 * {
@@ -79,6 +82,11 @@ body {
   border-color: var(--danger-line);
   color: var(--danger);
 }
+.status[data-health="unobserved"] {
+  background: var(--unobserved-bg);
+  border-color: var(--unobserved-line);
+  color: var(--unobserved);
+}
 .status-dot {
   display: inline-block;
   width: 8px;
@@ -89,6 +97,9 @@ body {
 }
 .status[data-health="unhealthy"] .status-dot {
   background: var(--danger);
+}
+.status[data-health="unobserved"] .status-dot {
+  background: var(--unobserved);
 }
 main {
   width: min(1180px, 92vw);
@@ -226,6 +237,15 @@ main {
   border-color: var(--danger-line);
   border-left-color: var(--danger);
   background: var(--danger-bg);
+}
+.health-card.is-unobserved {
+  border-color: var(--unobserved-line);
+  border-left-color: var(--unobserved);
+  background: var(--unobserved-bg);
+}
+.health-card.is-unobserved .health-icon,
+.health-card.is-unobserved .health-state {
+  background: var(--unobserved);
 }
 .health-card .health-icon {
   width: 25px;
@@ -379,6 +399,13 @@ main {
 }
 .dag-node.is-unhealthy circle {
   fill: var(--danger);
+}
+.dag-node.is-unobserved rect {
+  fill: var(--unobserved-bg);
+  stroke: var(--unobserved-line);
+}
+.dag-node.is-unobserved circle {
+  fill: var(--unobserved);
 }
 .dag-node.is-target rect {
   stroke: var(--accent);

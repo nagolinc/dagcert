@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass
+from hashlib import sha256
 from importlib.resources import files
 import json
 from pathlib import Path
 from typing import Any, Protocol, cast
 
+from .certificate import canonical_json, sha256_file
 from .evidence import load_evidence
 from .runtime import runtime_violations
 
@@ -60,6 +62,18 @@ def _banner_asset() -> str:
     ).read_text(encoding="utf-8")
 
 
+def _sha256_digest(value: object, name: str) -> str:
+    if not isinstance(value, str) or len(value) != 64:
+        raise SurfaceError(f"certificate {name} must be a SHA-256 digest")
+    try:
+        decoded = bytes.fromhex(value)
+    except ValueError as exc:
+        raise SurfaceError(f"certificate {name} must be a SHA-256 digest") from exc
+    if len(decoded) != 32:
+        raise SurfaceError(f"certificate {name} must be a SHA-256 digest")
+    return value
+
+
 def _certificate_document(path: str | Path) -> tuple[Path, dict[str, Any]]:
     certificate_path = Path(path).resolve()
     try:
@@ -76,6 +90,14 @@ def _certificate_document(path: str | Path) -> tuple[Path, dict[str, Any]]:
     for name in ("workers", "tasks", "resources"):
         if not isinstance(primitives.get(name), list):
             raise SurfaceError(f"certificate primitives.{name} must be an array")
+    claimed_digest = raw.get("certificate_sha256")
+    unsigned = dict(raw)
+    unsigned.pop("certificate_sha256", None)
+    actual_digest = sha256(canonical_json(unsigned)).hexdigest()
+    if not isinstance(claimed_digest, str) or claimed_digest != actual_digest:
+        raise SurfaceError("stats certificate digest does not match its sealed contents")
+    for name in ("evidence_sha256", "source_fingerprint"):
+        _sha256_digest(raw.get(name), name)
     return certificate_path, raw
 
 
@@ -88,11 +110,36 @@ def _bound_data(
     selected_evidence = Path(evidence_path).resolve() if evidence_path is not None else (
         certificate_path.parent / "timings.jsonl"
     )
-    evidence = (
-        [sample.to_mapping() for sample in load_evidence(selected_evidence)]
-        if selected_evidence.is_file()
-        else []
-    )
+    if not selected_evidence.is_file():
+        supplied = "explicitly supplied" if evidence_path is not None else "default"
+        raise SurfaceError(
+            f"stats {supplied} evidence file does not exist: {selected_evidence}"
+        )
+    try:
+        actual_evidence_sha256 = sha256_file(selected_evidence)
+        samples = load_evidence(selected_evidence)
+    except (OSError, ValueError) as exc:
+        raise SurfaceError(
+            f"cannot read certificate-bound evidence {selected_evidence}: {exc}"
+        ) from exc
+    sealed_evidence_sha256 = cast(str, certificate["evidence_sha256"])
+    if actual_evidence_sha256 != sealed_evidence_sha256:
+        raise SurfaceError(
+            "stats evidence digest does not match certificate.evidence_sha256: "
+            f"expected {sealed_evidence_sha256}, got {actual_evidence_sha256}"
+        )
+    source_fingerprint = cast(str, certificate["source_fingerprint"])
+    mismatched_samples = sorted({
+        sample.source_fingerprint
+        for sample in samples
+        if sample.source_fingerprint != source_fingerprint
+    })
+    if mismatched_samples:
+        raise SurfaceError(
+            "stats evidence contains samples from a different source fingerprint: "
+            f"certificate={source_fingerprint}, evidence={mismatched_samples}"
+        )
+    evidence = [sample.to_mapping() for sample in samples]
     return {
         "contract": {
             "schema": "dagcert-contract/bound-certificate",
@@ -101,6 +148,12 @@ def _bound_data(
             "resources": primitives["resources"],
         },
         "evidence": evidence,
+        "evidence_binding": {
+            "sha256": actual_evidence_sha256,
+            "source_fingerprint": source_fingerprint,
+            "sample_count": len(evidence),
+            "sealed": True,
+        },
         "certificate": certificate,
         "runtime_events": {"violation_count": 0, "violations": [], "last_violation": None},
     }
@@ -146,6 +199,9 @@ def stats(
     extension["task_workers"] = task_workers
     extension["external_boundary_tasks"] = boundary_tasks
     extension["certificate_path"] = str(certificate_path)
+    extension["evidence_sha256"] = cast(
+        dict[str, Any], bound["evidence_binding"]
+    )["sha256"]
 
     index = _asset("index.html")
     index = index.replace("<head>", f'<head>\n    <base href="{base}/" />', 1)

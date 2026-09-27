@@ -36,6 +36,11 @@ Required review
    operation being promised. Check relevant concurrency, failure, blocking,
    and state-transition paths. A timed helper or stand-in is not evidence for
    an HTTP, browser, database, model, or queue boundary that it does not cross.
+   If the application exposes Dagcert's `/stats`, confirm that the displayed
+   evidence is the file sealed by the certificate: missing evidence, a digest
+   mismatch, a source-fingerprint mismatch, or a substituted empty file is an
+   integrity failure. Confirm that zero retained samples is presented as not
+   observed, never as either a runtime failure or a healthy observation.
 4. Distinguish measured facts from assumptions. Explain exactly how every
    relevant assumption limits the English promise.
 5. Do not mistake a declared resource capacity for evidence that the code
