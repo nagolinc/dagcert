@@ -1798,6 +1798,10 @@ def composition_external_handoffs(
         return composition_external_handoffs(
             expression.children[0], multiplier=multiplier * expression.count,
         )
+    if expression.kind == "threshold_repeat" and expression.children:
+        return composition_external_handoffs(
+            expression.children[0], multiplier=multiplier * expression.attempts,
+        )
     result: list[str] = []
     if expression.kind == "external_handoff":
         assert expression.handoff is not None
@@ -1918,6 +1922,38 @@ def _validate_composition_expression_edges(
                 f"composition {composition_id} threshold_repeat non-qualifying outcomes also "
                 f"produce {resource_id!r}: {incorrectly_producing}"
             )
+        if expression.qualifying_exit is not None:
+            body = expression.children[0]
+            qualifier = expression.qualifying_exit
+            body_exits = _expression_exits(body)
+            matching_exits = [
+                candidate for candidate in body_exits
+                if candidate.task == qualifier.task
+                and candidate.outcome_type == qualifier.outcome_type
+                and candidate.count == 1
+            ]
+            if len(matching_exits) != 1:
+                raise ContractError(
+                    f"composition {composition_id} structured threshold_repeat body must "
+                    "contain its qualifying_exit exactly once among its terminal outcomes"
+                )
+            other_resource_producers = sorted({
+                candidate.task
+                for candidate in composition_steps(body)
+                if not (
+                    candidate.task == qualifier.task
+                    and candidate.outcome_type == qualifier.outcome_type
+                )
+                and tasks[candidate.task].outcome_by_type[
+                    str(candidate.outcome_type)
+                ].resources.get(qualifier.resource, ResourceEffect()).produce > 0
+            })
+            if other_resource_producers:
+                raise ContractError(
+                    f"composition {composition_id} structured threshold_repeat body has "
+                    f"non-exit producers of {qualifier.resource!r}: "
+                    f"{other_resource_producers}"
+                )
     if expression.kind == "sequence":
         for upstream, downstream in zip(
             expression.children, expression.children[1:], strict=False,
