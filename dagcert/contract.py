@@ -395,6 +395,11 @@ def composition_steps(
             expression.children[0], multiplier=multiplier * expression.count,
         )
     if expression.kind == "threshold_repeat":
+        if expression.children:
+            return composition_steps(
+                expression.children[0],
+                multiplier=multiplier * expression.attempts,
+            )
         assert expression.step is not None
         step = expression.step
         return (
@@ -536,14 +541,18 @@ def _composition_expression(
             raise ContractError(
                 f"{label}.kind threshold_repeat requires dagcert-contract/v11"
             )
-        required_fields = {
+        leaf_fields = {
             "kind", "attempts", "required", "task", "timing",
             "qualifying_outcome", "resource",
         }
-        if set(row) != required_fields:
+        body_fields = {
+            "kind", "attempts", "required", "body", "qualifying_exit", "resource",
+        }
+        row_fields = frozenset(row)
+        if row_fields not in {frozenset(leaf_fields), frozenset(body_fields)}:
             raise ContractError(
-                f"{label} threshold_repeat must contain exactly "
-                f"{sorted(required_fields)}"
+                f"{label} threshold_repeat must contain exactly either "
+                f"{sorted(leaf_fields)} or {sorted(body_fields)}"
             )
         attempts = _positive(row.get("attempts"), f"{label}.attempts")
         required_count = _positive(row.get("required"), f"{label}.required")
@@ -559,16 +568,45 @@ def _composition_expression(
             raise ContractError(
                 f"{label} threshold_repeat required must not exceed attempts"
             )
-        return CompositionExpression(
-            kind,
-            step=CompositionStep(
+        if row_fields == frozenset(leaf_fields):
+            qualifying_step = CompositionStep(
                 _identifier(row.get("task"), f"{label}.task"),
                 _identifier(row.get("timing"), f"{label}.timing"),
                 1,
                 _identifier(
                     row.get("qualifying_outcome"), f"{label}.qualifying_outcome",
                 ),
-            ),
+            )
+            body: tuple[CompositionExpression, ...] = ()
+        else:
+            exit_row = _object(row.get("qualifying_exit"), f"{label}.qualifying_exit")
+            exit_fields = {"task", "timing", "outcome_type"}
+            if set(exit_row) != exit_fields:
+                raise ContractError(
+                    f"{label}.qualifying_exit must contain exactly {sorted(exit_fields)}"
+                )
+            qualifying_step = CompositionStep(
+                _identifier(exit_row.get("task"), f"{label}.qualifying_exit.task"),
+                _identifier(exit_row.get("timing"), f"{label}.qualifying_exit.timing"),
+                1,
+                _identifier(
+                    exit_row.get("outcome_type"),
+                    f"{label}.qualifying_exit.outcome_type",
+                ),
+            )
+            body = (
+                _composition_expression(
+                    row.get("body"),
+                    f"{label}.body",
+                    allow_async_handoff=allow_async_handoff,
+                    allow_external_handoff=allow_external_handoff,
+                    allow_threshold_repeat=allow_threshold_repeat,
+                ),
+            )
+        return CompositionExpression(
+            kind,
+            step=qualifying_step,
+            children=body,
             attempts=int(attempts),
             required=int(required_count),
             resource=_identifier(row.get("resource"), f"{label}.resource"),
@@ -638,7 +676,7 @@ def _load(path: Path) -> Mapping[str, Any]:
         value = json.loads(text)
     except json.JSONDecodeError:
         try:
-            import yaml  # type: ignore[import-untyped]
+            import yaml
         except ImportError as exc:
             raise ContractError("YAML contracts require the optional PyYAML dependency") from exc
         value = yaml.safe_load(text)
@@ -1667,7 +1705,12 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
 
 
 def _expression_entries(expression: CompositionExpression) -> tuple[CompositionStep, ...]:
-    if expression.kind in {"leaf", "threshold_repeat"}:
+    if expression.kind == "leaf":
+        assert expression.step is not None
+        return (expression.step,)
+    if expression.kind == "threshold_repeat":
+        if expression.children:
+            return _expression_entries(expression.children[0])
         assert expression.step is not None
         return (expression.step,)
     if expression.kind == "sequence":
@@ -1716,6 +1759,10 @@ def composition_external_handoffs(
     if expression.kind == "finite_repeat":
         return composition_external_handoffs(
             expression.children[0], multiplier=multiplier * expression.count,
+        )
+    if expression.kind == "threshold_repeat" and expression.children:
+        return composition_external_handoffs(
+            expression.children[0], multiplier=multiplier * expression.attempts,
         )
     result: list[str] = []
     if expression.kind == "external_handoff":
@@ -1802,6 +1849,39 @@ def _validate_composition_expression_edges(
                 f"composition {composition_id} threshold_repeat non-qualifying outcomes also "
                 f"produce {expression.resource!r}: {incorrectly_producing}"
             )
+        if expression.children:
+            body = expression.children[0]
+            body_exits = _expression_exits(body)
+            matching_exits = [
+                candidate for candidate in body_exits
+                if candidate.task == expression.step.task
+                and candidate.timing == expression.step.timing
+                and candidate.outcome_type == expression.step.outcome_type
+                and candidate.count == 1
+            ]
+            if len(body_exits) != 1 or len(matching_exits) != 1:
+                raise ContractError(
+                    f"composition {composition_id} structured threshold_repeat body must "
+                    "end exactly at its qualifying_exit"
+                )
+            other_resource_producers = sorted({
+                candidate.task
+                for candidate in composition_steps(body)
+                if not (
+                    candidate.task == expression.step.task
+                    and candidate.timing == expression.step.timing
+                    and candidate.outcome_type == expression.step.outcome_type
+                )
+                and tasks[candidate.task].outcome_by_type[
+                    str(candidate.outcome_type)
+                ].resources.get(expression.resource, ResourceEffect()).produce > 0
+            })
+            if other_resource_producers:
+                raise ContractError(
+                    f"composition {composition_id} structured threshold_repeat body has "
+                    f"non-exit producers of {expression.resource!r}: "
+                    f"{other_resource_producers}"
+                )
     if expression.kind == "sequence":
         for upstream, downstream in zip(
             expression.children, expression.children[1:], strict=False,

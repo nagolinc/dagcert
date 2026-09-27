@@ -43,3 +43,43 @@ capacity. The operator bounds already-dispatched finite attempts. It does not pr
 arrive, model an unbounded retry loop, or replace queue/liveness state claims.
 
 Runnable source: `examples/certified_threshold_repeat`.
+
+When one attempt is a real multi-task workflow, use the structured form instead of replacing it
+with an aggregate leaf:
+
+```json
+{
+  "kind": "threshold_repeat",
+  "attempts": 10,
+  "required": 7,
+  "body": {
+    "kind": "sequence",
+    "children": [
+      {
+        "kind": "leaf",
+        "task": "item.prepare",
+        "timing": "completion",
+        "outcome_type": "PreparedItem"
+      },
+      {
+        "kind": "leaf",
+        "task": "item.publish",
+        "timing": "completion",
+        "outcome_type": "PublishedItem"
+      }
+    ]
+  },
+  "qualifying_exit": {
+    "task": "item.publish",
+    "timing": "completion",
+    "outcome_type": "PublishedItem"
+  },
+  "resource": "published-items"
+}
+```
+
+Dagcert verifies every edge in `body`, union-bounds the body's real leaf and handoff failure
+envelopes per attempt, requires the body to end at the named qualifying exit, and rejects any
+other selected body stage that produces the qualifying resource. Timing is the number of worker-
+and resource-limited attempt waves multiplied by the derived body bound. This form does not add a
+synthetic summary task or assume that failures are independent.

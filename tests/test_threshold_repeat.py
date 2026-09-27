@@ -31,6 +31,16 @@ def prepare(request: AttemptInput) -> Prepared | Rejected:
     if request.value >= 0:
         return Prepared(request.value)
     return Rejected("negative")
+
+@dataclass(frozen=True)
+class Checked:
+    value: int
+
+@operation
+def check(prepared: Prepared) -> Checked | Rejected:
+    if prepared.value >= 0:
+        return Checked(prepared.value)
+    return Rejected("negative")
 '''
 
 
@@ -130,6 +140,108 @@ def _analysis(contract):
     return report
 
 
+def _structured_raw_contract() -> dict[str, object]:
+    raw = _raw_contract()
+    raw["resources"] = [  # type: ignore[index]
+        {"id": "checked", "capacity": 100, "initial": 0, "unit": "items"},
+    ]
+    raw["tasks"][0]["outcomes"][0]["resources"] = {}  # type: ignore[index]
+    raw["tasks"].append({  # type: ignore[union-attr]
+        "id": "check",
+        "role": "operation",
+        "worker": "preparer",
+        "implementation": {
+            "language": "python", "path": "app.py", "symbol": "check",
+        },
+        "outcomes": [
+            {
+                "type": "Checked",
+                "resources": {"checked": {"produce": 1}},
+                "metadata": {},
+            },
+            {"type": "Rejected", "resources": {}, "metadata": {}},
+        ],
+        "error_budget": {
+            "basis": "engineering_assumption",
+            "evidence_case": "completion",
+            "good_outcomes": ["Checked"],
+            "bad_event_probability_upper": 0.05,
+            "minimum_observations": 10,
+        },
+        "external_contract": None,
+        "callable_bindings": [],
+        "start_resources": {},
+        "depends_on": [{
+            "task": "prepare", "outcome_type": "Prepared",
+        }],
+        "timings": {
+            "completion": {
+                "metric": "duration",
+                "evidence": "assumed",
+                "upper_ms": 3,
+                "minimum_samples": 0,
+                "policy": "max",
+                "safety_factor": 1,
+            },
+        },
+    })
+    raw["compositions"] = [{  # type: ignore[index]
+        "id": "prepare-threshold",
+        "expression": {
+            "kind": "threshold_repeat",
+            "attempts": 10,
+            "required": 7,
+            "body": {
+                "kind": "sequence",
+                "children": [
+                    {
+                        "kind": "leaf", "task": "prepare", "timing": "completion",
+                        "outcome_type": "Prepared",
+                    },
+                    {
+                        "kind": "leaf", "task": "check", "timing": "completion",
+                        "outcome_type": "Checked",
+                    },
+                ],
+            },
+            "qualifying_exit": {
+                "task": "check", "timing": "completion", "outcome_type": "Checked",
+            },
+            "resource": "checked",
+        },
+        "metadata": {},
+    }]
+    return raw
+
+
+def _structured_analysis(contract):
+    fingerprint = "f" * 64
+    samples = tuple(
+        TimingSample(
+            task_id=task_id,
+            case="completion",
+            value_ms=1,
+            worker_id="preparer",
+            source_fingerprint=fingerprint,
+            outcome_type=(
+                "Rejected" if task_id == "prepare" and index == 9
+                else "Prepared" if task_id == "prepare"
+                else "Checked"
+            ),
+            resource_produced=(
+                {"checked": 1}
+                if task_id == "check"
+                else {}
+            ),
+        )
+        for task_id in ("prepare", "check")
+        for index in range(10)
+    )
+    report = analyze_contract(contract, samples, source_fingerprint=fingerprint)
+    assert report.passed, report.findings
+    return report
+
+
 def test_threshold_repeat_uses_markov_envelope_and_worker_waves(tmp_path: Path) -> None:
     contract = _load(tmp_path)
     analysis = _analysis(contract)
@@ -166,6 +278,53 @@ def test_threshold_repeat_is_not_an_all_attempts_union_bound(tmp_path: Path) -> 
     }, contract, analysis)
 
     assert failure.passed
+
+
+def test_structured_threshold_repeat_composes_body_budget_and_worker_waves(
+    tmp_path: Path,
+) -> None:
+    contract = _load(tmp_path, _structured_raw_contract())
+    analysis = _structured_analysis(contract)
+
+    failure = evaluate_formula({
+        "eq": [
+            {"composition_failure_probability_upper": "composition:prepare-threshold"},
+            0.375,
+        ],
+    }, contract, analysis)
+    latency = evaluate_formula({
+        "eq": [
+            {"composition_upper_ms": "composition:prepare-threshold"},
+            24,
+        ],
+    }, contract, analysis)
+
+    assert failure.passed
+    assert latency.passed
+    assert contract.composition_by_id["prepare-threshold"].steps == (
+        contract.composition_by_id["prepare-threshold"].steps[0].__class__(
+            "prepare", "completion", 10, "Prepared",
+        ),
+        contract.composition_by_id["prepare-threshold"].steps[0].__class__(
+            "check", "completion", 10, "Checked",
+        ),
+    )
+
+
+def test_structured_threshold_repeat_requires_qualifying_body_exit(
+    tmp_path: Path,
+) -> None:
+    raw = _structured_raw_contract()
+    expression = raw["compositions"][0]["expression"]  # type: ignore[index]
+    expression["qualifying_exit"]["task"] = "prepare"  # type: ignore[index]
+    expression["qualifying_exit"]["outcome_type"] = "Prepared"  # type: ignore[index]
+    raw["tasks"][0]["outcomes"][0]["resources"] = {  # type: ignore[index]
+        "checked": {"produce": 1},
+    }
+    raw["tasks"][1]["outcomes"][0]["resources"] = {}  # type: ignore[index]
+
+    with pytest.raises(ContractError, match="end exactly at its qualifying_exit"):
+        _load(tmp_path, raw)
 
 
 @pytest.mark.parametrize(

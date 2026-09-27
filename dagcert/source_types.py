@@ -96,7 +96,7 @@ def type_enforcement_descriptor() -> dict[str, object]:
         "reachability": "typed-all-of+explicit-one-of+may-must/v2",
         "chance_composition": "engineering-envelope-optional-budget+exact-path+external+threshold-markov/v6",
         "structured_composition": (
-            "sequence+parallel-all+finite-repeat+finite-threshold+typed-async-handoff+"
+            "sequence+parallel-all+finite-repeat+finite-structured-threshold+typed-async-handoff+"
             "external-transport-handoff/resource-aware/v4"
         ),
         "lifecycle_state_proofs": "two-phase-affine+bounded-non-starvation+response/v1",

@@ -571,8 +571,14 @@ def _expression_failure_probability_upper(
         )
     if expression.kind == "threshold_repeat":
         assert expression.step is not None
-        per_attempt = _step_failure_probability_upper(
-            expression.step, state, composition_id,
+        per_attempt = (
+            _expression_failure_probability_upper(
+                expression.children[0], state, composition_id,
+            )
+            if expression.children
+            else _step_failure_probability_upper(
+                expression.step, state, composition_id,
+            )
         )
         failures_needed = expression.attempts - expression.required + 1
         return min(
@@ -633,6 +639,8 @@ def _merge_demands(
 def _worker_demand(
     expression: CompositionExpression, state: _EvaluationState,
 ) -> dict[str, float]:
+    if expression.kind == "threshold_repeat" and expression.children:
+        return _worker_demand(expression.children[0], state)
     if expression.kind in {"leaf", "threshold_repeat"}:
         assert expression.step is not None
         return {state.contract.task_by_id[expression.step.task].worker: 1.0}
@@ -645,6 +653,8 @@ def _worker_demand(
 def _acquire_demand(
     expression: CompositionExpression, state: _EvaluationState,
 ) -> dict[str, float]:
+    if expression.kind == "threshold_repeat" and expression.children:
+        return _acquire_demand(expression.children[0], state)
     if expression.kind in {"leaf", "threshold_repeat"}:
         assert expression.step is not None
         task = state.contract.task_by_id[expression.step.task]
@@ -696,29 +706,33 @@ def _expression_upper_ms(
         )
     if expression.kind == "threshold_repeat":
         assert expression.step is not None
-        task = state.contract.task_by_id[expression.step.task]
-        parallelism = state.contract.worker_by_id[task.worker].concurrency
-        resource_ids = set(task.start_resources) | set(task.resources)
-        for resource_id in resource_ids:
-            demand = max(
-                task.start_resources.get(resource_id, ResourceEffect()).acquire,
-                task.resources.get(resource_id, ResourceEffect()).acquire,
+        attempt = expression.children[0] if expression.children else expression
+        worker_demand = _worker_demand(attempt, state)
+        parallelism = min(
+            floor(state.contract.worker_by_id[worker].concurrency / demand)
+            for worker, demand in worker_demand.items()
+        )
+        for resource_id, demand in _acquire_demand(attempt, state).items():
+            parallelism = min(
+                parallelism,
+                floor(state.contract.resource_by_id[resource_id].capacity / demand),
             )
-            if demand > 0:
-                parallelism = min(
-                    parallelism,
-                    floor(state.contract.resource_by_id[resource_id].capacity / demand),
-                )
         if parallelism < 1:  # pragma: no cover - contract validation owns this invariant
             raise FormulaError(
-                f"composition {composition_id} threshold_repeat task {task.id} has no "
+                f"composition {composition_id} threshold_repeat body has no "
                 "feasible worker/resource execution slot"
             )
-        attempt_ms = _step_upper_ms(
-            expression.step.task,
-            expression.step.timing,
-            timing_by_ref,
-            composition_id,
+        attempt_ms = (
+            _expression_upper_ms(
+                expression.children[0], state, timing_by_ref, composition_id,
+            )
+            if expression.children
+            else _step_upper_ms(
+                expression.step.task,
+                expression.step.timing,
+                timing_by_ref,
+                composition_id,
+            )
         )
         waves = ceil(expression.attempts / parallelism)
         return waves * attempt_ms
