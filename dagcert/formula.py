@@ -293,7 +293,7 @@ def _validate_dag_surface(references: set[str], contract: Contract) -> None:
     if contract.schema in {
         "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
         "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10",
-        "dagcert-contract/v11",
+        "dagcert-contract/v11", "dagcert-contract/v12",
     }:
         resource_ids = {
             reference.split(":", 1)[1]
@@ -493,10 +493,10 @@ def _composition_failure_probability_upper(
     if state.contract.schema not in {
         "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7",
         "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10",
-        "dagcert-contract/v11",
+        "dagcert-contract/v11", "dagcert-contract/v12",
     }:
         raise FormulaError(
-            "error-budget formulas require dagcert-contract/v5 through v11"
+            "error-budget formulas require dagcert-contract/v5 through v12"
         )
     composition = state.contract.composition_by_id.get(composition_id)
     if composition is None:
@@ -557,6 +557,12 @@ def _step_failure_probability_upper(
     return Decimal(str(budget.bad_event_probability_upper))
 
 
+def _required_threshold_step(expression: CompositionExpression) -> CompositionStep:
+    if expression.step is None:  # pragma: no cover - contract validation owns this invariant
+        raise FormulaError("leaf threshold_repeat is missing its task step")
+    return expression.step
+
+
 def _expression_failure_probability_upper(
     expression: CompositionExpression,
     state: _EvaluationState,
@@ -570,9 +576,14 @@ def _expression_failure_probability_upper(
             * _step_failure_probability_upper(expression.step, state, composition_id),
         )
     if expression.kind == "threshold_repeat":
-        assert expression.step is not None
-        per_attempt = _step_failure_probability_upper(
-            expression.step, state, composition_id,
+        per_attempt = (
+            _expression_failure_probability_upper(
+                expression.children[0], state, composition_id,
+            )
+            if expression.children
+            else _step_failure_probability_upper(
+                _required_threshold_step(expression), state, composition_id,
+            )
         )
         failures_needed = expression.attempts - expression.required + 1
         return min(
@@ -633,9 +644,14 @@ def _merge_demands(
 def _worker_demand(
     expression: CompositionExpression, state: _EvaluationState,
 ) -> dict[str, float]:
-    if expression.kind in {"leaf", "threshold_repeat"}:
+    if expression.kind == "leaf":
         assert expression.step is not None
         return {state.contract.task_by_id[expression.step.task].worker: 1.0}
+    if expression.kind == "threshold_repeat":
+        if expression.children:
+            return _worker_demand(expression.children[0], state)
+        step = _required_threshold_step(expression)
+        return {state.contract.task_by_id[step.task].worker: 1.0}
     child_demands = [_worker_demand(child, state) for child in expression.children]
     return _merge_demands(
         child_demands, parallel=expression.kind == "parallel_all",
@@ -645,9 +661,20 @@ def _worker_demand(
 def _acquire_demand(
     expression: CompositionExpression, state: _EvaluationState,
 ) -> dict[str, float]:
-    if expression.kind in {"leaf", "threshold_repeat"}:
+    if expression.kind == "leaf":
         assert expression.step is not None
         task = state.contract.task_by_id[expression.step.task]
+        effects = task.start_resources or task.resources
+        return {
+            identifier: effect.acquire
+            for identifier, effect in effects.items()
+            if effect.acquire > 0
+        }
+    if expression.kind == "threshold_repeat":
+        if expression.children:
+            return _acquire_demand(expression.children[0], state)
+        step = _required_threshold_step(expression)
+        task = state.contract.task_by_id[step.task]
         effects = task.start_resources or task.resources
         return {
             identifier: effect.acquire
@@ -676,6 +703,122 @@ def _parallel_can_overlap(
     )
 
 
+def _task_parallelism(task_id: str, state: _EvaluationState) -> int:
+    task = state.contract.task_by_id[task_id]
+    parallelism = state.contract.worker_by_id[task.worker].concurrency
+    resource_ids = set(task.start_resources) | set(task.resources)
+    for resource_id in resource_ids:
+        demand = max(
+            task.start_resources.get(resource_id, ResourceEffect()).acquire,
+            task.resources.get(resource_id, ResourceEffect()).acquire,
+        )
+        if demand > 0:
+            parallelism = min(
+                parallelism,
+                floor(state.contract.resource_by_id[resource_id].capacity / demand),
+            )
+    return parallelism
+
+
+def _expression_worker_ids(
+    expression: CompositionExpression, state: _EvaluationState,
+) -> set[str]:
+    if expression.kind == "leaf":
+        assert expression.step is not None
+        return {state.contract.task_by_id[expression.step.task].worker}
+    return set().union(*(
+        _expression_worker_ids(child, state) for child in expression.children
+    ))
+
+
+def _expression_acquired_resource_ids(
+    expression: CompositionExpression, state: _EvaluationState,
+) -> set[str]:
+    if expression.kind == "leaf":
+        assert expression.step is not None
+        task = state.contract.task_by_id[expression.step.task]
+        effects = task.start_resources or task.resources
+        return {
+            resource_id for resource_id, effect in effects.items()
+            if effect.acquire > 0
+        }
+    return set().union(*(
+        _expression_acquired_resource_ids(child, state)
+        for child in expression.children
+    ))
+
+
+def _parallel_batches_are_disjoint(
+    expression: CompositionExpression, state: _EvaluationState,
+) -> bool:
+    workers = [
+        _expression_worker_ids(child, state) for child in expression.children
+    ]
+    resources = [
+        _expression_acquired_resource_ids(child, state)
+        for child in expression.children
+    ]
+    for index in range(len(expression.children)):
+        for other in range(index + 1, len(expression.children)):
+            if workers[index] & workers[other] or resources[index] & resources[other]:
+                return False
+    return True
+
+
+def _expression_batch_upper_ms(
+    expression: CompositionExpression,
+    attempts: int,
+    state: _EvaluationState,
+    timing_by_ref: Mapping[str, Any],
+    composition_id: str,
+) -> float:
+    """Bound a finite batch without assuming inputs exist concurrently.
+
+    Sequence stages use conservative batch barriers. Parallel branches overlap only when their
+    worker pools and acquired resources are disjoint. This makes the all-N completion bound also
+    a safe conditional bound on the Kth qualifying completion.
+    """
+
+    if expression.kind == "leaf":
+        assert expression.step is not None
+        parallelism = _task_parallelism(expression.step.task, state)
+        if parallelism < 1:  # pragma: no cover - contract validation owns this invariant
+            raise FormulaError(
+                f"composition {composition_id} task {expression.step.task} has no feasible "
+                "worker/resource execution slot"
+            )
+        invocations = attempts * expression.step.count
+        return ceil(invocations / parallelism) * _step_upper_ms(
+            expression.step.task,
+            expression.step.timing,
+            timing_by_ref,
+            composition_id,
+        )
+    if expression.kind == "finite_repeat":
+        return expression.count * _expression_batch_upper_ms(
+            expression.children[0], attempts, state, timing_by_ref, composition_id,
+        )
+    if expression.kind == "threshold_repeat":
+        raise FormulaError(
+            f"composition {composition_id} cannot nest threshold_repeat expressions"
+        )
+    values = [
+        _expression_batch_upper_ms(
+            child, attempts, state, timing_by_ref, composition_id,
+        )
+        for child in expression.children
+    ]
+    if expression.kind == "external_handoff":
+        assert expression.handoff is not None
+        handoff = state.contract.external_handoff_by_id[expression.handoff]
+        return sum(values) + attempts * handoff.upper_ms
+    if expression.kind == "parallel_all" and _parallel_batches_are_disjoint(
+        expression, state,
+    ):
+        return max(values)
+    return sum(values)
+
+
 def _expression_upper_ms(
     expression: CompositionExpression,
     state: _EvaluationState,
@@ -695,33 +838,18 @@ def _expression_upper_ms(
             expression.children[0], state, timing_by_ref, composition_id,
         )
     if expression.kind == "threshold_repeat":
-        assert expression.step is not None
-        task = state.contract.task_by_id[expression.step.task]
-        parallelism = state.contract.worker_by_id[task.worker].concurrency
-        resource_ids = set(task.start_resources) | set(task.resources)
-        for resource_id in resource_ids:
-            demand = max(
-                task.start_resources.get(resource_id, ResourceEffect()).acquire,
-                task.resources.get(resource_id, ResourceEffect()).acquire,
-            )
-            if demand > 0:
-                parallelism = min(
-                    parallelism,
-                    floor(state.contract.resource_by_id[resource_id].capacity / demand),
-                )
-        if parallelism < 1:  # pragma: no cover - contract validation owns this invariant
-            raise FormulaError(
-                f"composition {composition_id} threshold_repeat task {task.id} has no "
-                "feasible worker/resource execution slot"
-            )
-        attempt_ms = _step_upper_ms(
-            expression.step.task,
-            expression.step.timing,
+        body = (
+            expression.children[0]
+            if expression.children
+            else CompositionExpression("leaf", step=_required_threshold_step(expression))
+        )
+        return _expression_batch_upper_ms(
+            body,
+            expression.attempts,
+            state,
             timing_by_ref,
             composition_id,
         )
-        waves = ceil(expression.attempts / parallelism)
-        return waves * attempt_ms
     values = [
         _expression_upper_ms(child, state, timing_by_ref, composition_id)
         for child in expression.children
@@ -745,10 +873,10 @@ def _external_failure_probability_upper(
 ) -> float:
     if state.contract.schema not in {
         "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8",
-        "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11",
+        "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11", "dagcert-contract/v12",
     }:
         raise FormulaError(
-            "external-contract formulas require dagcert-contract/v6 through v11"
+            "external-contract formulas require dagcert-contract/v6 through v12"
         )
     task = state.contract.task_by_id.get(task_id)
     if task is None or task.external_contract is None:

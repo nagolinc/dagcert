@@ -58,6 +58,6 @@ def test_alternative_producers_v14_example_passes() -> None:
     _assert_example_claims(root, certificate_schema="dagcert-certificate/v14")
 
 
-def test_threshold_repeat_v15_example_passes() -> None:
+def test_threshold_repeat_v16_example_passes() -> None:
     root = Path(__file__).parents[1] / "examples" / "certified_threshold_repeat"
-    _assert_example_claims(root, certificate_schema="dagcert-certificate/v15")
+    _assert_example_claims(root, certificate_schema="dagcert-certificate/v16")

@@ -26,6 +26,7 @@ from .checks import (
 )
 from .contract import (
     CallableBinding, ChannelDequeue, ChannelEnqueue, Composition, CompositionExpression,
+    CompositionThresholdExit,
     CompositionStep, Contract,
     ContractError, ExternalCallableProvider,
     ExternalContract, ExternalHandoff, ExternalHandoffDestination, ExternalHandoffSource,
@@ -57,7 +58,7 @@ from .requirements import (
 __all__ = [
     "AnalysisReport", "CertificateError", "CertificateVerification", "CheckContext",
     "CheckFinding", "Checker", "CheckResult", "ChannelDequeue", "ChannelEnqueue",
-    "Composition", "CompositionExpression",
+    "Composition", "CompositionExpression", "CompositionThresholdExit",
     "CompositionStep",
     "CallableBinding", "Contract", "ContractError", "ExternalCallableProvider",
     "ExternalContract", "ExternalProvider", "Implementation",

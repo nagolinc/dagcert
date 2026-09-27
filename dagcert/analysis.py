@@ -138,10 +138,10 @@ def analyze_contract(
         if timing is not None and timing.metric == "duration":
             if contract.schema in {
                 "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
-                "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11",
+                "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11", "dagcert-contract/v12",
             }:
                 _check_typed_outcome_observation(task, sample, contract, findings)
-                if contract.schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11"}:
+                if contract.schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11", "dagcert-contract/v12"}:
                     _check_start_resource_observation(task, sample, findings)
             elif sample.succeeded:
                 _check_execution_observation(task, sample, contract, findings)
@@ -157,9 +157,9 @@ def analyze_contract(
             usable = [
                 sample for sample in evidence
                 if sample.task_id == task.id and sample.case == case
-                and (contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11"} or sample.succeeded)
+                and (contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11", "dagcert-contract/v12"} or sample.succeeded)
                 and (
-                    contract.schema not in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11"}
+                    contract.schema not in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11", "dagcert-contract/v12"}
                     or sample.outcome_type in task.outcome_by_type
                 )
                 and sample.worker_id == task.worker and sample.source_fingerprint == source_fingerprint
@@ -198,7 +198,7 @@ def analyze_contract(
                 requirement.lower_ms, requirement.upper_ms, passed,
             ))
 
-    if contract.schema in {"dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11"}:
+    if contract.schema in {"dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11", "dagcert-contract/v12"}:
         for task in contract.tasks:
             budget = task.error_budget
             if budget is None:
@@ -493,7 +493,7 @@ def _check_typed_outcome_observation(
 def _sample_boundary_matches(
     contract: Contract, task: Task, sample: TimingSample,
 ) -> bool:
-    if contract.schema not in {"dagcert-contract/v10", "dagcert-contract/v11"}:
+    if contract.schema not in {"dagcert-contract/v10", "dagcert-contract/v11", "dagcert-contract/v12"}:
         return True
     if task.role != "external":
         return sample.boundary_id is None

@@ -86,9 +86,10 @@ Those primitives are enough to express conditional statements such as:
 - model X is never more than G generations out of date; and
 - a handler or visible action completes within its declared deadline.
 
-V15 issuance separates real `operation`, `external`, and `instrumentation` tasks and supports a
+V16 issuance separates real `operation`, `external`, and `instrumentation` tasks and supports a
 small structured workflow algebra: `leaf`, `sequence`, `parallel_all`, `finite_repeat`, the v11
-`threshold_repeat`, the v8+ `async_handoff`, and the v9+ `external_handoff`.
+leaf and v12 structured forms of `threshold_repeat`, the v8+ `async_handoff`, and the v9+
+`external_handoff`.
 Every v7+ leaf names the source outcome traversed and every sequence boundary must match real typed
 dependency edges. A fork/join binds each branch output to a field of the downstream source input
 record. A composition has no stopwatch of its own: Dagcert computes its bound from exact leaf
@@ -98,13 +99,17 @@ permit the declared overlap. Claims are `observed` (retained executions only), `
 engineering error budgets). Derived and chance claims cannot delegate proof to an arbitrary checker
 boolean.
 
-A `threshold_repeat` is the restricted finite K-of-N operator. It repeats one real typed task a
-literal N times, counts one named qualifying outcome, and requires that outcome alone to produce
-exactly one unit of the named resource. Given a per-attempt bad-event envelope `q`, Dagcert uses
+A `threshold_repeat` is the restricted finite K-of-N operator. In v12 its body may be one real task
+or a structured `sequence`, `parallel_all`, `finite_repeat`, `async_handoff`, or
+`external_handoff`. One named terminal typed outcome is the qualifying exit, and that outcome alone
+must produce exactly one unit of the named resource. Dagcert unions every leaf and transport
+bad-event envelope in one attempt to obtain `q`, then uses
 `P(miss) <= N*q/(N-K+1)`. This conservative Markov bound does not assume independent attempts.
-Latency is `ceil(N/effective_concurrency)` times the leaf bound, with concurrency capped by acquired
-resource capacity. It covers already-dispatched finite attempts, not input arrival or unbounded
-retries. See `dagcert help threshold-repeat`.
+Latency is a conservative all-N batch bound derived from each body's real workers, acquired
+resources, and leaf timings; it is therefore also an upper bound on the Kth qualifying completion
+when one occurs. The operator covers a predeclared finite attempt prefix. It does not prove that
+inputs arrive, that an application controller actually dispatches that prefix, or that an unbounded
+retry loop is live. See `dagcert help threshold-repeat`.
 
 An `async_handoff` does not pretend that a queue-poll request already contains an unknown producer
 value. Its declared channel requires the producer's terminal outcome to equal the compiler-extracted

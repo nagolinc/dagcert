@@ -19,6 +19,14 @@ class AttemptInput:
     value: int
 
 @dataclass(frozen=True)
+class Sampled:
+    value: int
+
+@dataclass(frozen=True)
+class SampleRejected:
+    reason: str
+
+@dataclass(frozen=True)
 class Prepared:
     value: int
 
@@ -27,7 +35,13 @@ class Rejected:
     reason: str
 
 @operation
-def prepare(request: AttemptInput) -> Prepared | Rejected:
+def sample(request: AttemptInput) -> Sampled | SampleRejected:
+    if request.value >= 0:
+        return Sampled(request.value)
+    return SampleRejected("negative")
+
+@operation
+def prepare(request: Sampled) -> Prepared | Rejected:
     if request.value >= 0:
         return Prepared(request.value)
     return Rejected("negative")
@@ -103,6 +117,109 @@ def _load(tmp_path: Path, raw: dict[str, object] | None = None):
     path = tmp_path / "dag_contract.json"
     path.write_text(json.dumps(raw or _raw_contract()), encoding="utf-8")
     return load_contract(path, source_root=tmp_path)
+
+
+def _raw_structured_contract() -> dict[str, object]:
+    raw = _raw_contract()
+    raw["schema"] = "dagcert-contract/v12"
+    raw["workers"] = [
+        {"id": "sampler", "concurrency": 2},
+        {"id": "preparer", "concurrency": 4},
+    ]
+    prepare_task = raw["tasks"][0]  # type: ignore[index]
+    prepare_task["depends_on"] = [  # type: ignore[index]
+        {"task": "sample", "outcome_type": "Sampled"},
+    ]
+    prepare_task["error_budget"]["bad_event_probability_upper"] = 0.05  # type: ignore[index]
+    prepare_task["error_budget"]["minimum_observations"] = 20  # type: ignore[index]
+    sample_task = {
+        "id": "sample",
+        "role": "operation",
+        "worker": "sampler",
+        "implementation": {
+            "language": "python", "path": "app.py", "symbol": "sample",
+        },
+        "outcomes": [
+            {"type": "Sampled", "resources": {}, "metadata": {}},
+            {"type": "SampleRejected", "resources": {}, "metadata": {}},
+        ],
+        "error_budget": {
+            "basis": "engineering_assumption",
+            "evidence_case": "completion",
+            "good_outcomes": ["Sampled"],
+            "bad_event_probability_upper": 0.05,
+            "minimum_observations": 20,
+        },
+        "external_contract": None,
+        "callable_bindings": [],
+        "start_resources": {},
+        "depends_on": [],
+        "timings": {
+            "completion": {
+                "metric": "duration",
+                "evidence": "assumed",
+                "upper_ms": 2,
+                "minimum_samples": 0,
+                "policy": "max",
+                "safety_factor": 1,
+            },
+        },
+    }
+    raw["tasks"] = [sample_task, prepare_task]
+    raw["compositions"] = [{
+        "id": "prepare-threshold",
+        "expression": {
+            "kind": "threshold_repeat",
+            "attempts": 10,
+            "required": 7,
+            "body": {
+                "kind": "sequence",
+                "children": [
+                    {
+                        "kind": "leaf", "task": "sample", "timing": "completion",
+                        "outcome_type": "Sampled",
+                    },
+                    {
+                        "kind": "leaf", "task": "prepare", "timing": "completion",
+                        "outcome_type": "Prepared",
+                    },
+                ],
+            },
+            "qualifying_exit": {
+                "task": "prepare",
+                "outcome_type": "Prepared",
+                "resource": "prepared",
+            },
+        },
+        "metadata": {},
+    }]
+    return raw
+
+
+def _structured_analysis(contract):
+    fingerprint = "f" * 64
+    samples = []
+    for index in range(20):
+        samples.append(TimingSample(
+            task_id="sample",
+            case="completion",
+            value_ms=1,
+            worker_id="sampler",
+            source_fingerprint=fingerprint,
+            outcome_type="SampleRejected" if index == 19 else "Sampled",
+        ))
+        samples.append(TimingSample(
+            task_id="prepare",
+            case="completion",
+            value_ms=1,
+            worker_id="preparer",
+            source_fingerprint=fingerprint,
+            outcome_type="Rejected" if index == 19 else "Prepared",
+            resource_produced={} if index == 19 else {"prepared": 1},
+        ))
+    report = analyze_contract(contract, tuple(samples), source_fingerprint=fingerprint)
+    assert report.passed, report.findings
+    return report
 
 
 def _analysis(contract):
@@ -227,4 +344,91 @@ def test_threshold_repeat_requires_contract_v11(tmp_path: Path) -> None:
     raw["schema"] = "dagcert-contract/v10"
 
     with pytest.raises(ContractError, match="requires dagcert-contract/v11"):
+        _load(tmp_path, raw)
+
+
+def test_structured_threshold_composes_body_budgets_and_batch_latency(
+    tmp_path: Path,
+) -> None:
+    contract = _load(tmp_path, _raw_structured_contract())
+    analysis = _structured_analysis(contract)
+
+    confidence = evaluate_formula({
+        "eq": [
+            {"composition_success_probability_lower": "composition:prepare-threshold"},
+            0.75,
+        ],
+    }, contract, analysis)
+    latency = evaluate_formula({
+        "eq": [
+            {"composition_upper_ms": "composition:prepare-threshold"},
+            25,
+        ],
+    }, contract, analysis)
+
+    assert confidence.passed
+    assert latency.passed
+    assert confidence.primitive_refs == (
+        "composition:prepare-threshold",
+        "error-budget:prepare",
+        "error-budget:sample",
+    )
+    assert [(step.task, step.count) for step in contract.compositions[0].steps] == [
+        ("sample", 10),
+        ("prepare", 10),
+    ]
+
+
+def test_structured_threshold_qualifier_must_be_unique_terminal_exit(
+    tmp_path: Path,
+) -> None:
+    raw = _raw_structured_contract()
+    raw["compositions"][0]["expression"]["qualifying_exit"] = {  # type: ignore[index]
+        "task": "sample", "outcome_type": "Sampled", "resource": "prepared",
+    }
+
+    with pytest.raises(ContractError, match="terminal body outcome"):
+        _load(tmp_path, raw)
+
+
+def test_structured_threshold_rejects_other_body_resource_producers(
+    tmp_path: Path,
+) -> None:
+    raw = _raw_structured_contract()
+    raw["tasks"][0]["outcomes"][0]["resources"] = {  # type: ignore[index]
+        "prepared": {"produce": 1},
+    }
+
+    with pytest.raises(ContractError, match="non-qualifying outcomes also produce"):
+        _load(tmp_path, raw)
+
+
+def test_structured_threshold_requires_contract_v12(tmp_path: Path) -> None:
+    raw = _raw_structured_contract()
+    raw["schema"] = "dagcert-contract/v11"
+
+    with pytest.raises(ContractError, match="requires dagcert-contract/v12"):
+        _load(tmp_path, raw)
+
+
+def test_structured_threshold_rejects_nested_thresholds(tmp_path: Path) -> None:
+    raw = _raw_structured_contract()
+    original_body = raw["compositions"][0]["expression"]["body"]  # type: ignore[index]
+    raw["compositions"][0]["expression"]["body"] = {  # type: ignore[index]
+        "kind": "sequence",
+        "children": [
+            original_body,
+            {
+                "kind": "threshold_repeat",
+                "attempts": 2,
+                "required": 1,
+                "task": "prepare",
+                "timing": "completion",
+                "qualifying_outcome": "Prepared",
+                "resource": "prepared",
+            },
+        ],
+    }
+
+    with pytest.raises(ContractError, match="cannot contain a nested"):
         _load(tmp_path, raw)

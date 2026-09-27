@@ -22,16 +22,25 @@ def main() -> None:
     evidence.parent.mkdir(parents=True, exist_ok=True)
     evidence.unlink(missing_ok=True)
     recorder = EvidenceRecorder(evidence)
-    for index in range(10):
-        rejected = index == 9
+    for index in range(20):
+        sampling_rejected = index == 18
+        preparation_rejected = index == 19
+        recorder.append(TimingSample(
+            task_id="item.sample",
+            case="completion",
+            value_ms=1,
+            worker_id="sampling-worker",
+            source_fingerprint=fingerprint,
+            outcome_type="SamplingRejected" if sampling_rejected else "SampledItem",
+        ))
         recorder.append(TimingSample(
             task_id="item.prepare",
             case="completion",
             value_ms=1,
             worker_id="preparation-worker",
             source_fingerprint=fingerprint,
-            outcome_type="PreparationRejected" if rejected else "PreparedItem",
-            resource_produced={} if rejected else {"prepared-items": 1},
+            outcome_type="PreparationRejected" if preparation_rejected else "PreparedItem",
+            resource_produced={} if preparation_rejected else {"prepared-items": 1},
         ))
     document = issue_certificate(
         contract,

@@ -1,6 +1,10 @@
 {
-  "schema": "dagcert-contract/v11",
+  "schema": "dagcert-contract/v12",
   "workers": [
+    {
+      "id": "sampling-worker",
+      "concurrency": 2
+    },
     {
       "id": "preparation-worker",
       "concurrency": 4
@@ -15,6 +19,51 @@
     }
   ],
   "tasks": [
+    {
+      "id": "item.sample",
+      "role": "operation",
+      "worker": "sampling-worker",
+      "implementation": {
+        "language": "python",
+        "path": "app.py",
+        "symbol": "sample"
+      },
+      "outcomes": [
+        {
+          "type": "SampledItem",
+          "resources": {},
+          "metadata": {}
+        },
+        {
+          "type": "SamplingRejected",
+          "resources": {},
+          "metadata": {}
+        }
+      ],
+      "error_budget": {
+        "basis": "engineering_assumption",
+        "evidence_case": "completion",
+        "good_outcomes": [
+          "SampledItem"
+        ],
+        "bad_event_probability_upper": 0.05,
+        "minimum_observations": 20
+      },
+      "external_contract": null,
+      "callable_bindings": [],
+      "start_resources": {},
+      "depends_on": [],
+      "timings": {
+        "completion": {
+          "metric": "duration",
+          "evidence": "assumed",
+          "upper_ms": 2,
+          "minimum_samples": 0,
+          "policy": "max",
+          "safety_factor": 1
+        }
+      }
+    },
     {
       "id": "item.prepare",
       "role": "operation",
@@ -46,13 +95,18 @@
         "good_outcomes": [
           "PreparedItem"
         ],
-        "bad_event_probability_upper": 0.1,
-        "minimum_observations": 10
+        "bad_event_probability_upper": 0.05,
+        "minimum_observations": 20
       },
       "external_contract": null,
       "callable_bindings": [],
       "start_resources": {},
-      "depends_on": [],
+      "depends_on": [
+        {
+          "task": "item.sample",
+          "outcome_type": "SampledItem"
+        }
+      ],
       "timings": {
         "completion": {
           "metric": "duration",
@@ -74,10 +128,28 @@
         "kind": "threshold_repeat",
         "attempts": 10,
         "required": 7,
-        "task": "item.prepare",
-        "timing": "completion",
-        "qualifying_outcome": "PreparedItem",
-        "resource": "prepared-items"
+        "body": {
+          "kind": "sequence",
+          "children": [
+            {
+              "kind": "leaf",
+              "task": "item.sample",
+              "timing": "completion",
+              "outcome_type": "SampledItem"
+            },
+            {
+              "kind": "leaf",
+              "task": "item.prepare",
+              "timing": "completion",
+              "outcome_type": "PreparedItem"
+            }
+          ]
+        },
+        "qualifying_exit": {
+          "task": "item.prepare",
+          "outcome_type": "PreparedItem",
+          "resource": "prepared-items"
+        }
       },
       "metadata": {
         "scope": "ten dispatched attempts with seven prepared items required"

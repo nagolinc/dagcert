@@ -13,7 +13,7 @@ behavioral regression merely to make a claim pass.
 
 ## 2. Contract schema
 
-New issuance uses `dagcert-contract/v11`. The loader retains v2-v10 support for verification of
+New issuance uses `dagcert-contract/v12`. The loader retains v2-v11 support for verification of
 existing certificates. JSON is built in; YAML is available with PyYAML.
 
 ### Worker
@@ -148,14 +148,15 @@ good, its complement is simply empty.
 
 ### Composition
 
-A v11 composition is one expression in a deliberately small algebra:
+A v12 composition is one expression in a deliberately small algebra:
 
 - `leaf`: one exact task, duration case, and typed outcome;
 - `sequence`: two or more expressions with real typed edges across each boundary;
 - `parallel_all`: two or more independent branches, all required before the following join; and
 - `finite_repeat`: one expression and a positive literal count;
-- `threshold_repeat`: one real task, a finite literal attempt count N, a required count K, one
-  qualifying typed outcome, and one resource produced exactly once only by that outcome; and
+- `threshold_repeat`: a finite literal attempt count N, a required count K, one structured attempt
+  body, one terminal qualifying typed outcome, and one resource produced exactly once only by that
+  outcome; and
 - `async_handoff`: a producer expression and consumer expression linked by one declared typed
   channel. The producer must end at the enqueue outcome and the consumer must traverse the dequeue
   outcome exactly once.
@@ -166,12 +167,21 @@ concurrency and acquired-resource capacity permit overlap; otherwise it conserva
 Cross-branch dependencies fail. This prevents a monolithic pipeline stopwatch from substituting
 for a derivation over the actual task graph.
 
-`threshold_repeat` is not a general reducer or retry language. For per-attempt bad-event envelope
-`q`, its threshold-miss envelope is `min(1, N*q/(N-K+1))`, a Markov bound on the count of bad
-outcomes that makes no independence assumption. Its duration bound is
-`ceil(N/effective_concurrency)` times the leaf upper bound; worker concurrency is capped by
-acquired-resource capacity. It describes an already-dispatched finite batch and does not prove
-input arrival, an unbounded retry policy, or queue liveness.
+The v11 leaf form of `threshold_repeat` remains valid. The v12 form permits a body made from the
+same closed composition algebra except nested thresholds. Its `qualifying_exit` must occur exactly
+once among the body's terminal exits. No other body outcome may produce the named resource. For
+per-attempt bad-event envelope `q`, Dagcert first unions every selected task and transport envelope
+in the body and then computes the threshold-miss envelope
+`min(1, N*q/(N-K+1))`. This is a Markov bound on the count of bad attempts and makes no independence
+assumption.
+
+The duration is a conservative all-N batch bound. Each leaf uses its worker concurrency, capped by
+acquired-resource capacity. Sequence stages use batch barriers. Parallel branches overlap only
+when their worker sets and acquired resources are disjoint; external transport delays are added
+conservatively. Because all N attempts completing is no earlier than the Kth qualifying completion,
+this is also a safe conditional Kth-success latency bound. `threshold_repeat` describes a
+predeclared finite prefix. It does not prove input arrival, controller dispatch, an unbounded retry
+policy, or queue liveness.
 
 ### State claims
 
@@ -387,7 +397,7 @@ SHA-256 hashes it. It ignores common generated directories and `.dagcertignore` 
 selected checker artifacts inside the source root are automatically excluded to avoid
 self-reference.
 
-`dagcert-certificate/v15` records source identity, exclusions, contract/evidence/requirements
+`dagcert-certificate/v16` records source identity, exclusions, contract/evidence/requirements
 digests, source signature extraction, strict-mypy result, digest-pinned Nagini/Viper proof result
 and scope, the exact Dagcert source-verification kernel descriptor and source-file manifest hash, the complete normalized English
 requirements, the mandatory translation audit, serialized

@@ -3,15 +3,16 @@
   "claims": [
     {
       "id": "seven-items-confidence",
-      "statement": "Under the declared per-attempt engineering envelope, at least seven of ten finite preparation attempts produce PreparedItem values with probability at least 0.75.",
+      "statement": "Under the declared engineering envelopes for the complete sampling-and-preparation attempt, at least seven of ten finite attempts produce PreparedItem values with probability at least 0.75.",
       "primitive_refs": [
         "composition:prepare-seven-of-ten",
+        "error-budget:item.sample",
         "error-budget:item.prepare",
         "resource:prepared-items"
       ],
       "checker_refs": [],
       "assumptions": [
-        "Each attempt has bad-event probability at most 0.1 under the engineering envelope.",
+        "Each sampling and preparation stage has bad-event probability at most 0.05, giving a complete-attempt envelope of at most 0.1 by the union bound.",
         "The bound uses Markov's inequality over the number of bad outcomes and does not assume independent attempts."
       ],
       "basis": "chance",
@@ -26,16 +27,18 @@
     },
     {
       "id": "finite-batch-decision-time",
-      "statement": "All ten finite attempts reach typed outcomes within 15 ms under the declared four-worker and five-millisecond leaf bounds.",
+      "statement": "All ten finite attempt prefixes reach typed outcomes within 25 ms under the declared sampling and preparation worker bounds.",
       "primitive_refs": [
         "composition:prepare-seven-of-ten",
+        "worker:sampling-worker",
         "worker:preparation-worker",
+        "timing:item.sample/completion",
         "timing:item.prepare/completion"
       ],
       "checker_refs": [],
       "assumptions": [
-        "Ten already-dispatched attempts are available to the four-worker pool.",
-        "Every attempt reaches one declared typed outcome within five milliseconds."
+        "The production controller can dispatch the first ten attempts unless seven qualifying outcomes stop the prefix earlier.",
+        "Each sampling invocation reaches a typed outcome within two milliseconds and each preparation invocation within five milliseconds."
       ],
       "basis": "derived",
       "formula": {
@@ -43,7 +46,7 @@
           {
             "composition_upper_ms": "composition:prepare-seven-of-ten"
           },
-          15
+          25
         ]
       }
     }

@@ -85,7 +85,7 @@ def type_enforcement_descriptor() -> dict[str, object]:
         manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
     ).encode("utf-8")
     return {
-        "provider": "dagcert.python/v12",
+        "provider": "dagcert.python/v13",
         "dagcert_version": VERSION,
         "static_analysis": "source-ast+strict-mypy/v1",
         "mypy_import_surface": "sealed-type-preserving-dagcert-stub/v1",
@@ -94,10 +94,10 @@ def type_enforcement_descriptor() -> dict[str, object]:
         "exception_verification": "selectable-nagini-viper-v3-or-maledictus-v2",
         "external_contracts": "canonical-boundary+contextual-task+environment-resolved+p1-contract-only+typeguard-runtime/v4",
         "reachability": "typed-all-of+explicit-one-of+may-must/v2",
-        "chance_composition": "engineering-envelope-optional-budget+exact-path+external+threshold-markov/v6",
+        "chance_composition": "engineering-envelope-optional-budget+exact-path+external+composed-threshold-markov/v7",
         "structured_composition": (
-            "sequence+parallel-all+finite-repeat+finite-threshold+typed-async-handoff+"
-            "external-transport-handoff/resource-aware/v4"
+            "sequence+parallel-all+finite-repeat+finite-composed-threshold+typed-async-handoff+"
+            "external-transport-handoff/resource-aware/v5"
         ),
         "lifecycle_state_proofs": "two-phase-affine+bounded-non-starvation+response/v1",
         "verified_javascript_typescript_leaves": (
