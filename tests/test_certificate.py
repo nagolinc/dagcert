@@ -96,7 +96,8 @@ def test_certificate_embeds_and_digest_binds_plain_english_requirements(project)
         "selectable-nagini-viper-v3-or-maledictus-v2"
     )
     assert document["type_enforcement"]["external_contracts"] == (
-        "environment-resolved+p1-contract-only+typeguard-runtime/v3"
+        "canonical-boundary+contextual-task+environment-resolved+"
+        "p1-contract-only+typeguard-runtime/v4"
     )
     assert document["type_enforcement"]["chance_composition"] == (
         "engineering-envelope-optional-budget+exact-path+external/v5"
@@ -154,6 +155,33 @@ def test_certificate_binds_the_type_enforcement_kernel(project):
     )
     assert not result.valid
     assert "source/runtime type enforcement kernel no longer matches" in result.problems
+
+
+def test_v10_contract_issues_and_verifies_v14_certificate(project):
+    root = Path(project["root"])
+    contract_path = Path(project["contract"])
+    raw = json.loads(contract_path.read_text(encoding="utf-8"))
+    raw["schema"] = "dagcert-contract/v10"
+    raw["channels"] = []
+    raw["external_handoffs"] = []
+    raw["state_claims"] = []
+    for task in raw["tasks"]:
+        task["start_resources"] = {}
+    contract_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+    certificate = root / "artifacts" / "v14-certificate.json"
+
+    document = issue_certificate(
+        contract_path, project["evidence"], certificate,
+        requirements_path=project["requirements"], source_root=root,
+    )
+
+    assert document["schema"] == "dagcert-certificate/v14"
+    assert document["primitives"]["tasks"][0]["typed_dependencies"] == []
+    result = verify_certificate(
+        certificate, contract_path=contract_path, evidence_path=project["evidence"],
+        requirements_path=project["requirements"], source_root=root,
+    )
+    assert result.valid, result.problems
 
 
 def test_issue_rejects_unknown_primitive_in_english_claim(project):

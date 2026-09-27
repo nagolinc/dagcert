@@ -85,15 +85,15 @@ def type_enforcement_descriptor() -> dict[str, object]:
         manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
     ).encode("utf-8")
     return {
-        "provider": "dagcert.python/v10",
+        "provider": "dagcert.python/v11",
         "dagcert_version": VERSION,
         "static_analysis": "source-ast+strict-mypy/v1",
         "mypy_import_surface": "sealed-type-preserving-dagcert-stub/v1",
         "decorator_provenance": "trusted-imports-and-shadow-rejection/v1",
         "operation_marker": "type-preserving/v1",
         "exception_verification": "selectable-nagini-viper-v3-or-maledictus-v2",
-        "external_contracts": "environment-resolved+p1-contract-only+typeguard-runtime/v3",
-        "reachability": "typed-may-must/v1",
+        "external_contracts": "canonical-boundary+contextual-task+environment-resolved+p1-contract-only+typeguard-runtime/v4",
+        "reachability": "typed-all-of+explicit-one-of+may-must/v2",
         "chance_composition": "engineering-envelope-optional-budget+exact-path+external/v5",
         "structured_composition": (
             "sequence+parallel-all+finite-repeat+typed-async-handoff+"
@@ -149,9 +149,11 @@ def check_python_sources(
     Dagcert invokes mypy itself.  A checker result supplied by the application or an LLM is not
     accepted as a substitute.
     """
-    bound_signatures = tuple(signatures)
+    bound_signatures = _unique_source_signatures(signatures)
     proof_bound_signatures = (
-        bound_signatures if proof_signatures is None else tuple(proof_signatures)
+        bound_signatures
+        if proof_signatures is None
+        else _unique_source_signatures(proof_signatures)
     )
     external_boundaries = tuple(external_contracts)
     concrete_callable_bindings = tuple(callable_bindings)
@@ -353,6 +355,24 @@ def check_python_sources(
         "external_contracts": external_results,
         "signatures": signatures_result,
     }
+
+
+def _unique_source_signatures(
+    signatures: Iterable[SourceSignature],
+) -> tuple[SourceSignature, ...]:
+    """Collapse contextual task aliases while rejecting conflicting source identities."""
+
+    by_symbol: dict[tuple[str, str, str], SourceSignature] = {}
+    for signature in signatures:
+        identity = (signature.language, signature.path, signature.symbol)
+        existing = by_symbol.get(identity)
+        if existing is not None and existing != signature:
+            raise SourceTypeError(
+                f"source symbol {signature.path}:{signature.symbol} has conflicting extracted "
+                "signatures"
+            )
+        by_symbol[identity] = signature
+    return tuple(by_symbol[identity] for identity in sorted(by_symbol))
 
 
 def read_python_signature(
@@ -1139,7 +1159,7 @@ def _require_external_boundary_decorator(
     if call.args[0].value != boundary_id:
         raise SourceTypeError(
             f"external adapter {symbol} decorator ID {call.args[0].value!r} does not match "
-            f"contract task {boundary_id!r}"
+            f"declared canonical boundary {boundary_id!r}"
         )
 
 

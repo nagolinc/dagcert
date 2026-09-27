@@ -95,6 +95,7 @@ class ExternalContract:
     provider: ExternalProvider
     success_outcome: str
     evidence_case: str
+    boundary_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +130,7 @@ class TypedDependency:
     task: str
     outcome_type: str
     input_field: str | None = None
+    alternative_group: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,6 +217,21 @@ class Task:
     @property
     def outcome_by_type(self) -> Mapping[str, TaskOutcome]:
         return {item.type: item for item in self.outcomes}
+
+    @property
+    def required_dependencies(self) -> tuple[TypedDependency, ...]:
+        return tuple(
+            dependency for dependency in self.typed_dependencies
+            if dependency.alternative_group is None
+        )
+
+    @property
+    def alternative_dependencies(self) -> Mapping[str, tuple[TypedDependency, ...]]:
+        groups: dict[str, list[TypedDependency]] = {}
+        for dependency in self.typed_dependencies:
+            if dependency.alternative_group is not None:
+                groups.setdefault(dependency.alternative_group, []).append(dependency)
+        return {identifier: tuple(dependencies) for identifier, dependencies in groups.items()}
 
     def guaranteed_effect(self, resource_id: str, kind: str) -> float:
         """Return the minimum effect across the complete source-declared outcome union."""
@@ -322,18 +339,39 @@ class Contract:
         return {item.id: item for item in self.external_handoffs}
 
     def topological_tasks(self) -> tuple[str, ...]:
-        remaining = {task.id: set(task.depends_on) for task in self.tasks}
+        """Return one feasible activation order, respecting explicit one-of groups."""
+
+        remaining = {task.id: task for task in self.tasks}
+        activated: set[str] = set()
         result: list[str] = []
         while remaining:
-            ready = sorted(identifier for identifier, dependencies in remaining.items() if not dependencies)
+            ready = sorted(
+                identifier for identifier, task in remaining.items()
+                if dependencies_satisfied(task, activated)
+            )
             if not ready:
-                raise ContractError("task dependency graph contains a cycle")
+                raise ContractError(
+                    "task dependency graph has no feasible activation order; every remaining "
+                    "task has an unsatisfied required dependency or one-of group"
+                )
             result.extend(ready)
             for identifier in ready:
                 remaining.pop(identifier)
-            for dependencies in remaining.values():
-                dependencies.difference_update(ready)
+                activated.add(identifier)
         return tuple(result)
+
+
+def dependencies_satisfied(task: Task, reachable: set[str]) -> bool:
+    """Return whether required edges and every explicit one-of group can fire."""
+
+    if not task.typed_dependencies:
+        return set(task.depends_on).issubset(reachable)
+    if any(dependency.task not in reachable for dependency in task.required_dependencies):
+        return False
+    return all(
+        any(dependency.task in reachable for dependency in alternatives)
+        for alternatives in task.alternative_dependencies.values()
+    )
 
 
 def composition_steps(
@@ -551,29 +589,29 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
     if schema not in {
         "dagcert-contract/v2", "dagcert-contract/v3", "dagcert-contract/v4",
         "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7",
-        "dagcert-contract/v8", "dagcert-contract/v9",
+        "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10",
     }:
         raise ContractError(
-            "contract schema must be dagcert-contract/v2, v3, v4, v5, v6, v7, v8, or v9"
+            "contract schema must be dagcert-contract/v2 through v10"
         )
     expected_top_level = {
         "schema", "workers", "resources", "tasks", "compositions", "metadata",
     }
-    if schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9"}:
+    if schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"}:
         expected_top_level.add("state_claims")
-    if schema in {"dagcert-contract/v8", "dagcert-contract/v9"}:
+    if schema in {"dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"}:
         expected_top_level.add("channels")
-    if schema == "dagcert-contract/v9":
+    if schema in {"dagcert-contract/v9", "dagcert-contract/v10"}:
         expected_top_level.add("external_handoffs")
     if schema in {
         "dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5",
         "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8",
-        "dagcert-contract/v9",
+        "dagcert-contract/v9", "dagcert-contract/v10",
     } and set(raw) != expected_top_level:
         raise ContractError(
             f"{schema.rsplit('/', 1)[-1]} contract must contain exactly schema, workers, resources, "
             "tasks, compositions, metadata, state_claims for v7+, channels for v8+, and "
-            "external_handoffs for v9"
+            "external_handoffs for v9+"
         )
     implementation_root = Path(source_root).resolve() if source_root is not None else contract_path.resolve().parent
 
@@ -616,7 +654,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
         v7_optional_task_fields = v6_optional_task_fields | {"verified_interface"}
         allowed_task_fields = (
             v7_task_fields | v7_optional_task_fields
-            if schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9"}
+            if schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"}
             else v6_task_fields | v6_optional_task_fields if schema == "dagcert-contract/v6"
             else v5_task_fields if schema == "dagcert-contract/v5"
             else v4_task_fields if schema == "dagcert-contract/v4"
@@ -644,7 +682,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             raise ContractError(
                 f"v6 task fields mismatch: unexpected={sorted(unexpected_task_fields)}, missing={missing}"
             )
-        if schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9"} and (
+        if schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"} and (
             unexpected_task_fields or v7_task_fields - (set(row) - {"metadata"})
         ):
             missing = sorted(v7_task_fields - set(row))
@@ -657,19 +695,19 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             row.get("role") if schema in {
                 "dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5",
                 "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8",
-                "dagcert-contract/v9",
+                "dagcert-contract/v9", "dagcert-contract/v10",
             } else row.get("role", "operation"),
             f"task {task_id}.role",
         )
         allowed_roles = (
             {"operation", "instrumentation", "external"}
-            if schema in {"dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9"}
+            if schema in {"dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"}
             else {"operation", "instrumentation"}
         )
         if schema in {
             "dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5",
             "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8",
-            "dagcert-contract/v9",
+            "dagcert-contract/v9", "dagcert-contract/v10",
         } and role not in allowed_roles:
             raise ContractError(
                 f"task {task_id}.role must be one of {sorted(allowed_roles)}"
@@ -745,16 +783,19 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
         source_signature: SourceSignature | None = None
         external_contract: ExternalContract | None = None
         callable_bindings: tuple[CallableBinding, ...] = ()
-        if schema in {"dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9"} and row.get("external_contract") is not None:
+        if schema in {"dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"} and row.get("external_contract") is not None:
             external = _object(
                 row.get("external_contract"), f"task {task_id}.external_contract"
             )
-            if set(external) != {
+            required_external_fields = {
                 "stub_path", "assumption", "provider", "success_outcome", "evidence_case",
-            }:
+            }
+            if schema == "dagcert-contract/v10":
+                required_external_fields.add("boundary_id")
+            if set(external) != required_external_fields:
                 raise ContractError(
-                    f"task {task_id}.external_contract must contain exactly assumption, "
-                    "evidence_case, provider, stub_path, and success_outcome"
+                    f"task {task_id}.external_contract must contain exactly "
+                    f"{sorted(required_external_fields)}"
                 )
             provider = _object(
                 external.get("provider"), f"task {task_id}.external_contract.provider"
@@ -798,6 +839,10 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
                     external.get("evidence_case"),
                     f"task {task_id}.external_contract.evidence_case",
                 ),
+                _identifier(
+                    external.get("boundary_id"),
+                    f"task {task_id}.external_contract.boundary_id",
+                ) if schema == "dagcert-contract/v10" else None,
             )
         if role == "external" and external_contract is None:
             raise ContractError(f"external task {task_id} requires external_contract")
@@ -805,7 +850,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             raise ContractError(
                 f"non-external task {task_id} must set external_contract to null"
             )
-        if schema in {"dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9"}:
+        if schema in {"dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"}:
             parsed_bindings: list[CallableBinding] = []
             for binding_value in _array(
                 row.get("callable_bindings", ()), f"task {task_id}.callable_bindings"
@@ -899,7 +944,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             callable_bindings = tuple(parsed_bindings)
         if schema in {
             "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
-            "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9",
+            "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10",
         }:
             binding = _object(row.get("implementation"), f"task {task_id}.implementation")
             if set(binding) != {"language", "path", "symbol"}:
@@ -921,7 +966,11 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
                     source_signature = read_python_signature(
                         implementation_root, implementation.path, implementation.symbol,
                         include_legacy_unhandled=schema == "dagcert-contract/v4",
-                        external_boundary_id=task_id if role == "external" else None,
+                        external_boundary_id=(
+                            external_contract.boundary_id or task_id
+                            if role == "external" and external_contract is not None
+                            else None
+                        ),
                     )
                     if external_contract is not None:
                         if source_signature.outcome_types[0] != external_contract.success_outcome:
@@ -939,7 +988,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
                 except SourceTypeError as exc:
                     raise ContractError(f"task {task_id} source type error: {exc}") from exc
             elif (
-                schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9"}
+                schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"}
                 and implementation.language in {"javascript", "typescript"}
             ):
                 if role != "operation":
@@ -1076,7 +1125,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             input_type = _identifier(row.get("input_type"), f"task {task_id}.input_type")
             output_type = _identifier(row.get("output_type"), f"task {task_id}.output_type")
         error_budget: TaskErrorBudget | None = None
-        if schema in {"dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9"} and row.get("error_budget") is not None:
+        if schema in {"dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"} and row.get("error_budget") is not None:
             budget = _object(row.get("error_budget"), f"task {task_id}.error_budget")
             required_budget_fields = {
                 "basis", "evidence_case", "good_outcomes",
@@ -1128,22 +1177,20 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
         dependency_values = _array(row.get("depends_on", ()), f"task {task_id}.depends_on")
         if schema in {
             "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
-            "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9",
+            "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10",
         }:
             parsed_dependencies: list[TypedDependency] = []
             for dependency_value in dependency_values:
                 dependency = _object(dependency_value, f"task {task_id}.dependency")
-                allowed_dependency_fields = (
-                    {"task", "outcome_type", "input_field"}
-                    if schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9"}
-                    else {"task", "outcome_type"}
-                )
-                if set(dependency) not in (
-                    {"task", "outcome_type"}, allowed_dependency_fields,
-                ):
+                allowed_dependency_fields = {"task", "outcome_type"}
+                if schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"}:
+                    allowed_dependency_fields.add("input_field")
+                if schema == "dagcert-contract/v10":
+                    allowed_dependency_fields.add("alternative_group")
+                if not {"task", "outcome_type"}.issubset(dependency) or not set(dependency).issubset(allowed_dependency_fields):
                     raise ContractError(
                         f"task {task_id} typed dependency must contain task, outcome_type, "
-                        "and optionally input_field in v7"
+                        "and only the schema-supported optional fields"
                     )
                 parsed_dependencies.append(TypedDependency(
                     _identifier(dependency.get("task"), f"task {task_id}.dependency.task"),
@@ -1155,18 +1202,26 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
                         dependency.get("input_field"),
                         f"task {task_id}.dependency.input_field",
                     ) if dependency.get("input_field") is not None else None,
+                    _identifier(
+                        dependency.get("alternative_group"),
+                        f"task {task_id}.dependency.alternative_group",
+                    ) if dependency.get("alternative_group") is not None else None,
                 ))
             typed_dependencies = tuple(parsed_dependencies)
             if len(typed_dependencies) != len(set(typed_dependencies)):
                 raise ContractError(f"task {task_id}.depends_on contains duplicate typed edges")
-            outcomes_by_dependency: dict[str, set[str]] = {}
+            outcomes_by_dependency: dict[str, list[TypedDependency]] = {}
             for typed_dependency in typed_dependencies:
-                outcomes_by_dependency.setdefault(typed_dependency.task, set()).add(
-                    typed_dependency.outcome_type
-                )
+                outcomes_by_dependency.setdefault(typed_dependency.task, []).append(typed_dependency)
             ambiguous_dependencies = sorted(
-                dependency_id for dependency_id, outcome_types in outcomes_by_dependency.items()
-                if len(outcome_types) > 1
+                dependency_id
+                for dependency_id, edges in outcomes_by_dependency.items()
+                if len({edge.outcome_type for edge in edges}) > 1
+                and not (
+                    schema == "dagcert-contract/v10"
+                    and len({edge.alternative_group for edge in edges}) == 1
+                    and edges[0].alternative_group is not None
+                )
             )
             if ambiguous_dependencies:
                 raise ContractError(
@@ -1185,7 +1240,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             parse_effects(
                 row.get("start_resources", {}), f"task {task_id}.start_resources",
             )
-            if schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9"}
+            if schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"}
             else {}
         )
         tasks.append(Task(
@@ -1211,7 +1266,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
     compositions: list[Composition] = []
     for value in _array(raw.get("compositions", ()), "compositions"):
         row = _object(value, "composition")
-        if schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9"}:
+        if schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"}:
             if set(row) != {"id", "expression", "metadata"}:
                 raise ContractError(
                     "v7+ composition must contain exactly id, expression, and metadata"
@@ -1219,8 +1274,8 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             composition_id = _identifier(row.get("id"), "composition.id")
             expression = _composition_expression(
                 row.get("expression"), f"composition {composition_id}.expression",
-                allow_async_handoff=schema in {"dagcert-contract/v8", "dagcert-contract/v9"},
-                allow_external_handoff=schema == "dagcert-contract/v9",
+                allow_async_handoff=schema in {"dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"},
+                allow_external_handoff=schema in {"dagcert-contract/v9", "dagcert-contract/v10"},
             )
             v7_steps = composition_steps(expression)
             if len({step.task for step in v7_steps}) < 2:
@@ -1760,7 +1815,7 @@ def _validate(contract: Contract) -> None:
     }
     if len(handoff_dependency_keys) != len(contract.external_handoffs):
         raise ContractError("external handoffs must bind unique source/destination field edges")
-    if contract.schema in {"dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9"}:
+    if contract.schema in {"dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"}:
         callable_binding_ids = [
             binding.id for task in contract.tasks for binding in task.callable_bindings
         ]
@@ -1817,9 +1872,46 @@ def _validate(contract: Contract) -> None:
             raise ContractError(f"task {task.id} has unknown dependencies {sorted(missing_dependencies)}")
         if task.id in task.depends_on:
             raise ContractError(f"task {task.id} depends on itself")
+        if contract.schema == "dagcert-contract/v10":
+            groups = task.alternative_dependencies
+            for group_id, alternatives in groups.items():
+                if len(alternatives) < 2:
+                    raise ContractError(
+                        f"task {task.id} alternative_group {group_id!r} must contain at least "
+                        "two producer edges"
+                    )
+                input_fields = {edge.input_field for edge in alternatives}
+                if len(input_fields) != 1:
+                    raise ContractError(
+                        f"task {task.id} alternative_group {group_id!r} must feed exactly one "
+                        "input slot"
+                    )
+            groups_by_field: dict[str | None, set[str]] = {}
+            for group_id, alternatives in groups.items():
+                groups_by_field.setdefault(alternatives[0].input_field, set()).add(group_id)
+            duplicate_group_fields = {
+                field_name: group_ids
+                for field_name, group_ids in groups_by_field.items()
+                if len(group_ids) > 1
+            }
+            if duplicate_group_fields:
+                raise ContractError(
+                    f"task {task.id} assigns multiple alternative groups to one input slot: "
+                    f"{duplicate_group_fields}"
+                )
+            grouped_fields = set(groups_by_field)
+            conflicting_required = [
+                edge for edge in task.required_dependencies
+                if edge.input_field in grouped_fields
+            ]
+            if conflicting_required:
+                raise ContractError(
+                    f"task {task.id} mixes required and alternative producer edges for one "
+                    "input slot"
+                )
         if contract.schema in {
             "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
-            "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9",
+            "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10",
         }:
             for dependency in task.typed_dependencies:
                 upstream = tasks.get(dependency.task)
@@ -1850,7 +1942,7 @@ def _validate(contract: Contract) -> None:
                             f"typed edge {dependency.task}/{dependency.outcome_type}"
                         )
                 if dependency.input_field is not None:
-                    if contract.schema not in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9"}:
+                    if contract.schema not in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"}:
                         raise ContractError(
                             f"task {task.id} dependency input_field requires v7"
                         )
@@ -1875,7 +1967,7 @@ def _validate(contract: Contract) -> None:
                         )
             if contract.schema in {
                 "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7",
-                "dagcert-contract/v8", "dagcert-contract/v9",
+                "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10",
             } and task.error_budget is not None:
                 budget = task.error_budget
                 unknown_good = set(budget.good_outcomes) - set(task.outcome_by_type)
@@ -1931,6 +2023,20 @@ def _validate(contract: Contract) -> None:
                 raise ContractError(f"task {task.id} acquires more {resource_id} than exists")
             if effect.consume > resource.capacity or effect.produce > resource.capacity:
                 raise ContractError(f"task {task.id} moves more {resource_id} than its capacity")
+    if contract.schema == "dagcert-contract/v10":
+        external_bindings: dict[str, tuple[Implementation | None, ExternalContract]] = {}
+        for task in contract.tasks:
+            external = task.external_contract
+            if external is None or external.boundary_id is None:
+                continue
+            binding = (task.implementation, external)
+            existing = external_bindings.get(external.boundary_id)
+            if existing is not None and existing != binding:
+                raise ContractError(
+                    f"canonical external boundary {external.boundary_id!r} has conflicting "
+                    "implementation or contract bindings"
+                )
+            external_bindings[external.boundary_id] = binding
     for resource in contract.resources:
         if resource.initial > resource.capacity:
             raise ContractError(f"resource {resource.id} initial amount exceeds capacity")
@@ -2072,12 +2178,12 @@ def _validate(contract: Contract) -> None:
                 f"preserving primitive mapping: {source_signature.language} {source_type} -> "
                 f"{destination_signature.language} {destination_type} over {handoff.transport}"
             )
-        expected_dependency = TypedDependency(
-            source_task.id,
-            handoff.source.outcome_type,
-            handoff.destination.input_field,
-        )
-        if expected_dependency not in destination_task.typed_dependencies:
+        if not any(
+            dependency.task == source_task.id
+            and dependency.outcome_type == handoff.source.outcome_type
+            and dependency.input_field == handoff.destination.input_field
+            for dependency in destination_task.typed_dependencies
+        ):
             raise ContractError(
                 f"external_handoff {handoff.id} destination task {destination_task.id} must "
                 "declare the exact source outcome and input_field dependency"
@@ -2109,7 +2215,7 @@ def _validate(contract: Contract) -> None:
                 )
             if contract.schema in {
                 "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
-                "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9",
+                "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10",
             }:
                 if step.outcome_type not in task.outcome_by_type:
                     raise ContractError(
@@ -2117,7 +2223,7 @@ def _validate(contract: Contract) -> None:
                         f"{step.outcome_type!r} outside the task's source union"
                     )
                 if (
-                    contract.schema not in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9"}
+                    contract.schema not in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"}
                     and step.count > 1
                     and step.outcome_type != task.input_type
                 ):
@@ -2137,7 +2243,7 @@ def _validate(contract: Contract) -> None:
                         f"{upstream_step.task}/{upstream_step.outcome_type} does not feed "
                         f"{downstream_step.task}/{downstream.input_type}"
                     )
-        if contract.schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9"}:
+        if contract.schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"}:
             assert composition.expression is not None
             _validate_composition_expression_edges(
                 composition.expression, tasks, channels, external_handoffs, composition.id,

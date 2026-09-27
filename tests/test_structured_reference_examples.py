@@ -51,3 +51,8 @@ def test_async_channel_v12_example_passes() -> None:
 def test_browser_fetch_v13_example_passes() -> None:
     root = Path(__file__).parents[1] / "examples" / "certified_browser_fetch"
     _assert_example_claims(root, certificate_schema="dagcert-certificate/v13")
+
+
+def test_alternative_producers_v14_example_passes() -> None:
+    root = Path(__file__).parents[1] / "examples" / "certified_alternative_producers"
+    _assert_example_claims(root, certificate_schema="dagcert-certificate/v14")

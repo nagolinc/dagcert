@@ -13,7 +13,7 @@ behavioral regression merely to make a claim pass.
 
 ## 2. Contract schema
 
-New issuance uses `dagcert-contract/v8`. The loader retains v2-v7 support for verification of
+New issuance uses `dagcert-contract/v10`. The loader retains v2-v9 support for verification of
 existing certificates. JSON is built in; YAML is available with PyYAML.
 
 ### Worker
@@ -58,8 +58,12 @@ or unbounded liveness.
   `instrumentation` for observers/aggregate probes.
 - `worker`: declared worker ID.
 - `implementation`: language, source-root-relative path, and symbol for the real operation callable.
-- `depends_on`: typed edges naming an upstream task and one exact upstream outcome type; the graph
-  must be acyclic. A fork/join dependency additionally names the downstream source `input_field`.
+- `depends_on`: typed edges naming an upstream task and one exact upstream outcome type. Ungrouped
+  edges are all required. V10 edges may name an `alternative_group`; one edge in each group is
+  required, while distinct groups remain conjunctive. Every group feeds one downstream source
+  input slot and contains at least two alternatives. A multi-input dependency additionally names
+  the downstream source `input_field`. The declared quantifiers must admit a feasible activation
+  order; an unselected alternative edge is not allowed to invent a false cycle.
 - `outcomes`: the complete source return union, with a ResourceEffect mapping for every variant.
 - `start_resources`: reservation/acquisition effects applied before operation execution.
 - `error_budget`: null or one engineering bad-event budget over a canonical duration case and a
@@ -88,6 +92,13 @@ operation has no undeclared exceptional exit. Expected failures must be explicit
 return variants; the contract cannot add, omit, or rename them. Missing or unsupported verifier
 operation fails closed. Async callables remain unsupported until cancellation and awaited
 exceptions can be proved by the approved verifier.
+
+An external task's contextual task `id` may differ from its V10
+`external_contract.boundary_id`. The latter must match the real source
+`@external_boundary(...)` decorator. Several contextual tasks may reuse a canonical boundary only
+with identical adapter, stub, provider, assumption, and source signature. Retained evidence stores
+both identities; ambiguous concurrent call sites require a context-local task binding, and a
+missing or mismatched boundary identity fails analysis.
 
 The proof must establish totality over the complete declared input class. A task operation may not
 declare `Requires`, and a bound application module may not use Nagini `Assume` or `ContractOnly`.
@@ -367,7 +378,7 @@ SHA-256 hashes it. It ignores common generated directories and `.dagcertignore` 
 selected checker artifacts inside the source root are automatically excluded to avoid
 self-reference.
 
-`dagcert-certificate/v9` records source identity, exclusions, contract/evidence/requirements
+`dagcert-certificate/v14` records source identity, exclusions, contract/evidence/requirements
 digests, source signature extraction, strict-mypy result, digest-pinned Nagini/Viper proof result
 and scope, the exact Dagcert source-verification kernel descriptor and source-file manifest hash, the complete normalized English
 requirements, the mandatory translation audit, serialized

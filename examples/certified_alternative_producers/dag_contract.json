@@ -1,0 +1,177 @@
+{
+  "schema": "dagcert-contract/v10",
+  "workers": [
+    {
+      "id": "request-worker",
+      "concurrency": 2
+    }
+  ],
+  "resources": [
+    {
+      "id": "request-worker-slots",
+      "capacity": 2,
+      "initial": 2,
+      "unit": "slots"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "startup.request.reserve",
+      "role": "operation",
+      "worker": "request-worker",
+      "implementation": {
+        "language": "python",
+        "path": "app.py",
+        "symbol": "reserve_startup"
+      },
+      "outcomes": [
+        {
+          "type": "ReservedRequest",
+          "resources": {},
+          "metadata": {}
+        }
+      ],
+      "error_budget": null,
+      "external_contract": null,
+      "start_resources": {},
+      "depends_on": [],
+      "timings": {
+        "completion": {
+          "metric": "duration",
+          "upper_ms": 5,
+          "evidence": "assumed",
+          "minimum_samples": 0,
+          "policy": "max",
+          "safety_factor": 1
+        }
+      }
+    },
+    {
+      "id": "submitted.request.reserve",
+      "role": "operation",
+      "worker": "request-worker",
+      "implementation": {
+        "language": "python",
+        "path": "app.py",
+        "symbol": "reserve_submitted"
+      },
+      "outcomes": [
+        {
+          "type": "ReservedRequest",
+          "resources": {},
+          "metadata": {}
+        }
+      ],
+      "error_budget": null,
+      "external_contract": null,
+      "start_resources": {},
+      "depends_on": [],
+      "timings": {
+        "completion": {
+          "metric": "duration",
+          "upper_ms": 5,
+          "evidence": "assumed",
+          "minimum_samples": 0,
+          "policy": "max",
+          "safety_factor": 1
+        }
+      }
+    },
+    {
+      "id": "request.build",
+      "role": "operation",
+      "worker": "request-worker",
+      "implementation": {
+        "language": "python",
+        "path": "app.py",
+        "symbol": "build_request"
+      },
+      "outcomes": [
+        {
+          "type": "BuiltRequest",
+          "resources": {},
+          "metadata": {}
+        }
+      ],
+      "error_budget": null,
+      "external_contract": null,
+      "start_resources": {},
+      "depends_on": [
+        {
+          "task": "startup.request.reserve",
+          "outcome_type": "ReservedRequest",
+          "alternative_group": "request-source"
+        },
+        {
+          "task": "submitted.request.reserve",
+          "outcome_type": "ReservedRequest",
+          "alternative_group": "request-source"
+        }
+      ],
+      "timings": {
+        "completion": {
+          "metric": "duration",
+          "upper_ms": 5,
+          "evidence": "assumed",
+          "minimum_samples": 0,
+          "policy": "max",
+          "safety_factor": 1
+        }
+      }
+    }
+  ],
+  "channels": [],
+  "external_handoffs": [],
+  "compositions": [
+    {
+      "id": "startup-request-path",
+      "expression": {
+        "kind": "sequence",
+        "children": [
+          {
+            "kind": "leaf",
+            "task": "startup.request.reserve",
+            "timing": "completion",
+            "outcome_type": "ReservedRequest"
+          },
+          {
+            "kind": "leaf",
+            "task": "request.build",
+            "timing": "completion",
+            "outcome_type": "BuiltRequest"
+          }
+        ]
+      },
+      "metadata": {
+        "scope": "startup caller"
+      }
+    },
+    {
+      "id": "submitted-request-path",
+      "expression": {
+        "kind": "sequence",
+        "children": [
+          {
+            "kind": "leaf",
+            "task": "submitted.request.reserve",
+            "timing": "completion",
+            "outcome_type": "ReservedRequest"
+          },
+          {
+            "kind": "leaf",
+            "task": "request.build",
+            "timing": "completion",
+            "outcome_type": "BuiltRequest"
+          }
+        ]
+      },
+      "metadata": {
+        "scope": "submitted caller"
+      }
+    }
+  ],
+  "state_claims": [],
+  "metadata": {
+    "purpose": "Minimal explicit alternative-producer example"
+  }
+}

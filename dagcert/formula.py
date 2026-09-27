@@ -291,7 +291,7 @@ def _validate_dag_surface(references: set[str], contract: Contract) -> None:
     }
     if contract.schema in {
         "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
-        "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9",
+        "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10",
     }:
         resource_ids = {
             reference.split(":", 1)[1]
@@ -490,10 +490,10 @@ def _composition_failure_probability_upper(
 ) -> float:
     if state.contract.schema not in {
         "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7",
-        "dagcert-contract/v8", "dagcert-contract/v9",
+        "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10",
     }:
         raise FormulaError(
-            "error-budget formulas require dagcert-contract/v5, v6, v7, v8, or v9"
+            "error-budget formulas require dagcert-contract/v5 through v10"
         )
     composition = state.contract.composition_by_id.get(composition_id)
     if composition is None:
@@ -671,10 +671,10 @@ def _external_failure_probability_upper(
 ) -> float:
     if state.contract.schema not in {
         "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8",
-        "dagcert-contract/v9",
+        "dagcert-contract/v9", "dagcert-contract/v10",
     }:
         raise FormulaError(
-            "external-contract formulas require dagcert-contract/v6, v7, v8, or v9"
+            "external-contract formulas require dagcert-contract/v6 through v10"
         )
     task = state.contract.task_by_id.get(task_id)
     if task is None or task.external_contract is None:

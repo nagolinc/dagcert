@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass
 from math import ceil
 from typing import Any, Iterable
 
-from .contract import Contract, ResourceEffect, Task, Timing
+from .contract import Contract, ResourceEffect, Task, Timing, dependencies_satisfied
 from .evidence import TimingSample
 
 
@@ -113,6 +113,16 @@ def analyze_contract(
             findings.append(Finding("wrong-worker", sample.task_id, f"expected {task.worker}, observed {sample.worker_id}"))
         if sample.source_fingerprint != source_fingerprint:
             findings.append(Finding("wrong-source", sample.task_id, "timing was observed against another source fingerprint"))
+        if not _sample_boundary_matches(contract, task, sample):
+            expected = (
+                task.external_contract.boundary_id
+                if task.external_contract is not None else None
+            )
+            findings.append(Finding(
+                "wrong-external-boundary",
+                sample.task_id,
+                f"expected canonical boundary {expected!r}, observed {sample.boundary_id!r}",
+            ))
         worker = contract.worker_by_id[task.worker]
         if sample.observed_worker_concurrency is not None and sample.observed_worker_concurrency > worker.concurrency:
             findings.append(Finding(
@@ -128,10 +138,10 @@ def analyze_contract(
         if timing is not None and timing.metric == "duration":
             if contract.schema in {
                 "dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6",
-                "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9",
+                "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10",
             }:
                 _check_typed_outcome_observation(task, sample, contract, findings)
-                if contract.schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9"}:
+                if contract.schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"}:
                     _check_start_resource_observation(task, sample, findings)
             elif sample.succeeded:
                 _check_execution_observation(task, sample, contract, findings)
@@ -147,12 +157,13 @@ def analyze_contract(
             usable = [
                 sample for sample in evidence
                 if sample.task_id == task.id and sample.case == case
-                and (contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9"} or sample.succeeded)
+                and (contract.schema in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"} or sample.succeeded)
                 and (
-                    contract.schema not in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9"}
+                    contract.schema not in {"dagcert-contract/v4", "dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"}
                     or sample.outcome_type in task.outcome_by_type
                 )
                 and sample.worker_id == task.worker and sample.source_fingerprint == source_fingerprint
+                and _sample_boundary_matches(contract, task, sample)
             ]
             if len(usable) < requirement.minimum_samples:
                 findings.append(Finding(
@@ -187,7 +198,7 @@ def analyze_contract(
                 requirement.lower_ms, requirement.upper_ms, passed,
             ))
 
-    if contract.schema in {"dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9"}:
+    if contract.schema in {"dagcert-contract/v5", "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10"}:
         for task in contract.tasks:
             budget = task.error_budget
             if budget is None:
@@ -200,6 +211,7 @@ def analyze_contract(
                 and sample.worker_id == task.worker
                 and sample.source_fingerprint == source_fingerprint
                 and sample.outcome_type in task.outcome_by_type
+                and _sample_boundary_matches(contract, task, sample)
             ]
             bad = [
                 sample for sample in observations
@@ -259,6 +271,7 @@ def analyze_contract(
     passed = not findings
     progress_assumptions = (
         "outcome-specific resource effects match runtime acquisition and flow",
+        "ungrouped dependencies are all required; each named alternative_group requires one reachable producer",
         "may-reachability follows any real typed outcome branch; it is not an unconditional progress guarantee",
         "must-reachability uses only dependencies and resource effects common to every source outcome",
         "resource acquisition is atomic and scheduling is fair",
@@ -477,6 +490,17 @@ def _check_typed_outcome_observation(
             ))
 
 
+def _sample_boundary_matches(
+    contract: Contract, task: Task, sample: TimingSample,
+) -> bool:
+    if contract.schema != "dagcert-contract/v10":
+        return True
+    if task.role != "external":
+        return sample.boundary_id is None
+    assert task.external_contract is not None
+    return sample.boundary_id == task.external_contract.boundary_id
+
+
 def _reachable_tasks(contract: Contract, *, guaranteed: bool) -> set[str]:
     """Return may- or must-reachable task executions.
 
@@ -490,12 +514,21 @@ def _reachable_tasks(contract: Contract, *, guaranteed: bool) -> set[str]:
     while changed:
         changed = False
         for task_id, task in tuple(remaining.items()):
-            if not set(task.depends_on).issubset(reachable):
+            if not dependencies_satisfied(task, reachable):
                 continue
             if guaranteed and task.typed_dependencies:
                 if any(
                     len(contract.task_by_id[item.task].outcomes) != 1
-                    for item in task.typed_dependencies
+                    for item in task.required_dependencies
+                ):
+                    continue
+                if any(
+                    not any(
+                        item.task in reachable
+                        and len(contract.task_by_id[item.task].outcomes) == 1
+                        for item in alternatives
+                    )
+                    for alternatives in task.alternative_dependencies.values()
                 ):
                     continue
             unavailable = _unavailable_for_first_execution(
@@ -569,13 +602,23 @@ def _structurally_blocked_tasks(
 
     blocked: dict[str, str] = {}
     for task_id, task in remaining.items():
-        missing_dependencies = sorted(set(task.depends_on) - reachable)
+        missing_dependencies = sorted(
+            dependency.task for dependency in task.required_dependencies
+            if dependency.task not in reachable
+        )
+        unavailable_groups = {
+            group_id: sorted(dependency.task for dependency in alternatives)
+            for group_id, alternatives in task.alternative_dependencies.items()
+            if not any(dependency.task in reachable for dependency in alternatives)
+        }
         unavailable_resources = _unavailable_for_first_execution(
             task, contract, producible,
         )
         reasons: list[str] = []
         if missing_dependencies:
             reasons.append(f"unreachable dependencies {missing_dependencies}")
+        if unavailable_groups:
+            reasons.append(f"one-of producer groups have no reachable member {unavailable_groups}")
         if unavailable_resources:
             reasons.append(f"no initial supply or reachable producer for {unavailable_resources}")
         blocked[task_id] = "; ".join(reasons) or "no feasible first-execution path"

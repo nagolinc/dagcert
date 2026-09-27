@@ -132,8 +132,19 @@ def stats(
         for task in tasks
         if "id" in task and "worker" in task
     }
+    boundary_tasks: dict[str, list[tuple[str, str]]] = {}
+    for task in tasks:
+        external = task.get("external_contract")
+        if not isinstance(external, dict):
+            continue
+        boundary_id = external.get("boundary_id") or task.get("id")
+        if isinstance(boundary_id, str):
+            boundary_tasks.setdefault(boundary_id, []).append(
+                (str(task["id"]), str(task["worker"]))
+            )
     extension = _dagcert_extension(app)
     extension["task_workers"] = task_workers
+    extension["external_boundary_tasks"] = boundary_tasks
     extension["certificate_path"] = str(certificate_path)
 
     index = _asset("index.html")
@@ -192,12 +203,18 @@ def banner(
     def events_view() -> tuple[str, int, dict[str, str]]:
         rows: list[dict[str, object]] = []
         task_workers = cast(dict[str, str], _dagcert_extension(app).get("task_workers", {}))
+        boundary_tasks = cast(
+            dict[str, list[tuple[str, str]]],
+            _dagcert_extension(app).get("external_boundary_tasks", {}),
+        )
         for event in runtime_violations():
             row = cast(dict[str, object], asdict(event))
             row.update({"violation": True, "passed": False, "active": True})
             if event.boundary_id in task_workers:
                 row["task_id"] = event.boundary_id
                 row["worker_id"] = task_workers[event.boundary_id]
+            elif len(boundary_tasks.get(event.boundary_id, [])) == 1:
+                row["task_id"], row["worker_id"] = boundary_tasks[event.boundary_id][0]
             rows.append(row)
         if extra_events is not None:
             rows.extend(dict(event) for event in extra_events())

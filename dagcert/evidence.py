@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from threading import Lock
 from time import time
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any, Iterator, Mapping
 import json
 from math import isfinite
 
@@ -27,6 +29,7 @@ class TimingSample:
     value_ms: float
     worker_id: str
     source_fingerprint: str
+    boundary_id: str | None = None
     succeeded: bool = True
     recorded_at: float = field(default_factory=time)
     observed_worker_concurrency: int | None = None
@@ -68,7 +71,9 @@ class TimingSample:
             or self.observed_worker_concurrency < 1
         ):
             raise EvidenceError("observed_worker_concurrency must be a positive integer")
-        for field_name in ("observed_input_type", "observed_output_type", "outcome_type"):
+        for field_name in (
+            "boundary_id", "observed_input_type", "observed_output_type", "outcome_type",
+        ):
             value = getattr(self, field_name)
             if value is not None and (not isinstance(value, str) or not value.strip()):
                 raise EvidenceError(f"{field_name} must be a nonempty string or null")
@@ -107,14 +112,60 @@ class ExternalEvidenceMonitor:
         source_fingerprint: str,
     ) -> None:
         self._tasks = contract.task_by_id
+        self._tasks_by_boundary: dict[str, list[str]] = {}
+        for task in contract.tasks:
+            external = task.external_contract
+            if task.role != "external" or external is None:
+                continue
+            boundary_id = external.boundary_id or task.id
+            self._tasks_by_boundary.setdefault(boundary_id, []).append(task.id)
         self._recorder = recorder
         self._source_fingerprint = source_fingerprint
+        self._contextual_task: ContextVar[str | None] = ContextVar(
+            f"dagcert_external_task_{id(self)}", default=None,
+        )
 
     def __call__(self, event: ExternalBoundaryEvent) -> None:
-        task = self._tasks.get(event.boundary_id)
-        if task is None or task.external_contract is None or task.role != "external":
+        task_ids = self._tasks_by_boundary.get(event.boundary_id, [])
+        if not task_ids:
             raise EvidenceError(
-                f"runtime external boundary {event.boundary_id!r} is not a declared external task"
+                f"runtime external boundary {event.boundary_id!r} is not declared"
+            )
+        if len(task_ids) != 1:
+            contextual_task = self._contextual_task.get()
+            if contextual_task not in task_ids:
+                raise EvidenceError(
+                    f"runtime external boundary {event.boundary_id!r} maps to contextual tasks "
+                    f"{task_ids}; execute the call inside monitor.task_context(task_id)"
+                )
+            self.record_for_task(contextual_task, event)
+            return
+        self.record_for_task(task_ids[0], event)
+
+    @contextmanager
+    def task_context(self, task_id: str) -> Iterator[None]:
+        """Bind concurrent-safe contextual task identity around one production call."""
+
+        task = self._tasks.get(task_id)
+        if task is None or task.external_contract is None or task.role != "external":
+            raise EvidenceError(f"task {task_id!r} is not a declared external task")
+        token = self._contextual_task.set(task_id)
+        try:
+            yield
+        finally:
+            self._contextual_task.reset(token)
+
+    def record_for_task(self, task_id: str, event: ExternalBoundaryEvent) -> None:
+        """Record a canonical boundary event for one contextual external task instance."""
+
+        task = self._tasks.get(task_id)
+        if task is None or task.external_contract is None or task.role != "external":
+            raise EvidenceError(f"task {task_id!r} is not a declared external task")
+        boundary_id = task.external_contract.boundary_id or task.id
+        if event.boundary_id != boundary_id:
+            raise EvidenceError(
+                f"task {task_id!r} binds canonical boundary {boundary_id!r}, not runtime "
+                f"boundary {event.boundary_id!r}"
             )
         outcome = task.outcome_by_type.get(event.outcome_type)
         if outcome is None:
@@ -136,6 +187,7 @@ class ExternalEvidenceMonitor:
             value_ms=event.elapsed_ms,
             worker_id=task.worker,
             source_fingerprint=self._source_fingerprint,
+            boundary_id=event.boundary_id,
             succeeded=event.succeeded,
             recorded_at=event.recorded_at,
             observed_worker_concurrency=1,
@@ -166,6 +218,7 @@ def load_evidence(path: str | Path) -> tuple[TimingSample, ...]:
             sample = TimingSample(
                 task_id=row["task_id"], case=row["case"], value_ms=row["value_ms"],
                 worker_id=row["worker_id"], source_fingerprint=row["source_fingerprint"],
+                boundary_id=row.get("boundary_id"),
                 succeeded=row["succeeded"], recorded_at=row["recorded_at"],
                 observed_worker_concurrency=row.get("observed_worker_concurrency"),
                 observed_input_type=row.get("observed_input_type"),

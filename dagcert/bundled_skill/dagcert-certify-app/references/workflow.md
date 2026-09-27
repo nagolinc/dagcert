@@ -37,7 +37,7 @@ that opt-out in the handoff. Run `python -m dagcert help app-surfaces` for the i
 
 ## Contract
 
-The hardened `dagcert-contract/v9` JSON or YAML object contains `workers`, `tasks`, `resources`,
+The hardened `dagcert-contract/v10` JSON or YAML object contains `workers`, `tasks`, `resources`,
 typed asynchronous `channels`, task-local `timings`, structured finite `compositions`,
 cross-language `external_handoffs`, `state_claims`, and metadata. Composition expressions contain
 only `leaf`, `sequence`, `parallel_all`, `finite_repeat`, `async_handoff`, and
@@ -276,6 +276,9 @@ reservations, omitted failure transitions, average-rate substitutions for burst 
 models that do not resemble the actual application graph. It also verifies that every implementation
 binding is the production worker boundary, that dependency edges follow real source types, and that
 failure/exception outcomes and their effects were not omitted or falsely assigned success production.
+It checks dependency quantifiers too: mutually exclusive callers must be explicit alternatives,
+real multi-input joins must remain all-of, and reused external boundaries must retain the actual
+contextual task identity in evidence.
 
 ## Handoff
 

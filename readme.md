@@ -86,7 +86,7 @@ Those primitives are enough to express conditional statements such as:
 - model X is never more than G generations out of date; and
 - a handler or visible action completes within its declared deadline.
 
-V13 issuance separates real `operation`, `external`, and `instrumentation` tasks and supports a
+V14 issuance separates real `operation`, `external`, and `instrumentation` tasks and supports a
 small structured workflow algebra: `leaf`, `sequence`, `parallel_all`, `finite_repeat`, and the
 v8+ `async_handoff` plus the v9-only `external_handoff`.
 Every v7+ leaf names the source outcome traversed and every sequence boundary must match real typed
@@ -113,6 +113,14 @@ JSON `boolean`/`string` between JavaScript or TypeScript and Python `bool`/`str`
 bound, and engineering bad-event budget. Those terms are added to structured-composition latency
 and union-bound calculations; they cannot be hidden inside an observer task. See
 `dagcert help browser-fetch` for a runnable real `fetch` round trip.
+
+V10 dependencies are all-of by default and can name an explicit `alternative_group` for several
+real producers of the same input slot. Each group is one-of; distinct groups and ungrouped edges
+remain conjunctive. Dagcert never guesses alternatives from matching types. External tasks also
+separate their contextual task ID from a canonical `external_contract.boundary_id`, so the same
+proved adapter can appear at real startup, refresh, or request call sites without changing its
+source decorator identity. Evidence retains both identities. See
+`dagcert help alternative-producers`.
 
 V7+ tasks also distinguish resource effects at task start from effects on each typed completion
 outcome. Kernel-owned state claims cover affine lifecycle invariants, finite-horizon
@@ -155,7 +163,7 @@ closure and returns every source-import edge. Dagcert independently reconstructs
 the exact source files and requires the importer, module, provider, provider hash, and imported
 symbols to match; altered or omitted edges refuse issuance.
 
-The v13 certificate seals strict-mypy output, the pinned verifier identity and proof scope, and
+The v14 certificate seals strict-mypy output, the pinned verifier identity and proof scope, and
 a manifest hash of the source-verification kernel and typing stubs. For Maledictus, response v7
 also requires and retains the exact strict-mypy package, runtime executable, complete runtime
 bundle, configuration, and contract-support hashes. Verification reruns the digest-pinned backend

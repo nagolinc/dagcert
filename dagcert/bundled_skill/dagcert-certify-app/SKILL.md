@@ -49,11 +49,11 @@ declares finite source-outcome paths over those primitives.
   cross-file operation-record imports as explicit source edges, and Dagcert checks those edges
   against the exact bound files and hashes. Do not duplicate or flatten records to make operation
   files artificially self-contained.
-- A v13 certificate seals strict-mypy output, the selected proof-engine identity and proof scope, and the
+- A v14 certificate seals strict-mypy output, the selected proof-engine identity and proof scope, and the
   exact type-enforcement core-file manifest—not only a claimed Dagcert version or compiler result.
 - `instrumentation` tasks may record aggregate observations but cannot participate in a derived
   composition.
-- A v9 composition is built only from `leaf`, `sequence`, `parallel_all`, `finite_repeat`,
+- A v10 composition is built only from `leaf`, `sequence`, `parallel_all`, `finite_repeat`,
   `async_handoff`, and `external_handoff`. Use `async_handoff` for a real queue between independently scheduled workers;
   declare its typed channel instead of feeding the unknown producer value into the dequeue request.
   Sequence boundaries are real typed dependency edges. A parallel join binds every branch output
@@ -64,6 +64,10 @@ declares finite source-outcome paths over those primitives.
   endpoints. Bind the exact wire field and compiler-extracted endpoint types, state the platform
   assumption, and include its latency and engineering failure budget. See
   `dagcert help browser-fetch`; never invent a same-language browser adapter.
+- Dependencies are all-of unless real alternative producers for the same input slot share an
+  explicit `alternative_group`. Never list mutually exclusive call sites as ungrouped dependencies,
+  and never infer one-of behavior merely because types match. See
+  `dagcert help alternative-producers`.
 - V7 lifecycle effects distinguish task start from typed completion outcomes. Use kernel state
   claims for affine conservation, finite-horizon supply, and bounded dispatch; do not substitute a
   custom checker boolean for those proofs.
@@ -94,15 +98,18 @@ For passed-at-construction callable fields, declare task-local `callable_binding
 must identify the field and a real source path/symbol or an explicit external-contract overlay.
 Never replace this machine-readable provenance with prose or a checker assertion.
 
-For a real third-party or standard-library boundary that Nagini cannot translate, declare a v7
+For a real third-party or standard-library boundary that Nagini cannot translate, declare a v10
 `external` task. Put the executable adapter in its own module, mark it with
-`@dagcert.runtime.external_boundary(TASK_ID)`, and put the Nagini `ContractOnly` specification in a
+`@dagcert.runtime.external_boundary(CANONICAL_BOUNDARY_ID)`, and put the Nagini `ContractOnly` specification in a
 different source-owned stub named by `external_contract.stub_path`. The stub is a proof overlay, not
 production code. Its input and success dataclass shapes must exactly match the adapter. Declare the
 real provider module/symbols and the precise engineering assumption. Run production calls under
 `monitor_external_boundaries(ExternalEvidenceMonitor(...))`; exceptions and wrong return types are
 typed violation outcomes and retained evidence, never success. Use a zero bad-event upper bound for
 a p=1 premise; any observed violation then refuses issuance.
+When several contextual tasks call the same adapter, give them the same
+`external_contract.boundary_id`, require otherwise identical source bindings, and retain the call
+site by executing it inside `ExternalEvidenceMonitor.task_context(task_id)`.
 The stub body is intentionally limited to `Ensures(Result() is not None)`; arbitrary postconditions
 could make the proof vacuous and are rejected. Put richer value validation in executable code.
 
@@ -177,7 +184,9 @@ Run the independent audit only when requested. It uses the mandatory requirement
 one sealed packet per claim. Each fresh audit worker must reconstruct the real execution graph from
 source and compare it with the declared model. It must reject synthetic observer/summary timings,
 missing queues or reservations, omitted failure transitions, average-rate substitutions for burst
-bounds, and any proof that does not resemble the actual application DAG.
+bounds, mutually exclusive callers modeled as simultaneous dependencies, real joins weakened into
+alternatives, contextual external evidence attributed to the wrong call site, and any proof that
+does not resemble the actual application DAG.
 
 The review remains advisory: it can invalidate a claim, but its `passed` boolean cannot establish a
 derived formula. Follow the per-claim handoff procedure in the workflow reference.

@@ -1,0 +1,54 @@
+{
+  "schema": "dagcert-english-requirements/v2",
+  "claims": [
+    {
+      "id": "startup-request-path",
+      "statement": "Under the declared leaf bounds, a startup reservation and request build complete within 10 ms.",
+      "primitive_refs": [
+        "task:startup.request.reserve",
+        "timing:startup.request.reserve/completion",
+        "task:request.build",
+        "timing:request.build/completion",
+        "composition:startup-request-path"
+      ],
+      "checker_refs": [],
+      "assumptions": [
+        "Each source-proved leaf completes within its declared 5 ms bound."
+      ],
+      "basis": "derived",
+      "formula": {
+        "lte": [
+          {
+            "composition_upper_ms": "composition:startup-request-path"
+          },
+          10
+        ]
+      }
+    },
+    {
+      "id": "submitted-request-path",
+      "statement": "Under the declared leaf bounds, a submitted reservation and request build complete within 10 ms.",
+      "primitive_refs": [
+        "task:submitted.request.reserve",
+        "timing:submitted.request.reserve/completion",
+        "composition:submitted-request-path"
+      ],
+      "checker_refs": [],
+      "assumptions": [
+        "Each source-proved leaf completes within its declared 5 ms bound."
+      ],
+      "basis": "derived",
+      "formula": {
+        "lte": [
+          {
+            "composition_upper_ms": "composition:submitted-request-path"
+          },
+          10
+        ]
+      }
+    }
+  ],
+  "metadata": {
+    "purpose": "Claims for the explicit alternative-producer example"
+  }
+}

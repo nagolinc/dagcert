@@ -75,6 +75,15 @@ burst/gap behavior with average rates; omitting worker contention; or declaring
 dependencies that are documentation rather than runtime ordering. Merely
 having multiple task names is not adequate decomposition.
 
+Compare dependency quantifiers with real call sites. Ungrouped dependencies
+are simultaneous all-of prerequisites; an `alternative_group` is one-of.
+Reject mutually exclusive startup, ambient, retry, or request callers modeled
+as if all must run, and reject a true multi-field join weakened into
+alternatives merely because outputs share a type. For a contextual external
+task, confirm that its canonical boundary names the real source decorator and
+that retained evidence also identifies the actual contextual call site. Reject
+aliases invented only to make a proof connect or hide a missing production edge.
+
 Treat source typing and outcome totality as part of the DAG, not as cosmetic
 metadata. Confirm that each task's input and closed return union come from the bound source symbol,
 that each dependency edge names a real upstream outcome
