@@ -227,6 +227,85 @@ def test_embedded_external_call_keeps_local_work_in_one_proved_operation(
     assert len(result["files"]) == 2
 
 
+def test_heap_factory_result_and_nominal_type_evidence_are_exactly_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    root, executable, digest = _fixture(tmp_path)
+    adapter = root / "heap_boundary.py"
+    adapter.write_text(
+        "def open_cell(value: int) -> object:\n    raise NotImplementedError\n",
+        encoding="utf-8",
+    )
+    stub = root / "heap_contract.py"
+    stub.write_text("# hash-bound heap contract\n", encoding="utf-8")
+    boundary = MaledictusExternalBoundary(
+        "provider.open-cell", "heap_boundary.py", "open_cell",
+        "heap_contract.py", "provider", ("open_cell",), "assume-no-exception",
+    )
+    response = _proved_response(root, digest)
+    response["files"] = [{
+        "path": "heap_boundary.py",
+        "sha256": sha256(adapter.read_bytes()).hexdigest(),
+        "symbols": ["open_cell"],
+        "scope": "all-source-symbol-bodies",
+        "result": "proved",
+        "fragment": "checked-external-heap-contracts/v6",
+    }]
+    response["external_contracts"] = [{
+        "adapter_path": "heap_boundary.py",
+        "module": "provider",
+        "stub_path": "heap_contract.py",
+        "sha256": sha256(stub.read_bytes()).hexdigest(),
+        "functions": ["open_cell"],
+        "nominal_types": [],
+        "heap_types": ["provider.Cell"],
+        "exception_types": [],
+        "exception_policy": "assume-no-exception",
+        "declared_exceptions": [],
+        "scope": (
+            "provider-import-and-heap-contract-conformance-assumed; heap-returning-"
+            "factory-binding-class-layout-method-and-permission-effects-checked-at-adapter"
+        ),
+    }]
+    monkeypatch.setattr(
+        "dagcert.maledictus_verifier.run",
+        lambda arguments, **_kwargs: CompletedProcess(
+            arguments, 0, json.dumps(response), "",
+        ),
+    )
+
+    result = verify_with_maledictus(
+        root,
+        ["heap_boundary.py"],
+        {"heap_boundary.py": ("open_cell",)},
+        source_fingerprint="source-fingerprint",
+        executable=executable,
+        expected_executable_sha256=digest,
+        external_boundaries=(boundary,),
+    )
+
+    assert result["external_contracts"] == response["external_contracts"]
+
+    external_contracts = response["external_contracts"]
+    assert isinstance(external_contracts, list)
+    external_contract = external_contracts[0]
+    assert isinstance(external_contract, dict)
+    external_contract["heap_types"] = ["different_module.Cell"]
+    with pytest.raises(
+        MaledictusVerificationError,
+        match="external contract evidence does not exactly bind",
+    ):
+        verify_with_maledictus(
+            root,
+            ["heap_boundary.py"],
+            {"heap_boundary.py": ("open_cell",)},
+            source_fingerprint="source-fingerprint",
+            executable=executable,
+            expected_executable_sha256=digest,
+            external_boundaries=(boundary,),
+        )
+
+
 def test_tampered_embedded_external_call_evidence_refuses(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):

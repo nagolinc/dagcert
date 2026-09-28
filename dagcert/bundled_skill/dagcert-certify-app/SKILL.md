@@ -93,6 +93,10 @@ calls external code, then continues local work, keep it as one operation task. O
 monitored adapter in top-level `external_boundaries` and cite its ID from that task's
 `external_calls`; use the pinned Maledictus backend to seal the real import/call edge and exhaustive
 typed outcomes. Create separate tasks only for real scheduling, queue, retry, or handoff boundaries.
+Heap-returning provider calls stay in that same operation too: use a checked Maledictus heap
+contract for the factory and methods, state every `Result()` permission explicitly, and state
+`Ensures(Result() is self)` when a context manager's `__enter__` returns its receiver. Never split
+factory, method, or `with` lifecycle steps into artificial DAG tasks.
 See `dagcert help nested-external-call`.
 
 Write the production operation boundary in its strongly typed form before modeling it. For Python,

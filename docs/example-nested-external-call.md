@@ -20,3 +20,17 @@ Maledictus checks all of the following before Dagcert can issue:
 
 Local preprocessing and postprocessing remain ordinary statements in the same operation. Do not
 split them into artificial DAG nodes merely because the middle statement calls external code.
+
+Heap-returning libraries follow the same rule. For example, this remains one application task:
+
+```python
+with builtins.open(path, "r", encoding="utf-8") as handle:
+    content = handle.read()
+return classify(content)
+```
+
+The external contract declares `open(...) -> TextIO`, the permissions granted on `Result()`, and
+the contracts for `TextIO.__enter__`, `read`, and `__exit__`. If `__enter__` returns the same object,
+the stub must say `Ensures(Result() is self)`; neither Python's annotation nor Maledictus guesses
+that identity. Maledictus proves the complete factory/enter/body/exit composition inside the one
+source-bound operation, and Dagcert hash-seals the reported factory and heap type.

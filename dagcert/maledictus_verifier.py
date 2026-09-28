@@ -476,6 +476,7 @@ def verify_with_maledictus(
                 "checked-external-scalar-contracts/v26",
                 "checked-external-nominal-reference-contracts/v4",
                 "checked-external-heap-contracts/v5",
+                "checked-external-heap-contracts/v6",
                 "transitive-source+checked-external-scalar-contracts/v33",
                 "transitive-source+checked-external-nominal-reference-contracts/v4",
                 "transitive-source+checked-external-heap-contracts/v64",
@@ -721,12 +722,20 @@ def _validate_external_contract_results(
             raise MaledictusVerificationError(
                 f"external contract stub does not exist: {stub_relative}"
             )
-        expected_scope = (
+        scalar_scope = (
             "provider-import-conformance-and-normal-return-assumed; adapter-symbol-binding-"
             "call-sites-and-preconditions-verified"
             if overlay["exception_policy"] == "assume-no-exception"
             else "provider-import-and-contract-conformance-assumed; exsures-outcome-union-"
             "propagated; adapter-symbol-binding-call-sites-and-preconditions-verified"
+        )
+        nominal_scope = (
+            "provider-import-conformance-and-nominal-return-types-assumed; "
+            "adapter-symbol-binding-and-nominal-call-types-verified"
+        )
+        heap_scope = (
+            "provider-import-and-heap-contract-conformance-assumed; heap-returning-"
+            "factory-binding-class-layout-method-and-permission-effects-checked-at-adapter"
         )
         expected_symbols = {
             binding.provider.symbol
@@ -743,19 +752,56 @@ def _validate_external_contract_results(
             for symbol in boundary.provider_symbols
         )
         returned_functions = result.get("functions")
+        nominal_types = result.get("nominal_types")
+        heap_types = result.get("heap_types")
         exception_types = result.get("exception_types")
         declared_exceptions = result.get("declared_exceptions")
+        reported_type_names: set[str] = set()
+        reported_types_are_valid = True
+        for reported_types in (nominal_types, heap_types):
+            if (
+                not isinstance(reported_types, list)
+                or not all(isinstance(item, str) for item in reported_types)
+                or reported_types != sorted(set(reported_types))
+            ):
+                reported_types_are_valid = False
+                continue
+            for qualified_name in reported_types:
+                prefix = f"{overlay['module']}."
+                if (
+                    not qualified_name.startswith(prefix)
+                    or not qualified_name[len(prefix):].isidentifier()
+                ):
+                    reported_types_are_valid = False
+                else:
+                    reported_type_names.add(qualified_name[len(prefix):])
+        if isinstance(nominal_types, list) and nominal_types:
+            expected_scope = nominal_scope
+        elif isinstance(heap_types, list) and heap_types:
+            expected_scope = heap_scope
+        else:
+            expected_scope = scalar_scope
         if (
             result.get("stub_path") != stub_relative
             or result.get("sha256") != sha256(stub_path.read_bytes()).hexdigest()
             or result.get("exception_policy") != overlay["exception_policy"]
             or result.get("scope") != expected_scope
-            or result.get("nominal_types") != []
-            or result.get("heap_types") != []
+            or not reported_types_are_valid
+            or (
+                isinstance(nominal_types, list)
+                and bool(nominal_types)
+                and isinstance(heap_types, list)
+                and bool(heap_types)
+            )
+            or (
+                isinstance(nominal_types, list)
+                and isinstance(heap_types, list)
+                and set(nominal_types) & set(heap_types)
+            )
             or not isinstance(returned_functions, list)
             or not all(isinstance(item, str) for item in returned_functions)
-            or len(returned_functions) != len(set(returned_functions))
-            or not expected_symbols <= set(returned_functions)
+            or returned_functions != sorted(set(returned_functions))
+            or not expected_symbols <= (set(returned_functions) | reported_type_names)
             or not isinstance(exception_types, list)
             or not all(isinstance(item, str) for item in exception_types)
             or len(exception_types) != len(set(exception_types))

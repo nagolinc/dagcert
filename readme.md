@@ -162,8 +162,11 @@ standard-library, `purelib`, or `platlib` paths are external environment code ev
 virtualenv is physically beneath `source_root`. Distribution metadata is sealed when available but
 is not required for that classification. Only non-environment providers are compared with the
 application manifest; excluding an ordinary app module does not relabel it external.
-The proof-only stub is restricted to the canonical `Ensures(Result() is not None)` contract, so it
-cannot inject an impossible postcondition to make an application proof vacuous.
+Proof-only stubs are parsed by one closed contract dialect rather than accepted as arbitrary Python.
+Scalar and nominal-reference contracts remain restricted to their documented result relations.
+Maledictus's heap dialect additionally permits a declared external function or method to return a
+declared heap class, but only explicit `Result()` field permissions and identity relations become
+available to the caller. It does not invent ownership, freshness, or context-manager identity.
 For callable-valued frozen dataclass fields, an operation task may declare machine-readable
 `callable_bindings`. Each binding identifies the real input field and either a source path/symbol
 or an explicit external module/symbol/stub overlay. Dagcert derives the consumer operation and
@@ -187,6 +190,12 @@ that task's `external_calls`. Maledictus response v8 binds the exact consumer op
 source import, direct adapter call, literal boundary ID, provider overlay, and closed typed outcome
 union. Create another task only when the application really schedules, queues, retries, or hands
 off another unit of work. See `dagcert help nested-external-call`.
+
+The same one-task rule applies to external heap objects. A checked external factory such as
+`open(...) -> TextIO` or `post(...) -> Response`, subsequent method calls, and local application
+logic stay inside the surrounding operation. Maledictus composes the factory and method contracts,
+including a one-item `with factory(...) as value:` lifecycle. The stub must state every transferred
+permission and, when `__enter__` returns the receiver, explicitly state `Ensures(Result() is self)`.
 
 The v14 certificate seals strict-mypy output, the pinned verifier identity and proof scope, and
 a manifest hash of the source-verification kernel and typing stubs. For Maledictus, response v8
