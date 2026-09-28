@@ -103,9 +103,12 @@ consumer path, operation symbol, and input record from the task's real source si
 hash-binds those edges and composes provider exception outcomes; an absent or abstract binding,
 signature mismatch, unknown provider, or altered response evidence refuses certification.
 Operation modules may also import frozen record types from other Python files included in the same
-Maledictus request. Maledictus proves the provider record closure before the consumer and returns
-the exact source-import edges. Dagcert reconstructs the real imports and requires exact path,
-module, provider hash, and symbol equality; a missing, extra, or altered edge refuses issuance.
+Maledictus request. Dagcert recursively discovers reachable application-owned Python imports from
+the exact manifest and submits them as proof-only sources, not contract tasks. Maledictus proves
+the provider closure before the consumer and returns the exact source-import edges. Dagcert records
+the proof roots, proof-only file hashes, and package-initializer/import edges, then reconstructs the
+real explicit imports and requires exact path, module, provider hash, and symbol equality; a
+missing, extra, or altered file or edge refuses issuance.
 
 Task operations also may not declare `Requires`, because a task must be total over its complete
 source input type. Executable application modules may not use Nagini `Assume` or `ContractOnly`.

@@ -587,6 +587,52 @@ def test_maledictus_source_import_edge_is_recomputed_from_bound_files(
     assert result["source_imports"] == response["source_imports"]
 
 
+def test_maledictus_proof_only_import_is_hash_bound_without_becoming_a_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    root, executable, digest, response = _source_import_fixture(tmp_path)
+    files = response["files"]
+    assert isinstance(files, list)
+    assert isinstance(files[1], dict)
+    files[1]["symbols"] = []
+
+    def fake_run(arguments, **_kwargs):
+        request = json.loads(Path(arguments[-1]).read_text(encoding="utf-8"))
+        assert request["files"] == [
+            {"path": "consume.py", "language": "python", "symbols": ["consume"]},
+            {"path": "produced.py", "language": "python", "symbols": []},
+        ]
+        return CompletedProcess(arguments, 0, json.dumps(response), "")
+
+    monkeypatch.setattr("dagcert.maledictus_verifier.run", fake_run)
+
+    result = verify_with_maledictus(
+        root,
+        ["consume.py"],
+        {"consume.py": ("consume",)},
+        proof_only_files=["produced.py"],
+        source_fingerprint="source-fingerprint",
+        executable=executable,
+        expected_executable_sha256=digest,
+    )
+
+    assert result["files"] == files
+
+
+def test_maledictus_rejects_empty_symbol_operation_root(tmp_path: Path):
+    root, executable, digest = _fixture(tmp_path)
+
+    with pytest.raises(MaledictusVerificationError, match="no bound symbols"):
+        verify_with_maledictus(
+            root,
+            ["app.py"],
+            {"app.py": ()},
+            source_fingerprint="source-fingerprint",
+            executable=executable,
+            expected_executable_sha256=digest,
+        )
+
+
 @pytest.mark.parametrize(
     "mutation",
     [

@@ -21,6 +21,17 @@ _RESPONSE_SCHEMA = "maledictus-verification-result/v8"
 _DAGCERT_FRAGMENT = "dagcert-closed-typed-operations/v3"
 _TYPESCRIPT_FRAGMENT = "strict-typescript-closed-total-functions/v11"
 _JAVASCRIPT_FRAGMENT = "strict-javascript-jsdoc-closed-total-functions/v11"
+_PYTHON_PROOF_SOURCE_FRAGMENTS = {
+    _DAGCERT_FRAGMENT,
+    "closed-total-functions+safe-builtin-slices/v1",
+    "caught-callable-dataclass-boundaries/v1",
+    "scalar-nagini-contracts/v44",
+    "nominal-reference-contracts/v4",
+    "heap-method-contracts/v76",
+    "transitive-source-scalar-contracts/v33",
+    "transitive-source-nominal-reference-contracts/v4",
+    "transitive-source-heap-contracts/v64",
+}
 _RESPONSE_FIELDS = {
     "schema", "verifier", "version", "status", "proof_obligation",
     "source_fingerprint", "files", "source_imports", "external_contracts",
@@ -92,6 +103,7 @@ def verify_with_maledictus(
     executable: str | Path,
     expected_executable_sha256: str,
     timeout_seconds: float = 120.0,
+    proof_only_files: Iterable[str] = (),
     callable_bindings: Iterable[MaledictusCallableBinding] = (),
     external_boundaries: Iterable[MaledictusExternalBoundary] = (),
     embedded_external_calls: Iterable[MaledictusEmbeddedExternalCall] = (),
@@ -124,6 +136,9 @@ def verify_with_maledictus(
     boundaries = tuple(external_boundaries)
     embedded_calls = tuple(embedded_external_calls)
     interface_assertions = tuple(verified_interfaces)
+    normalized_proof_only_files = {
+        Path(path).as_posix() for path in proof_only_files
+    }
     requested_languages = {
         Path(path).as_posix(): language
         for path, language in (languages_by_file or {}).items()
@@ -149,11 +164,18 @@ def verify_with_maledictus(
             "Maledictus callable binding targets must be unique"
         )
     normalized_base_files = {Path(item).as_posix() for item in files}
+    if normalized_base_files & normalized_proof_only_files:
+        raise MaledictusVerificationError(
+            "Maledictus operation roots and proof-only import files must be disjoint"
+        )
     normalized_files_set = set(normalized_base_files)
+    normalized_files_set.update(normalized_proof_only_files)
     requested_symbols = {
         Path(path).as_posix(): tuple(symbols)
         for path, symbols in symbols_by_file.items()
     }
+    for proof_only_path in normalized_proof_only_files:
+        requested_symbols.setdefault(proof_only_path, ())
     for binding in bindings:
         consumer_path = Path(binding.consumer_path).as_posix()
         if consumer_path not in normalized_base_files:
@@ -198,7 +220,7 @@ def verify_with_maledictus(
                 f"Maledictus source file does not exist: {relative}"
             )
         symbols = requested_symbols.get(relative, ())
-        if not symbols:
+        if not symbols and relative not in normalized_proof_only_files:
             raise MaledictusVerificationError(
                 f"Maledictus source file has no bound symbols: {relative}"
             )
@@ -440,6 +462,12 @@ def verify_with_maledictus(
             "typescript": _TYPESCRIPT_FRAGMENT,
             "javascript": _JAVASCRIPT_FRAGMENT,
         }[language]
+        if returned_path in normalized_proof_only_files:
+            if language != "python":
+                raise MaledictusVerificationError(
+                    "proof-only imported sources currently require Python source files"
+                )
+            expected_fragment = _PYTHON_PROOF_SOURCE_FRAGMENTS
         boundary_adapter_paths = {
             Path(item.adapter_path).as_posix() for item in boundaries
         }

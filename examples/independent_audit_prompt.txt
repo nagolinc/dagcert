@@ -89,6 +89,13 @@ overlay, and exhaustive handling of `ExternalSuccess`, `ExternalRaised`, and
 `ExternalTypeViolation`. Reject an imported-but-unused boundary, a call made by a different
 operation in the same file, or unproved glue between artificial task nodes.
 
+For application-owned imports, confirm that the certificate's
+`source_verification.proof_source_closure` begins at the task-bound operation, recursively includes
+every reachable helper module and package initializer as a hash-bound proof-only source, and agrees
+with the backend's source-import edges. Reject any reachable application helper omitted from proof,
+any ignored source file relabeled as external, and any helper promoted to a DAG task merely because
+it lives in another file or is called as a function.
+
 Compare dependency quantifiers with real call sites. Ungrouped dependencies
 are simultaneous all-of prerequisites; an `alternative_group` is one-of.
 Reject mutually exclusive startup, ambient, retry, or request callers modeled

@@ -145,6 +145,10 @@ HELP_TOPICS = {
         "one logical task with typed local work before and after an external call",
         "docs/example-nested-external-call.md",
     ),
+    "imported-helpers": (
+        "one logical task with recursively proved application-owned helper modules",
+        "docs/example-imported-helpers.md",
+    ),
     "composed-worker-pipeline": (
         "generic capstone combining the structured workflow primitives",
         "docs/example-composed-worker-pipeline.md",

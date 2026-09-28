@@ -152,7 +152,7 @@ def test_issuance_and_independent_verification_forward_the_same_callable_edges(
     def fake_source_verification(*_args, **kwargs):
         captured.append(tuple(kwargs["callable_bindings"]))
         return {
-            "provider": "dagcert.python-source-verification/v2",
+            "provider": "dagcert.python-source-verification/v3",
             "type_checker": {"checker": "mypy", "version": "test", "mode": "strict"},
             "exception_verifier": {
                 "checker": "maledictus",

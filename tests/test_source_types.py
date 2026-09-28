@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from dataclasses import dataclass
+from hashlib import sha256
 import json
 import os
 import sys
@@ -295,6 +296,83 @@ def test_source_verification_selects_explicit_maledictus_without_nagini_fallback
     assert captured["executable"] == backend.executable
     assert captured["expected_executable_sha256"] == "a" * 64
     assert captured["callable_bindings"] == ()
+
+
+def test_source_verification_forwards_recursive_imports_as_proof_only_files(
+    tmp_path: Path, monkeypatch,
+):
+    (tmp_path / "worker.py").write_text(
+        "from helper import prepare\n\n"
+        "def work(value: int) -> int:\n    return prepare(value)\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "helper.py").write_text(
+        "from leaf import increment\n\n"
+        "def prepare(value: int) -> int:\n    return increment(value)\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "leaf.py").write_text(
+        "def increment(value: int) -> int:\n    return value + 1\n",
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr("mypy.api.run", lambda _arguments: ("", "", 0))
+
+    def fake_maledictus(root, files, symbols_by_file, **kwargs):
+        captured.update({
+            "root": root,
+            "files": files,
+            "symbols": symbols_by_file,
+            **kwargs,
+        })
+        return {"verifier": "maledictus", "version": "0.2.0", "status": "proved"}
+
+    monkeypatch.setattr("dagcert.source_types.verify_with_maledictus", fake_maledictus)
+    result = check_python_sources(
+        tmp_path,
+        [SourceSignature("python", "worker.py", "work", "int", ("int",), 4)],
+        source_fingerprint="f" * 64,
+        source_manifest_paths=["worker.py", "helper.py", "leaf.py"],
+        proof_backend=SourceProofBackend.maledictus(
+            tmp_path / "maledictus.exe", "a" * 64
+        ),
+    )
+
+    assert captured["files"] == ("worker.py",)
+    assert captured["symbols"] == {"worker.py": ("work",)}
+    assert captured["proof_only_files"] == ("helper.py", "leaf.py")
+    assert result["proof_source_closure"] == {
+        "roots": ["worker.py"],
+        "proof_only_files": [
+            {
+                "path": "helper.py",
+                "sha256": sha256((tmp_path / "helper.py").read_bytes()).hexdigest(),
+            },
+            {
+                "path": "leaf.py",
+                "sha256": sha256((tmp_path / "leaf.py").read_bytes()).hexdigest(),
+            },
+        ],
+        "edges": [
+            {
+                "importer_path": "helper.py",
+                "module": "leaf",
+                "provider_path": "leaf.py",
+                "provider_sha256": sha256((tmp_path / "leaf.py").read_bytes()).hexdigest(),
+                "imported_symbols": ["increment"],
+                "kind": "source-import",
+            },
+            {
+                "importer_path": "worker.py",
+                "module": "helper",
+                "provider_path": "helper.py",
+                "provider_sha256": sha256((tmp_path / "helper.py").read_bytes()).hexdigest(),
+                "imported_symbols": ["prepare"],
+                "kind": "source-import",
+            },
+        ],
+    }
 
 
 def test_source_verification_typechecks_and_forwards_concrete_callable_provider(

@@ -22,6 +22,7 @@ import sysconfig
 import tempfile
 
 from .python_verifier import PythonVerificationError, verify_exception_freedom
+from .proof_sources import ProofSourceError, resolve_python_proof_sources
 from .maledictus_verifier import (
     MaledictusCallableBinding, MaledictusExternalCallableProvider,
     MaledictusEmbeddedExternalCall, MaledictusExternalBoundary,
@@ -72,7 +73,7 @@ def type_enforcement_descriptor() -> dict[str, object]:
     kernel_files = (
         "_version.py", "__init__.py", "analysis.py", "certificate.py", "contract.py",
         "evidence.py", "formula.py", "requirements.py", "runtime.py", "runtime.pyi",
-        "maledictus_verifier.py", "python_verifier.py", "source_types.py",
+        "maledictus_verifier.py", "proof_sources.py", "python_verifier.py", "source_types.py",
         "state_model.py",
         "nagini_stubs/dagcert/__init__.pyi", "nagini_stubs/dagcert/runtime.pyi",
         "mypy_stubs/dagcert/__init__.pyi", "mypy_stubs/dagcert/runtime.pyi",
@@ -86,7 +87,7 @@ def type_enforcement_descriptor() -> dict[str, object]:
         manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
     ).encode("utf-8")
     return {
-        "provider": "dagcert.python/v14",
+        "provider": "dagcert.python/v15",
         "dagcert_version": VERSION,
         "static_analysis": "source-ast+strict-mypy/v1",
         "mypy_import_surface": "sealed-type-preserving-dagcert-stub/v1",
@@ -167,15 +168,35 @@ def check_python_sources(
     concrete_embedded_calls = tuple(embedded_external_calls)
     selected_backend = proof_backend or SourceProofBackend()
     selected_backend.validate()
+    root = Path(source_root).resolve()
+    manifest_paths = (
+        None if source_manifest_paths is None
+        else frozenset(Path(item).as_posix() for item in source_manifest_paths)
+    )
     source_callable_files = {
         binding.provider.path
         for binding in concrete_callable_bindings
         if isinstance(binding.provider, MaledictusSourceCallableProvider)
     }
+    python_proof_roots = {
+        item.path for item in proof_bound_signatures if item.language == "python"
+    } | source_callable_files | {item.adapter_path for item in external_boundaries}
+    proof_source_closure = None
+    if python_proof_roots and manifest_paths is not None:
+        try:
+            proof_source_closure = resolve_python_proof_sources(
+                root, python_proof_roots, manifest_paths
+            )
+        except ProofSourceError as exc:
+            raise SourceTypeError(str(exc)) from exc
     python_files = tuple(sorted(
         {item.path for item in bound_signatures if item.language == "python"}
         | source_callable_files
         | {item.adapter_path for item in external_boundaries}
+        | (
+            set(proof_source_closure.proof_only_files)
+            if proof_source_closure is not None else set()
+        )
     ))
     if not bound_signatures:
         raise SourceTypeError("source-typed contract contains no implementation files")
@@ -184,7 +205,6 @@ def check_python_sources(
         from mypy.version import __version__ as mypy_version
     except ImportError as exc:
         raise SourceTypeError("mypy is required to certify Python operation types") from exc
-    root = Path(source_root).resolve()
     arguments = [
         *(str(root / item) for item in python_files),
         "--strict",
@@ -247,10 +267,6 @@ def check_python_sources(
         }
     if source_fingerprint is None:
         raise SourceTypeError("source fingerprint is required for sealed exception verification")
-    manifest_paths = (
-        None if source_manifest_paths is None
-        else frozenset(Path(item).as_posix() for item in source_manifest_paths)
-    )
     if manifest_paths is not None:
         callable_provenance_paths = {
             Path(binding.provider.path).as_posix()
@@ -303,10 +319,20 @@ def check_python_sources(
                     "Maledictus backend; Nagini cannot seal source-import call edges"
                 )
             try:
+                nagini_proof_files = tuple(sorted(
+                    set(proof_files)
+                    | set(
+                        proof_source_closure.proof_only_files
+                        if proof_source_closure is not None else ()
+                    )
+                ))
+                nagini_symbols = {
+                    path: symbols_by_file.get(path, ()) for path in nagini_proof_files
+                }
                 exception_verification = verify_exception_freedom(
                     root,
-                    proof_files,
-                    symbols_by_file,
+                    nagini_proof_files,
+                    nagini_symbols,
                     source_fingerprint=source_fingerprint,
                     external_overlays=overlays,
                 )
@@ -323,6 +349,10 @@ def check_python_sources(
                     source_fingerprint=source_fingerprint,
                     executable=selected_backend.executable,
                     expected_executable_sha256=selected_backend.executable_sha256,
+                    proof_only_files=(
+                        proof_source_closure.proof_only_files
+                        if proof_source_closure is not None else ()
+                    ),
                     callable_bindings=concrete_callable_bindings,
                     external_boundaries=tuple(
                         MaledictusExternalBoundary(
@@ -342,7 +372,16 @@ def check_python_sources(
                     ),
                     embedded_external_calls=concrete_embedded_calls,
                     languages_by_file={
-                        item.path: item.language for item in proof_bound_signatures
+                        **{
+                            item.path: item.language for item in proof_bound_signatures
+                        },
+                        **{
+                            path: "python"
+                            for path in (
+                                proof_source_closure.proof_only_files
+                                if proof_source_closure is not None else ()
+                            )
+                        },
                     },
                     verified_interfaces=tuple(
                         MaledictusVerifiedInterface(
@@ -374,7 +413,7 @@ def check_python_sources(
             "files": [],
         }
     return {
-        "provider": "dagcert.python-source-verification/v2",
+        "provider": "dagcert.python-source-verification/v3",
         "type_checker": {
             "checker": "mypy",
             "version": mypy_version,
@@ -383,6 +422,11 @@ def check_python_sources(
             "files": list(python_files),
         },
         "exception_verifier": exception_verification,
+        "proof_source_closure": (
+            proof_source_closure.to_mapping(root)
+            if proof_source_closure is not None
+            else {"roots": [], "proof_only_files": [], "edges": []}
+        ),
         "external_contracts": external_results,
         "signatures": signatures_result,
     }

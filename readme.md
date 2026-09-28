@@ -170,11 +170,15 @@ or an explicit external module/symbol/stub overlay. Dagcert derives the consumer
 input record from source rather than prose. Maledictus hash-binds every consumer, source provider,
 and external stub, composes the provider's normal and exceptional outcomes, and rejects missing,
 duplicate, unknown, or tampered edges.
-Maledictus operation files may import frozen record types from other operation files in the same
-bound proof request. The backend proves the provider and the consumer against one transitive record
-closure and returns every source-import edge. Dagcert independently reconstructs those imports from
-the exact source files and requires the importer, module, provider, provider hash, and imported
-symbols to match; altered or omitted edges refuse issuance.
+Maledictus operation files may import application-owned helpers and frozen record types from other
+Python modules. Dagcert recursively resolves the application-owned import closure from the exact
+source manifest, adds every reachable module and package initializer as a proof-only source, and
+does not turn those implementation files into contract tasks. The backend proves the providers and
+consumer against one transitive closure and returns every source-import edge. Dagcert independently
+reconstructs those imports and requires the importer, module, provider, provider hash, and imported
+symbols to match; altered or omitted files or edges refuse issuance. The certificate separately
+records task-bound proof roots and proof-only imported file hashes. An ignored application file
+cannot be relabeled as external. See `dagcert help imported-helpers`.
 
 An ordinary external-library call inside one worker invocation does not become another DAG task.
 On a v12 contract, keep local work before the call, the call, and local work after it in one

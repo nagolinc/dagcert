@@ -115,6 +115,12 @@ For passed-at-construction callable fields, declare task-local `callable_binding
 must identify the field and a real source path/symbol or an explicit external-contract overlay.
 Never replace this machine-readable provenance with prose or a checker assertion.
 
+Keep application-owned helper imports inside the logical task that calls them. Dagcert recursively
+adds their reachable Python modules as hash-bound proof-only sources; they are not `contract.tasks`.
+Review `source_verification.proof_source_closure` and require every relevant helper and package
+initializer to appear there. Never inflate ordinary imported functions into DAG nodes, omit them as
+unproved glue, or copy them into a catch-all operation. See `dagcert help imported-helpers`.
+
 For a real third-party or standard-library boundary that is itself scheduled work, declare a v10
 `external` task. Put the executable adapter in its own module, mark it with
 `@dagcert.runtime.external_boundary(CANONICAL_BOUNDARY_ID)`, and put the Nagini `ContractOnly` specification in a
