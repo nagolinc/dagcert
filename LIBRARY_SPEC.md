@@ -68,6 +68,8 @@ or unbounded liveness.
 - `start_resources`: reservation/acquisition effects applied before operation execution.
 - `error_budget`: null or one engineering bad-event budget over a canonical duration case and a
   nonempty subset of source outcomes classified as good.
+- `external_calls`: on v12, zero or more top-level external-boundary IDs called inside this one
+  operation. These are typed effects inside the task, not additional workers or DAG nodes.
 - `timings`: nonempty timing-case mapping containing at least one `duration` metric.
 - `metadata`: optional opaque object.
 
@@ -99,6 +101,16 @@ An external task's contextual task `id` may differ from its V10
 with identical adapter, stub, provider, assumption, and source signature. Retained evidence stores
 both identities; ambiguous concurrent call sites require a context-local task binding, and a
 missing or mismatched boundary identity fails analysis.
+
+A v12 top-level `external_boundaries` entry describes an ordinary external-library call inside an
+operation. It names a canonical ID, a source-owned `@external_boundary` adapter, a provider-shaped
+`ContractOnly` overlay, the real external module and symbols, an assumption, and an exception
+policy. An operation cites that ID in `external_calls`. The pinned Maledictus backend must prove
+the complete operation—including local work before and after the call—and separately seal the
+exact source import, direct adapter call, literal decorator ID, adapter/provider overlay, and
+closed `ExternalSuccess | ExternalRaised | ExternalTypeViolation` outcome handling. Unused or
+unbound entries fail. Local work, one library call, and more local work remain one task unless the
+application itself creates a scheduling, queue, retry, or handoff boundary.
 
 The proof must establish totality over the complete declared input class. A task operation may not
 declare `Requires`, and a bound application module may not use Nagini `Assume` or `ContractOnly`.

@@ -1,0 +1,77 @@
+{
+  "schema": "dagcert-contract/v12",
+  "workers": [
+    {
+      "id": "application",
+      "concurrency": 1
+    }
+  ],
+  "resources": [],
+  "external_boundaries": [
+    {
+      "id": "stdlib.url.unquote",
+      "implementation": {
+        "language": "python",
+        "path": "boundary.py",
+        "symbol": "decode_url_component"
+      },
+      "stub_path": "urllib_parse_contract.py",
+      "assumption": "urllib.parse.unquote conforms to the sealed string-to-string provider contract",
+      "provider": {
+        "module": "urllib.parse",
+        "symbols": [
+          "unquote"
+        ]
+      },
+      "exception_policy": "assume-no-exception"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "url.normalize",
+      "role": "operation",
+      "worker": "application",
+      "implementation": {
+        "language": "python",
+        "path": "app.py",
+        "symbol": "normalize_url"
+      },
+      "outcomes": [
+        {
+          "type": "UrlNormalized",
+          "resources": {},
+          "metadata": {}
+        },
+        {
+          "type": "UrlNormalizationFailed",
+          "resources": {},
+          "metadata": {}
+        }
+      ],
+      "error_budget": null,
+      "external_contract": null,
+      "external_calls": [
+        "stdlib.url.unquote"
+      ],
+      "start_resources": {},
+      "depends_on": [],
+      "timings": {
+        "completion": {
+          "metric": "duration",
+          "upper_ms": 10,
+          "minimum_samples": 3,
+          "policy": "max",
+          "safety_factor": 1.0
+        }
+      }
+    }
+  ],
+  "channels": [],
+  "external_handoffs": [],
+  "compositions": [],
+  "state_claims": [],
+  "metadata": {
+    "purpose": "One logical task with preprocessing and postprocessing around a sealed external call"
+  }
+}
+

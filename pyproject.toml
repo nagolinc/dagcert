@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dagcert"
-version = "0.18.1"
+version = "0.19.0"
 description = "Plain-English certificates over workers, tasks, resources, and timings"
 readme = "readme.md"
 requires-python = ">=3.12"
@@ -91,6 +91,11 @@ examples = [
     "certified_threshold_repeat/*.md",
     "certified_threshold_repeat/artifacts/*.json",
     "certified_threshold_repeat/artifacts/*.jsonl",
+    "certified_nested_external_call/*.py",
+    "certified_nested_external_call/*.json",
+    "certified_nested_external_call/*.md",
+    "certified_nested_external_call/artifacts/*.json",
+    "certified_nested_external_call/artifacts/*.jsonl",
     "stats_viewer/*.html",
     "stats_viewer/*.css",
     "stats_viewer/*.js",

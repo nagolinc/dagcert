@@ -75,7 +75,7 @@ Python operations use `@dagcert.runtime.operation`, a type-preserving source mar
 strict mypy and then invokes the explicitly selected proof backend. Nagini/Viper is the default and
 runs digest-pinned with networking disabled and the source mounted read-only. Maledictus can instead
 be selected with `--proof-backend maledictus`, an explicit executable, and its exact SHA-256; v2
-requires `dagcert-closed-typed-operations/v3` in every returned file result. Maledictus response v7
+requires `dagcert-closed-typed-operations/v3` in every returned file result. Maledictus response v8
 additionally binds the exact strict-mypy package,
 Python runtime executable and complete runtime bundle, configuration, and contract-support hashes;
 Dagcert retains and rechecks the complete identity. The selected backend verifies the complete bound file and must prove that

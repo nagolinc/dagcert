@@ -9,6 +9,7 @@ import pytest
 
 from dagcert.maledictus_verifier import (
     MaledictusCallableBinding, MaledictusExternalCallableProvider,
+    MaledictusEmbeddedExternalCall, MaledictusExternalBoundary,
     MaledictusSourceCallableProvider, MaledictusVerificationError,
     MaledictusVerifiedInterface,
     verify_with_maledictus,
@@ -26,7 +27,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, str]:
 
 def _proved_response(root: Path, executable_digest: str) -> dict[str, object]:
     return {
-        "schema": "maledictus-verification-result/v7",
+        "schema": "maledictus-verification-result/v8",
         "verifier": "maledictus",
         "version": "0.1.0",
         "status": "proved",
@@ -44,6 +45,7 @@ def _proved_response(root: Path, executable_digest: str) -> dict[str, object]:
         "external_contracts": [],
         "cross_language_bindings": [],
         "python_callable_bindings": [],
+        "embedded_external_calls": [],
         "obligations": [],
         "verifier_identity": {
             "executable_sha256": executable_digest,
@@ -95,6 +97,183 @@ def test_digest_pinned_maledictus_response_is_exactly_bound(
     )
     assert result["status"] == "proved"
     assert result["python_typechecker"] == _proved_response(root, digest)["python_typechecker"]
+
+
+def test_embedded_external_call_keeps_local_work_in_one_proved_operation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    root = tmp_path / "nested-external-app"
+    root.mkdir()
+    consumer = root / "app.py"
+    consumer.write_text(
+        "from boundary import decode\n"
+        "from dagcert.runtime import ExternalSuccess, operation\n\n"
+        "@operation\n"
+        "def normalize(value: str) -> str:\n"
+        "    prepared = value.strip()\n"
+        "    result = decode(prepared)\n"
+        "    if isinstance(result, ExternalSuccess):\n"
+        "        return result.value.lower()\n"
+        "    return prepared.lower()\n",
+        encoding="utf-8",
+    )
+    adapter = root / "boundary.py"
+    adapter.write_text(
+        "from dagcert.runtime import ExternalResult, external_boundary\n"
+        "from urllib.parse import unquote\n\n"
+        "@external_boundary(\"stdlib.url.unquote\")\n"
+        "def decode(value: str) -> ExternalResult[str]:\n"
+        "    return unquote(value)\n",
+        encoding="utf-8",
+    )
+    stub = root / "urllib_contract.py"
+    stub.write_text(
+        "from typing import ContractOnly\n\n"
+        "@ContractOnly\n"
+        "def unquote(value: str) -> str: ...\n",
+        encoding="utf-8",
+    )
+    executable = tmp_path / "maledictus.exe"
+    executable.write_bytes(b"pinned nested external verifier")
+    digest = sha256(executable.read_bytes()).hexdigest()
+    boundary = MaledictusExternalBoundary(
+        "stdlib.url.unquote", "boundary.py", "decode", "urllib_contract.py",
+        "urllib.parse", ("unquote",), "assume-no-exception",
+    )
+    call = MaledictusEmbeddedExternalCall(
+        "app.py", "normalize", "stdlib.url.unquote", "boundary.py", "decode",
+    )
+    response = _proved_response(root, digest)
+    response["files"] = [
+        {
+            "path": "app.py",
+            "sha256": sha256(consumer.read_bytes()).hexdigest(),
+            "symbols": ["normalize"],
+            "scope": "all-source-symbol-bodies",
+            "result": "proved",
+            "fragment": "dagcert-closed-typed-operations/v3",
+        },
+        {
+            "path": "boundary.py",
+            "sha256": sha256(adapter.read_bytes()).hexdigest(),
+            "symbols": ["decode"],
+            "scope": "all-source-symbol-bodies",
+            "result": "proved",
+            "fragment": "checked-external-scalar-contracts/v26",
+        },
+    ]
+    response["source_imports"] = [{
+        "importer_path": "app.py",
+        "module": "boundary",
+        "provider_path": "boundary.py",
+        "provider_sha256": sha256(adapter.read_bytes()).hexdigest(),
+        "imported_symbols": ["decode"],
+    }]
+    response["external_contracts"] = [{
+        "adapter_path": "boundary.py",
+        "module": "urllib.parse",
+        "stub_path": "urllib_contract.py",
+        "sha256": sha256(stub.read_bytes()).hexdigest(),
+        "functions": ["unquote"],
+        "nominal_types": [],
+        "heap_types": [],
+        "exception_types": [],
+        "exception_policy": "assume-no-exception",
+        "declared_exceptions": [],
+        "scope": (
+            "provider-import-conformance-and-normal-return-assumed; adapter-symbol-"
+            "binding-call-sites-and-preconditions-verified"
+        ),
+    }]
+    response["embedded_external_calls"] = [{
+        "consumer_path": "app.py",
+        "consumer_sha256": sha256(consumer.read_bytes()).hexdigest(),
+        "operation_symbol": "normalize",
+        "boundary_id": "stdlib.url.unquote",
+        "adapter_path": "boundary.py",
+        "adapter_sha256": sha256(adapter.read_bytes()).hexdigest(),
+        "adapter_symbol": "decode",
+        "scope": "source-import-and-direct-call-bound-to-typed-external-outcome-union",
+    }]
+
+    def fake_run(arguments, **_kwargs):
+        request = json.loads(Path(arguments[-1]).read_text(encoding="utf-8"))
+        assert request["embedded_external_calls"] == [{
+            "consumer_path": "app.py",
+            "operation_symbol": "normalize",
+            "boundary_id": "stdlib.url.unquote",
+            "adapter_path": "boundary.py",
+            "adapter_symbol": "decode",
+        }]
+        assert request["files"] == [
+            {"path": "app.py", "language": "python", "symbols": ["normalize"]},
+            {"path": "boundary.py", "language": "python", "symbols": ["decode"]},
+        ]
+        return CompletedProcess(arguments, 0, json.dumps(response), "")
+
+    monkeypatch.setattr("dagcert.maledictus_verifier.run", fake_run)
+    result = verify_with_maledictus(
+        root,
+        ["app.py"],
+        {"app.py": ("normalize",)},
+        source_fingerprint="source-fingerprint",
+        executable=executable,
+        expected_executable_sha256=digest,
+        external_boundaries=(boundary,),
+        embedded_external_calls=(call,),
+    )
+
+    assert len(result["embedded_external_calls"]) == 1
+    assert len(result["files"]) == 2
+
+
+def test_tampered_embedded_external_call_evidence_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    root, executable, digest = _fixture(tmp_path)
+    adapter = root / "boundary.py"
+    adapter.write_text("def decode(value: str) -> str:\n    return value\n", encoding="utf-8")
+    stub = root / "provider_contract.py"
+    stub.write_text("# provider overlay\n", encoding="utf-8")
+    call = MaledictusEmbeddedExternalCall(
+        "app.py", "work", "provider.decode", "boundary.py", "decode",
+    )
+    response = _proved_response(root, digest)
+    response["files"].append({
+        "path": "boundary.py",
+        "sha256": sha256(adapter.read_bytes()).hexdigest(),
+        "symbols": ["decode"],
+        "scope": "all-source-symbol-bodies",
+        "result": "proved",
+        "fragment": "dagcert-closed-typed-operations/v3",
+    })
+    response["embedded_external_calls"] = [{
+        "consumer_path": "app.py",
+        "consumer_sha256": sha256((root / "app.py").read_bytes()).hexdigest(),
+        "operation_symbol": "other_operation",
+        "boundary_id": "provider.decode",
+        "adapter_path": "boundary.py",
+        "adapter_sha256": sha256(adapter.read_bytes()).hexdigest(),
+        "adapter_symbol": "decode",
+        "scope": "source-import-and-direct-call-bound-to-typed-external-outcome-union",
+    }]
+    monkeypatch.setattr(
+        "dagcert.maledictus_verifier.run",
+        lambda arguments, **_kwargs: CompletedProcess(
+            arguments, 0, json.dumps(response), "",
+        ),
+    )
+
+    with pytest.raises(MaledictusVerificationError, match="unknown or duplicate"):
+        verify_with_maledictus(
+            root,
+            ["app.py", "boundary.py"],
+            {"app.py": ("work",), "boundary.py": ("decode",)},
+            source_fingerprint="source-fingerprint",
+            executable=executable,
+            expected_executable_sha256=digest,
+            embedded_external_calls=(call,),
+        )
 
 
 def test_compiler_derived_typescript_interface_is_exactly_bound(
@@ -582,7 +761,7 @@ def test_callable_request_and_returned_source_provenance_are_exactly_bound(
 
     def fake_run(arguments, **kwargs):
         request = json.loads(Path(arguments[-1]).read_text(encoding="utf-8"))
-        assert request["schema"] == "maledictus-verification-request/v4"
+        assert request["schema"] == "maledictus-verification-request/v5"
         assert request["files"] == [
             {"path": "consumer.py", "language": "python", "symbols": ["prepare"]},
             {"path": "provider.py", "language": "python", "symbols": ["enhance"]},

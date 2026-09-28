@@ -11,6 +11,7 @@ import keyword
 
 from .source_types import (
     SourceSignature, SourceTypeError, read_python_signature, validate_external_contract_stub,
+    validate_external_provider_stub,
 )
 
 
@@ -96,6 +97,19 @@ class ExternalContract:
     success_outcome: str
     evidence_case: str
     boundary_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddedExternalBoundary:
+    """A checked external call used inside one logical application task."""
+
+    id: str
+    implementation: Implementation
+    stub_path: str
+    assumption: str
+    provider: ExternalProvider
+    exception_policy: str
+    source_signature: SourceSignature
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,6 +227,7 @@ class Task:
     external_contract: ExternalContract | None = None
     callable_bindings: tuple[CallableBinding, ...] = ()
     start_resources: Mapping[str, ResourceEffect] = field(default_factory=dict)
+    external_calls: tuple[str, ...] = ()
 
     @property
     def outcome_by_type(self) -> Mapping[str, TaskOutcome]:
@@ -320,6 +335,7 @@ class Contract:
     state_claims: tuple[StateClaim, ...] = ()
     channels: tuple[TypedChannel, ...] = ()
     external_handoffs: tuple[ExternalHandoff, ...] = ()
+    external_boundaries: tuple[EmbeddedExternalBoundary, ...] = ()
 
     @property
     def worker_by_id(self) -> Mapping[str, Worker]:
@@ -348,6 +364,10 @@ class Contract:
     @property
     def external_handoff_by_id(self) -> Mapping[str, ExternalHandoff]:
         return {item.id: item for item in self.external_handoffs}
+
+    @property
+    def external_boundary_by_id(self) -> Mapping[str, EmbeddedExternalBoundary]:
+        return {item.id: item for item in self.external_boundaries}
 
     def topological_tasks(self) -> tuple[str, ...]:
         """Return one feasible activation order, respecting explicit one-of groups."""
@@ -731,15 +751,19 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
         expected_top_level.add("channels")
     if schema in {"dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11", "dagcert-contract/v12"}:
         expected_top_level.add("external_handoffs")
+    optional_top_level = {"external_boundaries"} if schema == "dagcert-contract/v12" else set()
     if schema in {
         "dagcert-contract/v3", "dagcert-contract/v4", "dagcert-contract/v5",
         "dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8",
         "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11", "dagcert-contract/v12",
-    } and set(raw) != expected_top_level:
+    } and (
+        not expected_top_level <= set(raw)
+        or set(raw) - expected_top_level - optional_top_level
+    ):
         raise ContractError(
             f"{schema.rsplit('/', 1)[-1]} contract must contain exactly schema, workers, resources, "
             "tasks, compositions, metadata, state_claims for v7+, channels for v8+, and "
-            "external_handoffs for v9+"
+            "external_handoffs for v9+; v12 may additionally declare external_boundaries"
         )
     implementation_root = Path(source_root).resolve() if source_root is not None else contract_path.resolve().parent
 
@@ -765,6 +789,106 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             dict(_object(row.get("metadata", {}), "resource.metadata")),
         ))
 
+    external_boundaries: list[EmbeddedExternalBoundary] = []
+    for value in _array(raw.get("external_boundaries", ()), "external_boundaries"):
+        row = _object(value, "external_boundary")
+        required_fields = {
+            "id", "implementation", "stub_path", "assumption", "provider",
+            "exception_policy",
+        }
+        if set(row) != required_fields:
+            raise ContractError(
+                "external_boundary must contain exactly id, implementation, stub_path, "
+                "assumption, provider, and exception_policy"
+            )
+        boundary_id = _identifier(row.get("id"), "external_boundary.id")
+        implementation_value = _object(
+            row.get("implementation"), f"external_boundary {boundary_id}.implementation",
+        )
+        if set(implementation_value) != {"language", "path", "symbol"}:
+            raise ContractError(
+                f"external_boundary {boundary_id}.implementation must contain exactly "
+                "language, path, and symbol"
+            )
+        boundary_implementation = Implementation(
+            _identifier(
+                implementation_value.get("language"),
+                f"external_boundary {boundary_id}.implementation.language",
+            ),
+            _identifier(
+                implementation_value.get("path"),
+                f"external_boundary {boundary_id}.implementation.path",
+            ),
+            _identifier(
+                implementation_value.get("symbol"),
+                f"external_boundary {boundary_id}.implementation.symbol",
+            ),
+        )
+        if boundary_implementation.language != "python":
+            raise ContractError(
+                f"external_boundary {boundary_id} currently requires a Python adapter"
+            )
+        provider_value = _object(
+            row.get("provider"), f"external_boundary {boundary_id}.provider",
+        )
+        if set(provider_value) != {"module", "symbols"}:
+            raise ContractError(
+                f"external_boundary {boundary_id}.provider must contain module and symbols"
+            )
+        provider_symbols = tuple(
+            _identifier(item, f"external_boundary {boundary_id}.provider.symbols")
+            for item in _array(
+                provider_value.get("symbols"),
+                f"external_boundary {boundary_id}.provider.symbols",
+            )
+        )
+        if not provider_symbols or len(provider_symbols) != len(set(provider_symbols)):
+            raise ContractError(
+                f"external_boundary {boundary_id}.provider.symbols must be nonempty and unique"
+            )
+        exception_policy = _identifier(
+            row.get("exception_policy"),
+            f"external_boundary {boundary_id}.exception_policy",
+        )
+        if exception_policy not in {"assume-no-exception", "declared-by-exsures"}:
+            raise ContractError(
+                f"external_boundary {boundary_id}.exception_policy must be "
+                "assume-no-exception or declared-by-exsures"
+            )
+        try:
+            signature = read_python_signature(
+                implementation_root,
+                boundary_implementation.path,
+                boundary_implementation.symbol,
+                external_boundary_id=boundary_id,
+            )
+            validate_external_provider_stub(
+                implementation_root,
+                _identifier(
+                    row.get("stub_path"), f"external_boundary {boundary_id}.stub_path",
+                ),
+                provider_symbols,
+            )
+        except SourceTypeError as exc:
+            raise ContractError(
+                f"external_boundary {boundary_id} source type error: {exc}"
+            ) from exc
+        external_boundaries.append(EmbeddedExternalBoundary(
+            boundary_id,
+            boundary_implementation,
+            _identifier(row.get("stub_path"), f"external_boundary {boundary_id}.stub_path"),
+            _identifier(row.get("assumption"), f"external_boundary {boundary_id}.assumption"),
+            ExternalProvider(
+                _identifier(
+                    provider_value.get("module"),
+                    f"external_boundary {boundary_id}.provider.module",
+                ),
+                provider_symbols,
+            ),
+            exception_policy,
+            signature,
+        ))
+
     tasks: list[Task] = []
     for value in _array(raw.get("tasks", ()), "tasks"):
         row = _object(value, "task")
@@ -780,6 +904,8 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
         v6_optional_task_fields = {"callable_bindings"}
         v7_task_fields = v6_task_fields | {"start_resources"}
         v7_optional_task_fields = v6_optional_task_fields | {"verified_interface"}
+        if schema == "dagcert-contract/v12":
+            v7_optional_task_fields.add("external_calls")
         allowed_task_fields = (
             v7_task_fields | v7_optional_task_fields
             if schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11", "dagcert-contract/v12"}
@@ -1371,6 +1497,12 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             if schema in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11", "dagcert-contract/v12"}
             else {}
         )
+        external_calls = tuple(
+            _identifier(item, f"task {task_id}.external_calls")
+            for item in _array(row.get("external_calls", ()), f"task {task_id}.external_calls")
+        )
+        if len(external_calls) != len(set(external_calls)):
+            raise ContractError(f"task {task_id}.external_calls must be unique")
         tasks.append(Task(
             task_id,
             _identifier(row.get("worker"), f"task {task_id}.worker"),
@@ -1389,6 +1521,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
             external_contract,
             callable_bindings,
             start_resources,
+            external_calls,
         ))
 
     compositions: list[Composition] = []
@@ -1727,6 +1860,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
         tuple(state_claims),
         tuple(channels),
         tuple(external_handoffs),
+        tuple(external_boundaries),
     )
     _validate(contract)
     return contract
@@ -2054,11 +2188,12 @@ def _validate(contract: Contract) -> None:
         ("resource", [item.id for item in contract.resources]),
         ("channel", [item.id for item in contract.channels]),
         ("external handoff", [item.id for item in contract.external_handoffs]),
+        ("external boundary", [item.id for item in contract.external_boundaries]),
         ("composition", [item.id for item in contract.compositions]),
         ("state claim", [item.id for item in contract.state_claims]),
     ):
         if label not in {
-            "resource", "channel", "external handoff", "composition", "state claim",
+            "resource", "channel", "external handoff", "external boundary", "composition", "state claim",
         } and not identifiers:
             raise ContractError(f"contract must declare at least one {label}")
         if len(identifiers) != len(set(identifiers)):
@@ -2068,6 +2203,7 @@ def _validate(contract: Contract) -> None:
     resources = contract.resource_by_id
     channels = contract.channel_by_id
     external_handoffs = contract.external_handoff_by_id
+    external_boundaries = contract.external_boundary_by_id
     handoff_dependency_keys = {
         (
             handoff.source.task,
@@ -2090,6 +2226,16 @@ def _validate(contract: Contract) -> None:
                 raise ContractError(
                     f"task {task.id} callable bindings require role operation"
                 )
+            if task.external_calls and task.role != "operation":
+                raise ContractError(
+                    f"task {task.id} external_calls require role operation"
+                )
+            missing_external_calls = set(task.external_calls) - set(external_boundaries)
+            if missing_external_calls:
+                raise ContractError(
+                    f"task {task.id} references unknown external boundaries "
+                    f"{sorted(missing_external_calls)}"
+                )
             fields = [binding.field for binding in task.callable_bindings]
             if len(fields) != len(set(fields)):
                 raise ContractError(
@@ -2111,10 +2257,32 @@ def _validate(contract: Contract) -> None:
                 "external adapters must be in separate modules from proved operations so Nagini "
                 f"can overlay only the declared ContractOnly boundary: {sorted(shared_paths)}"
             )
+        boundary_adapter_paths = {
+            boundary.implementation.path for boundary in contract.external_boundaries
+        }
         implementation_paths = {
             task.implementation.path
             for task in contract.tasks if task.implementation is not None
+        } | boundary_adapter_paths
+        if boundary_adapter_paths & proved_paths:
+            raise ContractError(
+                "embedded external adapters must be separate modules from logical task "
+                f"implementations: {sorted(boundary_adapter_paths & proved_paths)}"
+            )
+        if boundary_adapter_paths & external_paths:
+            raise ContractError(
+                "an embedded external adapter may not also be declared as a DAG external task: "
+                f"{sorted(boundary_adapter_paths & external_paths)}"
+            )
+        referenced_boundaries = {
+            boundary_id for task in contract.tasks for boundary_id in task.external_calls
         }
+        unused_boundaries = set(external_boundaries) - referenced_boundaries
+        if unused_boundaries:
+            raise ContractError(
+                "external_boundaries must be called by at least one logical task: "
+                f"{sorted(unused_boundaries)}"
+            )
         for task in contract.tasks:
             if (
                 task.external_contract is not None
@@ -2123,6 +2291,12 @@ def _validate(contract: Contract) -> None:
                 raise ContractError(
                     f"external task {task.id} ContractOnly stub must be separate from every real "
                     "implementation module"
+                )
+        for boundary in contract.external_boundaries:
+            if boundary.stub_path in implementation_paths:
+                raise ContractError(
+                    f"external boundary {boundary.id} ContractOnly stub must be separate from "
+                    "every real implementation module"
                 )
     for task in contract.tasks:
         if not task.timings:

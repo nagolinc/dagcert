@@ -80,6 +80,15 @@ burst/gap behavior with average rates; omitting worker contention; or declaring
 dependencies that are documentation rather than runtime ordering. Merely
 having multiple task names is not adequate decomposition.
 
+Reject the opposite distortion too: an ordinary function call is not a worker, queue, or scheduling
+boundary. In particular, preprocessing, one external-library call, and postprocessing performed by
+one worker invocation must not be inflated into three DAG tasks merely because the middle call uses
+an external contract. For a task declaring `external_calls`, confirm the certificate seals the exact
+operation-to-adapter import and direct-call edge, the adapter's literal boundary ID, its provider
+overlay, and exhaustive handling of `ExternalSuccess`, `ExternalRaised`, and
+`ExternalTypeViolation`. Reject an imported-but-unused boundary, a call made by a different
+operation in the same file, or unproved glue between artificial task nodes.
+
 Compare dependency quantifiers with real call sites. Ungrouped dependencies
 are simultaneous all-of prerequisites; an `alternative_group` is one-of.
 Reject mutually exclusive startup, ambient, retry, or request callers modeled

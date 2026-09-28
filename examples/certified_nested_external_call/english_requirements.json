@@ -1,0 +1,23 @@
+{
+  "schema": "dagcert-english-requirements/v2",
+  "claims": [
+    {
+      "id": "one-logical-normalization-task",
+      "statement": "URL normalization is one logical application task whose internal urllib call has a sealed typed boundary and whose every boundary outcome is handled by the task.",
+      "primitive_refs": [
+        "task:url.normalize",
+        "timing:url.normalize/completion",
+        "external-boundary:stdlib.url.unquote"
+      ],
+      "checker_refs": [],
+      "assumptions": [
+        "urllib.parse.unquote conforms to the sealed provider overlay."
+      ],
+      "basis": "observed",
+      "formula": null
+    }
+  ],
+  "metadata": {
+    "purpose": "One-task nested external-boundary example"
+  }
+}

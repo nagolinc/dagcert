@@ -88,6 +88,13 @@ success transitions, and failure-release transitions that affect a requested gua
 collapse them into a pipeline observer or surround one catch-all measurement with meaningless task
 names.
 
+A function call is not automatically a DAG task. When one worker invocation performs local work,
+calls external code, then continues local work, keep it as one operation task. On v12, declare the
+monitored adapter in top-level `external_boundaries` and cite its ID from that task's
+`external_calls`; use the pinned Maledictus backend to seal the real import/call edge and exhaustive
+typed outcomes. Create separate tasks only for real scheduling, queue, retry, or handoff boundaries.
+See `dagcert help nested-external-call`.
+
 Write the production operation boundary in its strongly typed form before modeling it. For Python,
 use an explicit input class, explicit named outcome classes, an inline closed return union, and
 `@dagcert.runtime.operation`. Every v7+ dependency names an upstream outcome type and must feed a downstream
@@ -100,15 +107,15 @@ must prove executable behavior for the complete declared input type without trus
 
 Use `--proof-backend maledictus` only with both `--proof-backend-executable` and
 `--proof-backend-sha256`, and pass the same selection to lint, issue, and verify. Never switch
-backends after a refusal. Maledictus v2 requires `dagcert-closed-typed-operations/v3`. Its response
-v7 must
+backends after a refusal. Maledictus v3 requires `dagcert-closed-typed-operations/v3`. Its response
+v8 must
 include the exact strict-mypy package, runtime executable and bundle, configuration, and support
 hashes. Dagcert retains that identity in the certificate and requires an exact match on verification.
 For passed-at-construction callable fields, declare task-local `callable_bindings`; each binding
 must identify the field and a real source path/symbol or an explicit external-contract overlay.
 Never replace this machine-readable provenance with prose or a checker assertion.
 
-For a real third-party or standard-library boundary that Nagini cannot translate, declare a v10
+For a real third-party or standard-library boundary that is itself scheduled work, declare a v10
 `external` task. Put the executable adapter in its own module, mark it with
 `@dagcert.runtime.external_boundary(CANONICAL_BOUNDARY_ID)`, and put the Nagini `ContractOnly` specification in a
 different source-owned stub named by `external_contract.stub_path`. The stub is a proof overlay, not
@@ -122,8 +129,10 @@ When several contextual tasks call the same adapter, give them the same
 site by executing it inside `ExternalEvidenceMonitor.task_context(task_id)`.
 The stub body is intentionally limited to `Ensures(Result() is not None)`; arbitrary postconditions
 could make the proof vacuous and are rejected. Put richer value validation in executable code.
+If the call is internal to one logical operation instead, do not manufacture an external task:
+use `external_boundaries` plus the operation's `external_calls` as described above.
 
-JavaScript or TypeScript operations require the explicit digest-pinned Maledictus backend and a v7
+JavaScript or TypeScript operations require the explicit digest-pinned Maledictus backend and a v8
 `verified_interface`. The declaration is only an assertion: Maledictus must return the exact
 compiler-derived signature and prove the accepted source body has no undeclared exceptional exit.
 The current leaf surface is synchronous with a compiler-derived vector of primitive parameters and

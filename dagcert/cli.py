@@ -15,7 +15,8 @@ from . import __version__
 from .analysis import analyze_contract
 from .certificate import (
     CertificateError, canonical_json, external_source_contracts, issue_certificate,
-    maledictus_callable_bindings, source_fingerprint, source_manifest, verify_certificate,
+    maledictus_callable_bindings, maledictus_embedded_external_calls,
+    source_fingerprint, source_manifest, verify_certificate,
 )
 from .checks import load_check_result
 from .contract import ContractError, load_contract
@@ -139,6 +140,10 @@ HELP_TOPICS = {
     "external-verified-leaf": (
         "source-bound alternate-backend leaf and explicit environment assumption",
         "docs/example-external-verified-leaf.md",
+    ),
+    "nested-external-call": (
+        "one logical task with typed local work before and after an external call",
+        "docs/example-nested-external-call.md",
     ),
     "composed-worker-pipeline": (
         "generic capstone combining the structured workflow primitives",
@@ -281,6 +286,7 @@ def main(argv: list[str] | None = None) -> int:
                 ),
                 external_contracts=external_source_contracts(contract),
                 callable_bindings=maledictus_callable_bindings(contract),
+                embedded_external_calls=maledictus_embedded_external_calls(contract),
                 proof_backend=_proof_backend(args),
             )
             translation_audit = audit_translation(requirements, contract)

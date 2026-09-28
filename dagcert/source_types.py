@@ -24,6 +24,7 @@ import tempfile
 from .python_verifier import PythonVerificationError, verify_exception_freedom
 from .maledictus_verifier import (
     MaledictusCallableBinding, MaledictusExternalCallableProvider,
+    MaledictusEmbeddedExternalCall, MaledictusExternalBoundary,
     MaledictusSourceCallableProvider, MaledictusVerificationError,
     MaledictusVerifiedInterface,
     verify_with_maledictus,
@@ -85,14 +86,17 @@ def type_enforcement_descriptor() -> dict[str, object]:
         manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
     ).encode("utf-8")
     return {
-        "provider": "dagcert.python/v13",
+        "provider": "dagcert.python/v14",
         "dagcert_version": VERSION,
         "static_analysis": "source-ast+strict-mypy/v1",
         "mypy_import_surface": "sealed-type-preserving-dagcert-stub/v1",
         "decorator_provenance": "trusted-imports-and-shadow-rejection/v1",
         "operation_marker": "type-preserving/v1",
-        "exception_verification": "selectable-nagini-viper-v3-or-maledictus-v2",
-        "external_contracts": "canonical-boundary+contextual-task+environment-resolved+p1-contract-only+typeguard-runtime/v4",
+        "exception_verification": "selectable-nagini-viper-v3-or-maledictus-v3",
+        "external_contracts": (
+            "canonical-boundary+contextual-task+embedded-operation-effect+exact-source-call+"
+            "environment-resolved+p1-contract-only+typeguard-runtime/v5"
+        ),
         "reachability": "typed-all-of+explicit-one-of+may-must/v2",
         "chance_composition": "engineering-envelope-optional-budget+exact-path+external+composed-threshold-markov/v7",
         "structured_composition": (
@@ -130,6 +134,8 @@ class ExternalSourceContract:
     provider_symbols: tuple[str, ...]
     assumption: str
     signature: SourceSignature
+    exception_policy: str = "assume-no-exception"
+    provider_overlay: bool = False
 
 
 def check_python_sources(
@@ -142,6 +148,7 @@ def check_python_sources(
     proof_signatures: Iterable[SourceSignature] | None = None,
     external_contracts: Iterable[ExternalSourceContract] = (),
     callable_bindings: Iterable[MaledictusCallableBinding] = (),
+    embedded_external_calls: Iterable[MaledictusEmbeddedExternalCall] = (),
     proof_backend: SourceProofBackend | None = None,
 ) -> dict[str, object]:
     """Run strict mypy and external exception verification over real implementation files.
@@ -157,6 +164,7 @@ def check_python_sources(
     )
     external_boundaries = tuple(external_contracts)
     concrete_callable_bindings = tuple(callable_bindings)
+    concrete_embedded_calls = tuple(embedded_external_calls)
     selected_backend = proof_backend or SourceProofBackend()
     selected_backend.validate()
     source_callable_files = {
@@ -167,6 +175,7 @@ def check_python_sources(
     python_files = tuple(sorted(
         {item.path for item in bound_signatures if item.language == "python"}
         | source_callable_files
+        | {item.adapter_path for item in external_boundaries}
     ))
     if not bound_signatures:
         raise SourceTypeError("source-typed contract contains no implementation files")
@@ -288,6 +297,11 @@ def check_python_sources(
                     "callable-valued operation inputs require the explicit Maledictus backend; "
                     "the Nagini adapter cannot bind passed-at-construction callables"
                 )
+            if concrete_embedded_calls:
+                raise SourceTypeError(
+                    "external adapters called inside a logical task require the explicit "
+                    "Maledictus backend; Nagini cannot seal source-import call edges"
+                )
             try:
                 exception_verification = verify_exception_freedom(
                     root,
@@ -310,6 +324,23 @@ def check_python_sources(
                     executable=selected_backend.executable,
                     expected_executable_sha256=selected_backend.executable_sha256,
                     callable_bindings=concrete_callable_bindings,
+                    external_boundaries=tuple(
+                        MaledictusExternalBoundary(
+                            item.boundary_id,
+                            item.adapter_path,
+                            item.symbol,
+                            item.stub_path,
+                            item.provider_module,
+                            item.provider_symbols,
+                            item.exception_policy,  # type: ignore[arg-type]
+                        )
+                        for item in external_boundaries
+                        if any(
+                            call.boundary_id == item.boundary_id
+                            for call in concrete_embedded_calls
+                        )
+                    ),
+                    embedded_external_calls=concrete_embedded_calls,
                     languages_by_file={
                         item.path: item.language for item in proof_bound_signatures
                     },
@@ -436,6 +467,10 @@ def read_python_signature(
     variant_nodes = (parameter.annotation, *outcome_nodes)
     for variant_node in variant_nodes:
         variant_name = _annotation(variant_node, f"operation {symbol} type")
+        if external_boundary_id is not None and variant_name in {
+            "bool", "bytes", "float", "int", "str",
+        }:
+            continue
         class_node, class_nodes, resolved_dataclasses = _resolve_variant_definition(
             root, path, tree, variant_node, f"operation {symbol} type {variant_name}",
         )
@@ -471,18 +506,30 @@ def read_python_signature(
         )
     if include_legacy_unhandled:
         outcomes = (*outcomes, "dagcert.runtime.UnhandledException")
-    input_fields = _variant_field_schema(
-        root, path, tree, parameter.annotation, f"operation {symbol} input",
+    input_fields = (
+        ()
+        if external_boundary_id is not None and input_type in {
+            "bool", "bytes", "float", "int", "str",
+        }
+        else _variant_field_schema(
+            root, path, tree, parameter.annotation, f"operation {symbol} input",
+        )
     )
     outcome_fields = tuple(
         (
             outcome_name,
-            _variant_field_schema(
-                root,
-                path,
-                tree,
-                outcome_node,
-                f"operation {symbol} outcome {outcome_name}",
+            (
+                ()
+                if external_boundary_id is not None and outcome_name in {
+                    "bool", "bytes", "float", "int", "str",
+                }
+                else _variant_field_schema(
+                    root,
+                    path,
+                    tree,
+                    outcome_node,
+                    f"operation {symbol} outcome {outcome_name}",
+                )
             ),
         )
         for outcome_name, outcome_node in zip(
@@ -568,13 +615,66 @@ def validate_external_contract_stub(
     }
 
 
+def validate_external_provider_stub(
+    source_root: str | Path,
+    relative_path: str,
+    provider_symbols: Iterable[str],
+) -> dict[str, object]:
+    """Preflight a provider-shaped overlay; Maledictus remains the proof authority."""
+
+    root = Path(source_root).resolve()
+    path = (root / relative_path).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise SourceTypeError(f"external provider stub escapes source root: {relative_path}") from exc
+    if not path.is_file():
+        raise SourceTypeError(f"external provider stub does not exist: {relative_path}")
+    source = path.read_text(encoding="utf-8")
+    try:
+        tree = ast.parse(source, filename=str(path), type_comments=True)
+    except SyntaxError as exc:
+        raise SourceTypeError(f"cannot parse external provider stub {relative_path}: {exc}") from exc
+    _reject_type_escape_hatches(tree, source, relative_path)
+    contract_only = _nagini_contract_names(tree, "ContractOnly")
+    declared = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and any(
+            _qualified_name(decorator.func if isinstance(decorator, ast.Call) else decorator)
+            in contract_only
+            for decorator in node.decorator_list
+        )
+    }
+    required = {symbol.rsplit(".", 1)[-1] for symbol in provider_symbols}
+    missing = required - declared
+    if missing:
+        raise SourceTypeError(
+            f"external provider stub {relative_path} lacks @ContractOnly declarations for "
+            f"{sorted(missing)}"
+        )
+    return {
+        "path": Path(relative_path).as_posix(),
+        "sha256": sha256(path.read_bytes()).hexdigest(),
+        "symbols": sorted(provider_symbols),
+        "assumption_kind": "maledictus-provider-overlay",
+    }
+
+
 def _validate_external_source_contract(
     root: Path,
     contract: ExternalSourceContract,
     source_manifest_paths: frozenset[str] | None,
 ) -> dict[str, object]:
-    stub = validate_external_contract_stub(
-        root, contract.stub_path, contract.symbol, contract.signature,
+    stub = (
+        validate_external_provider_stub(
+            root, contract.stub_path, contract.provider_symbols,
+        )
+        if contract.provider_overlay
+        else validate_external_contract_stub(
+            root, contract.stub_path, contract.symbol, contract.signature,
+        )
     )
     adapter = (root / contract.adapter_path).resolve()
     try:
@@ -596,33 +696,34 @@ def _validate_external_source_contract(
         stub_path.read_text(encoding="utf-8"), filename=str(stub_path), type_comments=True,
     )
     adapter_function = _find_function(tree, contract.symbol)
-    stub_function = _find_function(stub_tree, contract.symbol)
-    adapter_parameters = (*adapter_function.args.posonlyargs, *adapter_function.args.args)
-    stub_parameters = (*stub_function.args.posonlyargs, *stub_function.args.args)
-    assert adapter_parameters[0].annotation is not None
-    assert stub_parameters[0].annotation is not None
-    assert adapter_function.returns is not None
-    assert stub_function.returns is not None
-    adapter_nodes = (adapter_parameters[0].annotation, *_flatten_union(adapter_function.returns))
-    stub_nodes = (stub_parameters[0].annotation, stub_function.returns)
-    for variant, adapter_node, stub_node in zip(
-        (contract.signature.input_type, contract.signature.outcome_types[0]),
-        adapter_nodes,
-        stub_nodes,
-        strict=True,
-    ):
-        adapter_shape = _variant_field_schema(
-            root, adapter, tree, adapter_node, f"external adapter {contract.adapter_path}",
-        )
-        stub_shape = _variant_field_schema(
-            root, stub_path, stub_tree, stub_node,
-            f"external contract stub {contract.stub_path}",
-        )
-        if adapter_shape != stub_shape:
-            raise SourceTypeError(
-                f"external ContractOnly stub changes source type {variant}: "
-                f"adapter={adapter_shape}, stub={stub_shape}"
+    if not contract.provider_overlay:
+        stub_function = _find_function(stub_tree, contract.symbol)
+        adapter_parameters = (*adapter_function.args.posonlyargs, *adapter_function.args.args)
+        stub_parameters = (*stub_function.args.posonlyargs, *stub_function.args.args)
+        assert adapter_parameters[0].annotation is not None
+        assert stub_parameters[0].annotation is not None
+        assert adapter_function.returns is not None
+        assert stub_function.returns is not None
+        adapter_nodes = (adapter_parameters[0].annotation, *_flatten_union(adapter_function.returns))
+        stub_nodes = (stub_parameters[0].annotation, stub_function.returns)
+        for variant, adapter_node, stub_node in zip(
+            (contract.signature.input_type, contract.signature.outcome_types[0]),
+            adapter_nodes,
+            stub_nodes,
+            strict=True,
+        ):
+            adapter_shape = _variant_field_schema(
+                root, adapter, tree, adapter_node, f"external adapter {contract.adapter_path}",
             )
+            stub_shape = _variant_field_schema(
+                root, stub_path, stub_tree, stub_node,
+                f"external contract stub {contract.stub_path}",
+            )
+            if adapter_shape != stub_shape:
+                raise SourceTypeError(
+                    f"external ContractOnly stub changes source type {variant}: "
+                    f"adapter={adapter_shape}, stub={stub_shape}"
+                )
     function = _find_function(tree, contract.symbol)
     imported_calls = _external_provider_call_names(tree, function, contract.provider_module)
     missing = set(contract.provider_symbols) - imported_calls

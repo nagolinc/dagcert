@@ -14,6 +14,54 @@ def test_loads_only_four_primitive_contract(project):
     assert contract.tasks[0].timings["normal"].upper_ms == 10
 
 
+def test_nested_external_call_is_one_logical_task_not_three_nodes():
+    example = (
+        Path(__file__).resolve().parents[1]
+        / "examples"
+        / "certified_nested_external_call"
+    )
+    contract = load_contract(
+        example / "dag_contract.json",
+        source_root=example,
+    )
+
+    assert [task.id for task in contract.tasks] == ["url.normalize"]
+    assert contract.tasks[0].external_calls == ("stdlib.url.unquote",)
+    assert [boundary.id for boundary in contract.external_boundaries] == [
+        "stdlib.url.unquote"
+    ]
+
+
+def test_nested_external_boundary_must_be_used_by_the_declared_task(tmp_path: Path):
+    example = (
+        Path(__file__).resolve().parents[1]
+        / "examples"
+        / "certified_nested_external_call"
+    )
+    raw = json.loads((example / "dag_contract.json").read_text(encoding="utf-8"))
+    raw["tasks"][0]["external_calls"] = []
+    contract_path = tmp_path / "unused-boundary.json"
+    contract_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(ContractError, match="must be called by at least one logical task"):
+        load_contract(contract_path, source_root=example)
+
+
+def test_nested_external_call_cannot_cite_an_unknown_boundary(tmp_path: Path):
+    example = (
+        Path(__file__).resolve().parents[1]
+        / "examples"
+        / "certified_nested_external_call"
+    )
+    raw = json.loads((example / "dag_contract.json").read_text(encoding="utf-8"))
+    raw["tasks"][0]["external_calls"] = ["stdlib.url.not-declared"]
+    contract_path = tmp_path / "unknown-boundary.json"
+    contract_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(ContractError, match="references unknown external boundaries"):
+        load_contract(contract_path, source_root=example)
+
+
 def test_resources_may_be_empty(project, tmp_path: Path):
     raw = json.loads(Path(project["contract"]).read_text(encoding="utf-8"))
     raw["resources"] = []

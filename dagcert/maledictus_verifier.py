@@ -16,8 +16,8 @@ class MaledictusVerificationError(RuntimeError):
     pass
 
 
-_REQUEST_SCHEMA = "maledictus-verification-request/v4"
-_RESPONSE_SCHEMA = "maledictus-verification-result/v7"
+_REQUEST_SCHEMA = "maledictus-verification-request/v5"
+_RESPONSE_SCHEMA = "maledictus-verification-result/v8"
 _DAGCERT_FRAGMENT = "dagcert-closed-typed-operations/v3"
 _TYPESCRIPT_FRAGMENT = "strict-typescript-closed-total-functions/v11"
 _JAVASCRIPT_FRAGMENT = "strict-javascript-jsdoc-closed-total-functions/v11"
@@ -25,7 +25,7 @@ _RESPONSE_FIELDS = {
     "schema", "verifier", "version", "status", "proof_obligation",
     "source_fingerprint", "files", "source_imports", "external_contracts",
     "cross_language_bindings", "python_callable_bindings", "obligations",
-    "verifier_identity", "diagnostics",
+    "embedded_external_calls", "verifier_identity", "diagnostics",
 }
 _OPTIONAL_RESPONSE_FIELDS = {"solver", "typescript_toolchain", "python_typechecker"}
 
@@ -55,6 +55,26 @@ class MaledictusCallableBinding:
 
 
 @dataclass(frozen=True, slots=True)
+class MaledictusExternalBoundary:
+    boundary_id: str
+    adapter_path: str
+    adapter_symbol: str
+    stub_path: str
+    provider_module: str
+    provider_symbols: tuple[str, ...]
+    exception_policy: Literal["assume-no-exception", "declared-by-exsures"]
+
+
+@dataclass(frozen=True, slots=True)
+class MaledictusEmbeddedExternalCall:
+    consumer_path: str
+    operation_symbol: str
+    boundary_id: str
+    adapter_path: str
+    adapter_symbol: str
+
+
+@dataclass(frozen=True, slots=True)
 class MaledictusVerifiedInterface:
     path: str
     language: Literal["javascript", "typescript"]
@@ -73,6 +93,8 @@ def verify_with_maledictus(
     expected_executable_sha256: str,
     timeout_seconds: float = 120.0,
     callable_bindings: Iterable[MaledictusCallableBinding] = (),
+    external_boundaries: Iterable[MaledictusExternalBoundary] = (),
+    embedded_external_calls: Iterable[MaledictusEmbeddedExternalCall] = (),
     languages_by_file: Mapping[str, str] | None = None,
     verified_interfaces: Iterable[MaledictusVerifiedInterface] = (),
 ) -> dict[str, object]:
@@ -99,6 +121,8 @@ def verify_with_maledictus(
         )
 
     bindings = tuple(callable_bindings)
+    boundaries = tuple(external_boundaries)
+    embedded_calls = tuple(embedded_external_calls)
     interface_assertions = tuple(verified_interfaces)
     requested_languages = {
         Path(path).as_posix(): language
@@ -149,6 +173,13 @@ def verify_with_maledictus(
             if binding.provider.symbol not in provider_symbols:
                 provider_symbols.append(binding.provider.symbol)
             requested_symbols[provider_path] = tuple(provider_symbols)
+    for boundary in boundaries:
+        adapter_path = Path(boundary.adapter_path).as_posix()
+        normalized_files_set.add(adapter_path)
+        adapter_symbols = list(requested_symbols.get(adapter_path, ()))
+        if boundary.adapter_symbol not in adapter_symbols:
+            adapter_symbols.append(boundary.adapter_symbol)
+        requested_symbols[adapter_path] = tuple(adapter_symbols)
     normalized_files = tuple(sorted(normalized_files_set))
     if not normalized_files:
         raise MaledictusVerificationError("Maledictus received no bound operation files")
@@ -222,6 +253,22 @@ def verify_with_maledictus(
             "field": binding.field,
             "provider": provider_row,
         })
+    for boundary in boundaries:
+        adapter_path = Path(boundary.adapter_path).as_posix()
+        overlay = {
+            "adapter_path": adapter_path,
+            "module": boundary.provider_module,
+            "stub_path": Path(boundary.stub_path).as_posix(),
+            "exception_policy": boundary.exception_policy,
+        }
+        overlay_key = (adapter_path, boundary.provider_module)
+        prior = external_overlays.get(overlay_key)
+        if prior is not None and prior != overlay:
+            raise MaledictusVerificationError(
+                f"embedded boundary declares a conflicting external overlay for "
+                f"{adapter_path}:{boundary.provider_module}"
+            )
+        external_overlays[overlay_key] = overlay
 
     request = {
         "schema": _REQUEST_SCHEMA,
@@ -232,6 +279,16 @@ def verify_with_maledictus(
         "external_contract_overlays": list(external_overlays.values()),
         "cross_language_bindings": [],
         "python_callable_bindings": binding_rows,
+        "embedded_external_calls": [
+            {
+                "consumer_path": Path(call.consumer_path).as_posix(),
+                "operation_symbol": call.operation_symbol,
+                "boundary_id": call.boundary_id,
+                "adapter_path": Path(call.adapter_path).as_posix(),
+                "adapter_symbol": call.adapter_symbol,
+            }
+            for call in embedded_calls
+        ],
     }
     with TemporaryDirectory(prefix="dagcert-maledictus-") as temporary:
         request_path = Path(temporary) / "request.json"
@@ -350,17 +407,27 @@ def verify_with_maledictus(
                 f"Maledictus returned duplicate file result {returned_path!r}"
             )
         returned_paths.add(returned_path)
-        consumer_paths = {Path(item.consumer_path).as_posix() for item in bindings}
+        callable_consumer_paths = {
+            Path(item.consumer_path).as_posix() for item in bindings
+        }
+        embedded_consumer_paths = {
+            Path(item.consumer_path).as_posix() for item in embedded_calls
+        }
         provider_paths = {
             Path(item.provider.path).as_posix()
             for item in bindings
             if isinstance(item.provider, MaledictusSourceCallableProvider)
         }
-        if returned_path in consumer_paths:
+        if returned_path in callable_consumer_paths:
             expected_scope = (
                 "hash-bound-operation-input-and-concrete-callable-provider-with-"
                 "composed-exit-effects"
             )
+        elif returned_path in embedded_consumer_paths:
+            # Exact task-to-adapter use is additionally sealed below by the backend's
+            # embedded_external_calls result; the file proof itself retains the ordinary
+            # complete-operation scope.
+            expected_scope = "all-source-symbol-bodies"
         elif returned_path in provider_paths:
             expected_scope = (
                 "hash-bound-source-callback-signature-body-and-complete-exit-effects"
@@ -368,21 +435,38 @@ def verify_with_maledictus(
         else:
             expected_scope = "all-source-symbol-bodies"
         language = requested_languages.get(returned_path, "python")
-        expected_fragment = {
+        expected_fragment: str | set[str] = {
             "python": _DAGCERT_FRAGMENT,
             "typescript": _TYPESCRIPT_FRAGMENT,
             "javascript": _JAVASCRIPT_FRAGMENT,
         }[language]
+        boundary_adapter_paths = {
+            Path(item.adapter_path).as_posix() for item in boundaries
+        }
+        if returned_path in boundary_adapter_paths:
+            expected_fragment = {
+                "checked-external-scalar-contracts/v26",
+                "checked-external-nominal-reference-contracts/v4",
+                "checked-external-heap-contracts/v5",
+                "transitive-source+checked-external-scalar-contracts/v33",
+                "transitive-source+checked-external-nominal-reference-contracts/v4",
+                "transitive-source+checked-external-heap-contracts/v64",
+            }
+        fragment_matches = (
+            result.get("fragment") in expected_fragment
+            if isinstance(expected_fragment, set)
+            else result.get("fragment") == expected_fragment
+        )
         if (
             result.get("sha256") != expected_hashes[returned_path]
             or result.get("symbols") != list(requested_symbols[returned_path])
             or result.get("scope") != expected_scope
             or result.get("result") != "proved"
-            or result.get("fragment") != expected_fragment
+            or not fragment_matches
         ):
             raise MaledictusVerificationError(
                 f"Maledictus file proof does not exactly bind {returned_path!r} to "
-                f"{expected_fragment}"
+                f"{sorted(expected_fragment) if isinstance(expected_fragment, set) else expected_fragment}"
             )
         _validate_verified_interfaces(
             returned_path,
@@ -407,10 +491,16 @@ def verify_with_maledictus(
         root,
         tuple(external_overlays.values()),
         bindings,
+        boundaries,
         response.get("external_contracts"),
     )
     _validate_callable_binding_results(
         root, bindings, expected_hashes, response.get("python_callable_bindings")
+    )
+    _validate_embedded_external_call_results(
+        embedded_calls,
+        expected_hashes,
+        response.get("embedded_external_calls"),
     )
     return response
 
@@ -563,6 +653,7 @@ def _validate_external_contract_results(
     root: Path,
     overlays: tuple[dict[str, str], ...],
     bindings: tuple[MaledictusCallableBinding, ...],
+    boundaries: tuple[MaledictusExternalBoundary, ...],
     value: object,
 ) -> None:
     if not isinstance(value, list) or len(value) != len(overlays):
@@ -616,6 +707,13 @@ def _validate_external_contract_results(
             and Path(binding.consumer_path).as_posix() == key[0]
             and binding.provider.module == key[1]
         }
+        expected_symbols.update(
+            symbol
+            for boundary in boundaries
+            if Path(boundary.adapter_path).as_posix() == key[0]
+            and boundary.provider_module == key[1]
+            for symbol in boundary.provider_symbols
+        )
         returned_functions = result.get("functions")
         exception_types = result.get("exception_types")
         declared_exceptions = result.get("declared_exceptions")
@@ -736,6 +834,61 @@ def _validate_callable_binding_results(
             )
     if returned != set(expected):
         raise MaledictusVerificationError("Maledictus omitted a Python callable binding result")
+
+
+def _validate_embedded_external_call_results(
+    calls: tuple[MaledictusEmbeddedExternalCall, ...],
+    expected_hashes: Mapping[str, str],
+    value: object,
+) -> None:
+    if not isinstance(value, list) or len(value) != len(calls):
+        raise MaledictusVerificationError(
+            "Maledictus returned the wrong number of embedded external call results"
+        )
+    expected = {
+        (Path(call.consumer_path).as_posix(), call.operation_symbol, call.boundary_id): call
+        for call in calls
+    }
+    required_fields = {
+        "consumer_path", "consumer_sha256", "operation_symbol", "boundary_id",
+        "adapter_path", "adapter_sha256", "adapter_symbol", "scope",
+    }
+    returned: set[tuple[str, str, str]] = set()
+    for result in value:
+        if not isinstance(result, dict) or set(result) != required_fields:
+            raise MaledictusVerificationError(
+                "Maledictus returned a malformed embedded external call result"
+            )
+        key = (
+            result.get("consumer_path"),
+            result.get("operation_symbol"),
+            result.get("boundary_id"),
+        )
+        if key not in expected or key in returned:
+            raise MaledictusVerificationError(
+                f"Maledictus returned an unknown or duplicate embedded external call {key!r}"
+            )
+        returned.add(key)
+        call = expected[key]
+        consumer_path = Path(call.consumer_path).as_posix()
+        adapter_path = Path(call.adapter_path).as_posix()
+        if result != {
+            "consumer_path": consumer_path,
+            "consumer_sha256": expected_hashes.get(consumer_path),
+            "operation_symbol": call.operation_symbol,
+            "boundary_id": call.boundary_id,
+            "adapter_path": adapter_path,
+            "adapter_sha256": expected_hashes.get(adapter_path),
+            "adapter_symbol": call.adapter_symbol,
+            "scope": "source-import-and-direct-call-bound-to-typed-external-outcome-union",
+        }:
+            raise MaledictusVerificationError(
+                f"Maledictus embedded external call evidence does not match {key!r}"
+            )
+    if returned != set(expected):
+        raise MaledictusVerificationError(
+            "Maledictus omitted an embedded external call result"
+        )
 
 
 def _validate_python_typechecker_identity(identity: object) -> None:

@@ -93,11 +93,11 @@ def test_certificate_embeds_and_digest_binds_plain_english_requirements(project)
     assert document["type_enforcement"]["operation_marker"] == "type-preserving/v1"
     assert document["type_enforcement"]["mypy_import_surface"] == "sealed-type-preserving-dagcert-stub/v1"
     assert document["type_enforcement"]["exception_verification"] == (
-        "selectable-nagini-viper-v3-or-maledictus-v2"
+        "selectable-nagini-viper-v3-or-maledictus-v3"
     )
     assert document["type_enforcement"]["external_contracts"] == (
-        "canonical-boundary+contextual-task+environment-resolved+"
-        "p1-contract-only+typeguard-runtime/v4"
+        "canonical-boundary+contextual-task+embedded-operation-effect+exact-source-call+"
+        "environment-resolved+p1-contract-only+typeguard-runtime/v5"
     )
     assert document["type_enforcement"]["chance_composition"] == (
         "engineering-envelope-optional-budget+exact-path+external+"

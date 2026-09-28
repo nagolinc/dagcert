@@ -97,6 +97,9 @@ def audit_translation(
         f"external-handoff:{item.id}" for item in contract.external_handoffs
     )
     valid_primitives.update(
+        f"external-boundary:{item.id}" for item in contract.external_boundaries
+    )
+    valid_primitives.update(
         f"timing:{task.id}/{case}" for task in contract.tasks for case in task.timings
     )
     valid_primitives.update(f"composition:{item.id}" for item in contract.compositions)

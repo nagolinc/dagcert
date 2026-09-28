@@ -176,8 +176,16 @@ closure and returns every source-import edge. Dagcert independently reconstructs
 the exact source files and requires the importer, module, provider, provider hash, and imported
 symbols to match; altered or omitted edges refuse issuance.
 
+An ordinary external-library call inside one worker invocation does not become another DAG task.
+On a v12 contract, keep local work before the call, the call, and local work after it in one
+`operation` task. Declare the adapter once in top-level `external_boundaries` and cite its ID in
+that task's `external_calls`. Maledictus response v8 binds the exact consumer operation, real
+source import, direct adapter call, literal boundary ID, provider overlay, and closed typed outcome
+union. Create another task only when the application really schedules, queues, retries, or hands
+off another unit of work. See `dagcert help nested-external-call`.
+
 The v14 certificate seals strict-mypy output, the pinned verifier identity and proof scope, and
-a manifest hash of the source-verification kernel and typing stubs. For Maledictus, response v7
+a manifest hash of the source-verification kernel and typing stubs. For Maledictus, response v8
 also requires and retains the exact strict-mypy package, runtime executable, complete runtime
 bundle, configuration, and contract-support hashes. Verification reruns the digest-pinned backend
 and rejects any change in that recorded typechecker identity,
@@ -199,9 +207,9 @@ dagcert lint dag_contract.json --requirements english_requirements.json `
 ```
 
 Pass the same three backend options to `issue` and `verify`. Verification recomputes the proof and
-requires the complete v7 result—including its strict typechecker identity and callable-binding
-evidence—to match the certificate.
-Maledictus v2 accepts the narrow source-owned Dagcert operation fragment plus explicit source or
+requires the complete v8 result—including its strict typechecker identity, callable-binding, and
+embedded external-call evidence—to match the certificate.
+Maledictus v3 accepts the narrow source-owned Dagcert operation fragment plus explicit source or
 external-contract callable providers. Unsupported provider forms fail closed. On Windows, select
 the packaged executable beside
 its pinned `libz3.dll`, not a bare Cargo output missing its runtime.

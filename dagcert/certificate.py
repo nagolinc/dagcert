@@ -24,7 +24,7 @@ from .source_types import (
 )
 from .maledictus_verifier import (
     MaledictusCallableBinding, MaledictusExternalCallableProvider,
-    MaledictusSourceCallableProvider,
+    MaledictusEmbeddedExternalCall, MaledictusSourceCallableProvider,
 )
 
 
@@ -130,6 +130,7 @@ def _primitive_refs(contract: Contract) -> set[str]:
     refs.update(f"resource:{item.id}" for item in contract.resources)
     refs.update(f"channel:{item.id}" for item in contract.channels)
     refs.update(f"external-handoff:{item.id}" for item in contract.external_handoffs)
+    refs.update(f"external-boundary:{item.id}" for item in contract.external_boundaries)
     refs.update(f"timing:{task.id}/{case}" for task in contract.tasks for case in task.timings)
     refs.update(f"composition:{item.id}" for item in contract.compositions)
     refs.update(f"state-claim:{item.id}" for item in contract.state_claims)
@@ -154,6 +155,8 @@ def _serialized_primitives(contract: Contract, analysis_mapping: dict[str, Any])
     """Return the exact JSON shape stored in a certificate (tuples become arrays)."""
     tasks = [asdict(item) for item in contract.tasks]
     for task in tasks:
+        if not task["external_calls"]:
+            task.pop("external_calls", None)
         if contract.schema not in {"dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11", "dagcert-contract/v12"} or not task["callable_bindings"]:
             task.pop("callable_bindings", None)
         if contract.schema not in {"dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11", "dagcert-contract/v12"}:
@@ -236,12 +239,31 @@ def _serialized_primitives(contract: Contract, analysis_mapping: dict[str, Any])
         value["channels"] = [asdict(item) for item in contract.channels]
     if contract.schema in {"dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11", "dagcert-contract/v12"}:
         value["external_handoffs"] = [asdict(item) for item in contract.external_handoffs]
+    if contract.external_boundaries:
+        value["external_boundaries"] = [
+            asdict(item) for item in contract.external_boundaries
+        ]
     return cast(dict[str, Any], json.loads(canonical_json(value)))
 
 
 def external_source_contracts(contract: Contract) -> tuple[ExternalSourceContract, ...]:
     result: list[ExternalSourceContract] = []
     by_boundary: dict[str, ExternalSourceContract] = {}
+    for boundary in contract.external_boundaries:
+        binding = ExternalSourceContract(
+            boundary.id,
+            boundary.implementation.path,
+            boundary.implementation.symbol,
+            boundary.stub_path,
+            boundary.provider.module,
+            boundary.provider.symbols,
+            boundary.assumption,
+            boundary.source_signature,
+            boundary.exception_policy,
+            True,
+        )
+        by_boundary[boundary.id] = binding
+        result.append(binding)
     for task in contract.tasks:
         external = task.external_contract
         implementation = task.implementation
@@ -315,6 +337,33 @@ def maledictus_callable_bindings(
                 signature.input_type,
                 binding.field,
                 resolved_provider,
+            ))
+    return tuple(result)
+
+
+def maledictus_embedded_external_calls(
+    contract: Contract,
+) -> tuple[MaledictusEmbeddedExternalCall, ...]:
+    """Bind each logical task to the real monitored adapters called inside its body."""
+
+    boundaries = contract.external_boundary_by_id
+    result: list[MaledictusEmbeddedExternalCall] = []
+    for task in contract.tasks:
+        if not task.external_calls:
+            continue
+        implementation = task.implementation
+        if implementation is None or task.source_signature is None:
+            raise CertificateError(
+                f"operation task {task.id} external calls lack a source implementation"
+            )
+        for boundary_id in task.external_calls:
+            boundary = boundaries[boundary_id]
+            result.append(MaledictusEmbeddedExternalCall(
+                implementation.path,
+                implementation.symbol,
+                boundary_id,
+                boundary.implementation.path,
+                boundary.implementation.symbol,
             ))
     return tuple(result)
 
@@ -437,6 +486,7 @@ def issue_certificate(
             ),
             external_contracts=external_source_contracts(contract),
             callable_bindings=maledictus_callable_bindings(contract),
+            embedded_external_calls=maledictus_embedded_external_calls(contract),
             proof_backend=proof_backend,
         )
     except SourceTypeError as exc:
@@ -621,6 +671,7 @@ def verify_certificate(
                         ),
                         external_contracts=external_source_contracts(contract),
                         callable_bindings=maledictus_callable_bindings(contract),
+                        embedded_external_calls=maledictus_embedded_external_calls(contract),
                         proof_backend=selected_backend,
                     )
                     if stored_source_verification != source_verification:
