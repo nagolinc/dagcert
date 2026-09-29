@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from importlib.machinery import ModuleSpec
 from pathlib import Path
+import ast
 import json
 import pytest
 
@@ -37,8 +38,62 @@ from dagcert import (
 )
 from dagcert.formula import evaluate_formula
 from dagcert.source_types import (
-    ExternalSourceContract, SourceTypeError, _resolve_external_provider,
+    ExternalSourceContract, SourceTypeError, _external_provider_call_names,
+    _resolve_external_provider, validate_external_provider_stub,
 )
+
+
+def test_provider_heap_method_calls_follow_a_single_assignment_factory_result() -> None:
+    tree = ast.parse(
+        "import logging\n\ndef write() -> None:\n"
+        "    logger = logging.getLogger('worker')\n"
+        "    logger.warning('working')\n"
+    )
+    stub = ast.parse(
+        "class Logger:\n"
+        "    def warning(self, message: str) -> None: ...\n\n"
+        "def getLogger(name: str) -> Logger: ...\n"
+    )
+    function = next(
+        item for item in tree.body if isinstance(item, ast.FunctionDef)
+    )
+
+    assert _external_provider_call_names(tree, function, "logging", stub) == {
+        "getLogger", "Logger.warning",
+    }
+
+
+def test_builtin_factory_results_do_not_invent_provider_heap_methods() -> None:
+    tree = ast.parse(
+        "import json\n\ndef decode(payload: str) -> object:\n"
+        "    decoded = json.loads(payload)\n"
+        "    return decoded.get('value')\n"
+    )
+    stub = ast.parse("def loads(payload: str) -> object: ...\n")
+    function = next(
+        item for item in tree.body if isinstance(item, ast.FunctionDef)
+    )
+
+    assert _external_provider_call_names(tree, function, "json", stub) == {"loads"}
+
+
+def test_provider_overlay_names_a_class_with_a_contracted_constructor(
+    tmp_path: Path,
+) -> None:
+    stub = tmp_path / "pipeline_contract.py"
+    stub.write_text(
+        "from nagini_contracts.contracts import ContractOnly\n\n"
+        "class ModelPipeline:\n"
+        "    @ContractOnly\n"
+        "    def __init__(self, model: str) -> None: ...\n",
+        encoding="utf-8",
+    )
+
+    result = validate_external_provider_stub(
+        tmp_path, "pipeline_contract.py", ("ModelPipeline",),
+    )
+
+    assert result["symbols"] == ["ModelPipeline"]
 
 
 @dataclass(frozen=True)
@@ -171,6 +226,28 @@ def test_external_raise_and_wrong_return_are_visible_certificate_violations(
     )
     assert not report.passed
     assert any(item.code == "error-budget-observed-rate-exceeded" for item in report.findings)
+
+
+def test_external_exception_diagnostics_cannot_mask_the_original_failure() -> None:
+    class BrokenExceptionMeta(type):
+        def __getattribute__(cls, name: str) -> object:
+            if name in {"__module__", "__qualname__"}:
+                raise RuntimeError("exception class name lookup raised")
+            return super().__getattribute__(name)
+
+    class BrokenException(Exception, metaclass=BrokenExceptionMeta):
+        def __str__(self) -> str:
+            raise RuntimeError("exception formatting raised")
+
+    @external_boundary("provider.broken-diagnostics")
+    def raises(_request: _Request) -> _Parsed:
+        raise BrokenException()
+
+    result = raises(_Request("x"))
+
+    assert isinstance(result, ExternalRaised)
+    assert result.exception_type == "unknown-runtime-type"
+    assert result.message == "exception message could not be rendered"
 
 
 def test_v6_external_adapter_and_contractonly_stub_are_separate_and_exact(

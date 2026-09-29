@@ -132,13 +132,25 @@ def audit_translation(
         reference for claim in requirements.claims for reference in claim.primitive_refs
     }
     coverage_primitives: set[str] = set()
+    timing_owners = {
+        f"timing:{task.id}/{case}": f"task:{task.id}"
+        for task in contract.tasks for case in task.timings
+    }
     if requirements.schema == "dagcert-english-requirements/v2":
         from .formula import formula_references
 
         for claim in requirements.claims:
             if claim.basis in {"derived", "chance"} and claim.formula is not None:
                 try:
-                    coverage_primitives.update(formula_references(claim.formula))
+                    used_references = set(formula_references(claim.formula))
+                    coverage_primitives.update(used_references)
+                    # A bound on a real task's timing represents that task too.
+                    # Only formula-used, existing timings establish this relation;
+                    # an unused prose reference cannot manufacture task coverage.
+                    coverage_primitives.update(
+                        timing_owners[reference]
+                        for reference in used_references if reference in timing_owners
+                    )
                 except ValueError:
                     # The formula-specific audit below reports the precise invalidity. Invalid
                     # prose references must not nevertheless count as formal coverage.

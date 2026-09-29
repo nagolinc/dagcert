@@ -21,6 +21,8 @@ R = TypeVar("R")
 _LOG = logging.getLogger("dagcert.runtime")
 _EXTERNAL_RAISED = "dagcert.runtime.ExternalRaised"
 _EXTERNAL_TYPE_VIOLATION = "dagcert.runtime.ExternalTypeViolation"
+_UNKNOWN_RUNTIME_TYPE = "unknown-runtime-type"
+_UNRENDERABLE_EXCEPTION_MESSAGE = "exception message could not be rendered"
 
 
 class OperationTypeViolation(TypeError):
@@ -130,6 +132,7 @@ def external_boundary(
                         check_type(value, parameter_type)
             except (TypeCheckError, TypeError) as exc:
                 observed = _type_name(type(args[0])) if args else "invalid-call-shape"
+                exception_type, message = _exception_details(exc)
                 event = ExternalBoundaryEvent(
                     identifier,
                     (perf_counter() - started) * 1000,
@@ -138,16 +141,17 @@ def external_boundary(
                     time(),
                     "source-declared external input",
                     observed_type=observed,
-                    exception_type=_type_name(type(exc)),
-                    message=str(exc),
+                    exception_type=exception_type,
+                    message=message,
                 )
                 _publish_external_event(event)
                 return ExternalTypeViolation(
-                    identifier, event.expected_type, observed, str(exc),
+                    identifier, event.expected_type, observed, message,
                 )
             try:
                 value = function(*args, **kwargs)
             except Exception as exc:
+                exception_type, message = _exception_details(exc)
                 event = ExternalBoundaryEvent(
                     identifier,
                     (perf_counter() - started) * 1000,
@@ -155,14 +159,15 @@ def external_boundary(
                     False,
                     time(),
                     expected_label,
-                    exception_type=_type_name(type(exc)),
-                    message=str(exc),
+                    exception_type=exception_type,
+                    message=message,
                 )
                 _publish_external_event(event)
                 return ExternalRaised(
                     identifier, str(event.exception_type), str(event.message or ""),
                 )
             except BaseException as exc:
+                exception_type, message = _exception_details(exc)
                 event = ExternalBoundaryEvent(
                     identifier,
                     (perf_counter() - started) * 1000,
@@ -170,8 +175,8 @@ def external_boundary(
                     False,
                     time(),
                     expected_label,
-                    exception_type=_type_name(type(exc)),
-                    message=str(exc),
+                    exception_type=exception_type,
+                    message=message,
                 )
                 _publish_external_event(event)
                 raise
@@ -180,6 +185,7 @@ def external_boundary(
                 check_type(value, expected_type)
             except (TypeCheckError, TypeError) as exc:
                 observed = _type_name(type(value))
+                exception_type, message = _exception_details(exc)
                 event = ExternalBoundaryEvent(
                     identifier,
                     (perf_counter() - started) * 1000,
@@ -188,18 +194,18 @@ def external_boundary(
                     time(),
                     expected_label,
                     observed_type=observed,
-                    exception_type=_type_name(type(exc)),
-                    message=str(exc),
+                    exception_type=exception_type,
+                    message=message,
                 )
                 _publish_external_event(event)
                 return ExternalTypeViolation(
-                    identifier, expected_label, observed, str(exc),
+                    identifier, expected_label, observed, message,
                 )
 
             _publish_external_event(ExternalBoundaryEvent(
                 identifier,
                 (perf_counter() - started) * 1000,
-                type(value).__qualname__,
+                _qualname(type(value)),
                 True,
                 time(),
                 expected_label,
@@ -262,11 +268,33 @@ def _publish_external_event(event: ExternalBoundaryEvent) -> None:
 
 
 def _type_name(value: object) -> str:
-    module = getattr(value, "__module__", None)
-    qualname = getattr(value, "__qualname__", None)
-    if isinstance(module, str) and isinstance(qualname, str):
-        return qualname if module == "builtins" else f"{module}.{qualname}"
-    return str(value)
+    try:
+        module = getattr(value, "__module__", None)
+        qualname = getattr(value, "__qualname__", None)
+        if isinstance(module, str) and isinstance(qualname, str):
+            return qualname if module == "builtins" else f"{module}.{qualname}"
+    except BaseException:
+        pass
+    return _UNKNOWN_RUNTIME_TYPE
+
+
+def _exception_details(exc: BaseException) -> tuple[str, str]:
+    exception_type = _type_name(type(exc))
+    try:
+        message = str(exc)
+    except BaseException:
+        message = _UNRENDERABLE_EXCEPTION_MESSAGE
+    return exception_type, message
+
+
+def _qualname(value: object) -> str:
+    try:
+        qualname = getattr(value, "__qualname__", None)
+        if isinstance(qualname, str):
+            return qualname
+    except BaseException:
+        pass
+    return _UNKNOWN_RUNTIME_TYPE
 
 
 def outcome_type(value: object) -> str:
@@ -274,9 +302,9 @@ def outcome_type(value: object) -> str:
     if isinstance(value, UnhandledException):
         return "dagcert.runtime.UnhandledException"
     if isinstance(value, ExternalSuccess):
-        return type(value.value).__qualname__
+        return _qualname(type(value.value))
     if isinstance(value, ExternalRaised):
         return _EXTERNAL_RAISED
     if isinstance(value, ExternalTypeViolation):
         return _EXTERNAL_TYPE_VIOLATION
-    return type(value).__qualname__
+    return _qualname(type(value))

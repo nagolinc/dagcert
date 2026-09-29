@@ -9,6 +9,8 @@ from typing import Any, Mapping, Sequence
 import json
 import keyword
 
+from .javascript_interfaces import JavaScriptInterfaceError, parse_javascript_interface
+
 from .source_types import (
     SourceSignature, SourceTypeError, read_python_signature, validate_external_contract_stub,
     validate_external_provider_stub,
@@ -1253,61 +1255,14 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
                 interface = _object(
                     row.get("verified_interface"), f"task {task_id}.verified_interface",
                 )
-                if set(interface) != {"execution", "parameters", "return_type"}:
-                    raise ContractError(
-                        f"task {task_id}.verified_interface must contain execution, parameters, "
-                        "and return_type"
+                try:
+                    javascript_interface = parse_javascript_interface(
+                        interface, f"task {task_id}.verified_interface",
                     )
-                if interface.get("execution") != "synchronous":
-                    raise ContractError(
-                        f"task {task_id}.verified_interface currently requires synchronous "
-                        "execution"
-                    )
-                parameter_rows = _array(
-                    interface.get("parameters"),
-                    f"task {task_id}.verified_interface.parameters",
-                )
-                parameters: list[tuple[str, str]] = []
-                for parameter_index, parameter_value in enumerate(parameter_rows):
-                    parameter = _object(
-                        parameter_value,
-                        f"task {task_id}.verified_interface.parameters[{parameter_index}]",
-                    )
-                    if set(parameter) != {"name", "type"}:
-                        raise ContractError(
-                            f"task {task_id}.verified_interface parameter must contain name and "
-                            "type"
-                        )
-                    parameter_name = _identifier(
-                        parameter.get("name"),
-                        f"task {task_id}.verified_interface parameter name",
-                    )
-                    parameter_type = _identifier(
-                        parameter.get("type"),
-                        f"task {task_id}.verified_interface parameter type",
-                    )
-                    if any(name == parameter_name for name, _type_name in parameters):
-                        raise ContractError(
-                            f"task {task_id}.verified_interface contains duplicate parameter "
-                            f"{parameter_name!r}"
-                        )
-                    parameters.append((parameter_name, parameter_type))
-                return_type = _identifier(
-                    interface.get("return_type"),
-                    f"task {task_id}.verified_interface.return_type",
-                )
-                allowed_types = {"boolean", "number", "string"}
-                unsupported_types = {
-                    type_name for _name, type_name in parameters
-                    if type_name not in allowed_types
-                }
-                if return_type not in allowed_types:
-                    unsupported_types.add(return_type)
-                if unsupported_types:
-                    raise ContractError(
-                        f"task {task_id}.verified_interface currently supports only primitive "
-                        f"types {sorted(allowed_types)}; observed {sorted(unsupported_types)}"
-                    )
+                except JavaScriptInterfaceError as exc:
+                    raise ContractError(str(exc)) from exc
+                parameters = javascript_interface.parameters
+                return_type = javascript_interface.return_type
                 if not parameters:
                     input_type = "()"
                 elif len(parameters) == 1:
@@ -1324,6 +1279,8 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
                     (return_type,),
                     1,
                     tuple(parameters),
+                    execution=javascript_interface.execution,
+                    record_parameters=javascript_interface.record_parameters,
                 )
             else:
                 raise ContractError(
@@ -2359,6 +2316,14 @@ def _validate(contract: Contract) -> None:
                     raise ContractError(
                         f"task {task.id} dependency cites {dependency.task} outcome "
                         f"{dependency.outcome_type!r}, which is not in the upstream source union"
+                    )
+                if (
+                    dependency.outcome_type == "void"
+                    and upstream.source_signature is not None
+                    and upstream.source_signature.language in {"javascript", "typescript"}
+                ):
+                    raise ContractError(
+                        f"task {task.id} cannot consume void callback completion as a typed payload"
                     )
                 if dependency.input_field is None:
                     assert task.source_signature is not None

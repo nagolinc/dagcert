@@ -23,6 +23,7 @@ import tempfile
 
 from .python_verifier import PythonVerificationError, verify_exception_freedom
 from .proof_sources import ProofSourceError, resolve_python_proof_sources
+from .javascript_interfaces import RecordParameters
 from .maledictus_verifier import (
     MaledictusCallableBinding, MaledictusExternalCallableProvider,
     MaledictusEmbeddedExternalCall, MaledictusExternalBoundary,
@@ -74,7 +75,7 @@ def type_enforcement_descriptor() -> dict[str, object]:
         "_version.py", "__init__.py", "analysis.py", "certificate.py", "contract.py",
         "evidence.py", "formula.py", "requirements.py", "runtime.py", "runtime.pyi",
         "maledictus_verifier.py", "proof_sources.py", "python_verifier.py", "source_types.py",
-        "state_model.py",
+        "state_model.py", "javascript_interfaces.py", "source_calls.py",
         "nagini_stubs/dagcert/__init__.pyi", "nagini_stubs/dagcert/runtime.pyi",
         "mypy_stubs/dagcert/__init__.pyi", "mypy_stubs/dagcert/runtime.pyi",
         "mypy_stubs/dagcert/surfaces.pyi",
@@ -106,7 +107,7 @@ def type_enforcement_descriptor() -> dict[str, object]:
         ),
         "lifecycle_state_proofs": "two-phase-affine+bounded-non-starvation+response/v1",
         "verified_javascript_typescript_leaves": (
-            "maledictus-compiler-interface+source+toolchain-bound/v1"
+            "maledictus-exact-execution+closed-record-interface+source+toolchain-bound/v2"
         ),
         "kernel_manifest": manifest,
         "kernel_sha256": sha256(manifest_bytes).hexdigest(),
@@ -123,6 +124,8 @@ class SourceSignature:
     line: int
     input_fields: tuple[tuple[str, str], ...] = ()
     outcome_fields: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = ()
+    execution: str = "synchronous"
+    record_parameters: RecordParameters = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,6 +257,11 @@ def check_python_sources(
             "symbol": item.symbol,
             "input_fields": [list(field) for field in item.input_fields],
             "outcome_types": list(item.outcome_types),
+            "execution": item.execution,
+            "record_parameters": [
+                {"name": name, "fields": [list(field) for field in fields]}
+                for name, fields in item.record_parameters
+            ],
         })
         for item in sorted(bound_signatures, key=lambda value: (value.path, value.symbol))
     ]
@@ -390,6 +398,8 @@ def check_python_sources(
                             item.symbol,
                             item.input_fields,
                             item.outcome_types[0],
+                            execution=item.execution,
+                            record_parameters=item.record_parameters,
                         )
                         for item in proof_bound_signatures
                         if item.language in {"javascript", "typescript"}
@@ -691,6 +701,25 @@ def validate_external_provider_stub(
             for decorator in node.decorator_list
         )
     }
+    # A provider constructor is named by its public class (``Path``, ``Request``,
+    # ``ModelPipeline``), while its executable contract naturally lives on ``__init__`` or
+    # ``__new__``.  Treat that decorated constructor as the class export; requiring a fake
+    # top-level function with the class name would misdescribe the real provider API.
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        if any(
+            isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and member.name in {"__init__", "__new__"}
+            and any(
+                _qualified_name(
+                    decorator.func if isinstance(decorator, ast.Call) else decorator
+                ) in contract_only
+                for decorator in member.decorator_list
+            )
+            for member in node.body
+        ):
+            declared.add(node.name)
     required = {symbol.rsplit(".", 1)[-1] for symbol in provider_symbols}
     missing = required - declared
     if missing:
@@ -769,12 +798,22 @@ def _validate_external_source_contract(
                     f"adapter={adapter_shape}, stub={stub_shape}"
                 )
     function = _find_function(tree, contract.symbol)
-    imported_calls = _external_provider_call_names(tree, function, contract.provider_module)
+    imported_calls = _external_provider_call_names(
+        tree, function, contract.provider_module, stub_tree,
+    )
     missing = set(contract.provider_symbols) - imported_calls
     if missing:
         raise SourceTypeError(
             f"external adapter {contract.adapter_path}:{contract.symbol} does not directly call "
             f"declared provider symbols {sorted(missing)} from {contract.provider_module}"
+        )
+    undeclared = imported_calls - set(contract.provider_symbols)
+    if undeclared:
+        raise SourceTypeError(
+            f"external adapter {contract.adapter_path}:{contract.symbol} calls undeclared "
+            f"provider symbols {sorted(undeclared)} from {contract.provider_module}; every "
+            "external constructor, function, and method call must be covered by the sealed "
+            "provider overlay"
         )
 
     provider = _resolve_external_provider(
@@ -909,6 +948,7 @@ def _external_provider_call_names(
     tree: ast.Module,
     function: ast.FunctionDef | ast.AsyncFunctionDef,
     provider_module: str,
+    stub_tree: ast.Module | None = None,
 ) -> set[str]:
     direct: dict[str, str] = {}
     module_aliases: dict[str, str] = {}
@@ -923,13 +963,10 @@ def _external_provider_call_names(
                     parts = imported.name.split(".", 1)
                     suffix = "" if imported.asname or len(parts) == 1 else parts[1]
                     module_aliases[binding] = suffix
-    calls: set[str] = set()
-    for descendant in ast.walk(function):
-        if not isinstance(descendant, ast.Call):
-            continue
-        name = _qualified_name(descendant.func)
+    def provider_call_name(call: ast.Call) -> str | None:
+        name = _qualified_name(call.func)
         if name in direct:
-            calls.add(direct[str(name)])
+            return direct[str(name)]
         if name is not None:
             for module_alias, provider_suffix in module_aliases.items():
                 prefix = module_alias + "."
@@ -938,7 +975,69 @@ def _external_provider_call_names(
                     suffix_prefix = provider_suffix + "." if provider_suffix else ""
                     if suffix_prefix and called.startswith(suffix_prefix):
                         called = called[len(suffix_prefix):]
-                    calls.add(called)
+                    return called
+        return None
+
+    factory_returns: dict[str, str] = {}
+    if stub_tree is not None:
+        provider_classes = {
+            statement.name
+            for statement in stub_tree.body
+            if isinstance(statement, ast.ClassDef)
+        }
+        for statement in stub_tree.body:
+            if (
+                isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and isinstance(statement.returns, ast.Name)
+                and statement.returns.id in provider_classes
+            ):
+                factory_returns[statement.name] = statement.returns.id
+
+    # Track only single-assignment local bindings.  This recognizes the ordinary
+    # `logger = logging.getLogger(...); logger.warning(...)` shape without pretending a
+    # reassigned or dynamically sourced object still has provider provenance.
+    store_counts: dict[str, int] = {}
+    for descendant in ast.walk(function):
+        if isinstance(descendant, ast.Name) and isinstance(descendant.ctx, ast.Store):
+            store_counts[descendant.id] = store_counts.get(descendant.id, 0) + 1
+    provider_instances: dict[str, str] = {}
+    for descendant in ast.walk(function):
+        if not isinstance(descendant, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets: list[ast.expr]
+        value: ast.expr | None
+        if isinstance(descendant, ast.Assign):
+            targets = list(descendant.targets)
+            value = descendant.value
+        else:
+            targets = [descendant.target]
+            value = descendant.value
+        if not isinstance(value, ast.Call):
+            continue
+        factory = provider_call_name(value)
+        returned_class = factory_returns.get(factory or "")
+        if returned_class is None:
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name) and store_counts.get(target.id) == 1:
+                provider_instances[target.id] = returned_class
+
+    calls: set[str] = set()
+    for descendant in ast.walk(function):
+        if not isinstance(descendant, ast.Call):
+            continue
+        called = provider_call_name(descendant)
+        if called is not None:
+            calls.add(called)
+        if isinstance(descendant.func, ast.Attribute):
+            receiver = descendant.func.value
+            if isinstance(receiver, ast.Name) and receiver.id in provider_instances:
+                calls.add(f"{provider_instances[receiver.id]}.{descendant.func.attr}")
+            elif isinstance(receiver, ast.Call):
+                factory = provider_call_name(receiver)
+                returned_class = factory_returns.get(factory or "")
+                if returned_class is not None:
+                    calls.add(f"{returned_class}.{descendant.func.attr}")
     return calls
 
 

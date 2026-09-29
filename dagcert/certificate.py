@@ -13,7 +13,8 @@ import json
 from .analysis import AnalysisReport, analyze_contract
 from .checks import CheckResult, load_check_result
 from .contract import (
-    Contract, ExternalCallableProvider, SourceCallableProvider, load_contract,
+    Contract, ExternalCallableProvider, SourceCallableProvider,
+    load_contract,
 )
 from .evidence import load_evidence
 from .formula import FormulaError, evaluate_formula
@@ -26,6 +27,8 @@ from .maledictus_verifier import (
     MaledictusCallableBinding, MaledictusExternalCallableProvider,
     MaledictusEmbeddedExternalCall, MaledictusSourceCallableProvider,
 )
+from .proof_sources import ProofSourceError
+from .source_calls import resolve_python_source_calls
 
 
 class CertificateError(RuntimeError):
@@ -342,12 +345,24 @@ def maledictus_callable_bindings(
 
 
 def maledictus_embedded_external_calls(
-    contract: Contract,
+    contract: Contract, source_root: str | Path | None = None,
+    *, source_manifest_paths: Iterable[str] | None = None,
 ) -> tuple[MaledictusEmbeddedExternalCall, ...]:
-    """Bind each logical task to the real monitored adapters called inside its body."""
+    """Bind task effects through real helpers to every direct adapter consumer."""
 
     boundaries = contract.external_boundary_by_id
     result: list[MaledictusEmbeddedExternalCall] = []
+    identities: set[tuple[str, str, str]] = set()
+    root = Path(source_root).resolve() if source_root is not None else None
+    manifest = (
+        tuple(source_manifest_paths) if source_manifest_paths is not None
+        else tuple(source_manifest(root)) if root is not None and boundaries else ()
+    )
+    boundary_by_source = {
+        (boundary.implementation.path, boundary.implementation.symbol): boundary
+        for boundary in boundaries.values()
+    }
+
     for task in contract.tasks:
         if not task.external_calls:
             continue
@@ -356,15 +371,48 @@ def maledictus_embedded_external_calls(
             raise CertificateError(
                 f"operation task {task.id} external calls lack a source implementation"
             )
-        for boundary_id in task.external_calls:
-            boundary = boundaries[boundary_id]
-            result.append(MaledictusEmbeddedExternalCall(
-                implementation.path,
-                implementation.symbol,
-                boundary_id,
-                boundary.implementation.path,
-                boundary.implementation.symbol,
-            ))
+        if root is None:
+            for boundary_id in task.external_calls:
+                boundary = boundaries[boundary_id]
+                result.append(MaledictusEmbeddedExternalCall(
+                    implementation.path,
+                    implementation.symbol,
+                    boundary_id,
+                    boundary.implementation.path,
+                    boundary.implementation.symbol,
+                ))
+            continue
+        allowed = set(task.external_calls)
+        reached: set[str] = set()
+        try:
+            calls = resolve_python_source_calls(
+                root, [(implementation.path, implementation.symbol)], manifest,
+            )
+        except ProofSourceError as exc:
+            raise CertificateError(f"cannot inspect task {task.id} external-call closure: {exc}") from exc
+        for call in calls:
+            called_boundary = boundary_by_source.get((call.provider_path, call.provider_symbol))
+            if called_boundary is None:
+                continue
+            if called_boundary.id not in allowed:
+                raise CertificateError(
+                    f"task {task.id} reaches undeclared external boundary {called_boundary.id} "
+                    f"through {call.consumer_path}:{call.consumer_symbol}"
+                )
+            reached.add(called_boundary.id)
+            identity = (call.consumer_path, call.consumer_symbol, called_boundary.id)
+            if identity not in identities:
+                identities.add(identity)
+                result.append(MaledictusEmbeddedExternalCall(
+                    call.consumer_path, call.consumer_symbol, called_boundary.id,
+                    call.provider_path, call.provider_symbol,
+                ))
+        missing = allowed - reached
+        if missing:
+            raise CertificateError(
+                f"task {task.id} declares external calls not reachable from its source-bound "
+                f"operation: {sorted(missing)}"
+            )
     return tuple(result)
 
 
@@ -486,7 +534,9 @@ def issue_certificate(
             ),
             external_contracts=external_source_contracts(contract),
             callable_bindings=maledictus_callable_bindings(contract),
-            embedded_external_calls=maledictus_embedded_external_calls(contract),
+            embedded_external_calls=maledictus_embedded_external_calls(
+                contract, root, source_manifest_paths=manifest,
+            ),
             proof_backend=proof_backend,
         )
     except SourceTypeError as exc:
@@ -671,7 +721,9 @@ def verify_certificate(
                         ),
                         external_contracts=external_source_contracts(contract),
                         callable_bindings=maledictus_callable_bindings(contract),
-                        embedded_external_calls=maledictus_embedded_external_calls(contract),
+                        embedded_external_calls=maledictus_embedded_external_calls(
+                            contract, root, source_manifest_paths=manifest,
+                        ),
                         proof_backend=selected_backend,
                     )
                     if stored_source_verification != source_verification:

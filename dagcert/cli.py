@@ -294,7 +294,9 @@ def main(argv: list[str] | None = None) -> int:
                 ),
                 external_contracts=external_source_contracts(contract),
                 callable_bindings=maledictus_callable_bindings(contract),
-                embedded_external_calls=maledictus_embedded_external_calls(contract),
+                embedded_external_calls=maledictus_embedded_external_calls(
+                    contract, lint_root, source_manifest_paths=lint_manifest,
+                ),
                 proof_backend=_proof_backend(args),
             )
             translation_audit = audit_translation(requirements, contract)

@@ -20,10 +20,18 @@ class MaledictusVerificationError(RuntimeError):
 _REQUEST_SCHEMA = "maledictus-verification-request/v5"
 _RESPONSE_SCHEMA = "maledictus-verification-result/v8"
 _DAGCERT_FRAGMENT = "dagcert-closed-typed-operations/v4"
+_DAGCERT_ASSERTION_FRAGMENT = (
+    "dagcert-closed-typed-operations+semantic-assertions/v1"
+)
+_DAGCERT_OPERATION_FRAGMENTS = {
+    _DAGCERT_FRAGMENT,
+    _DAGCERT_ASSERTION_FRAGMENT,
+}
 _TYPESCRIPT_FRAGMENT = "strict-typescript-closed-total-functions/v11"
 _JAVASCRIPT_FRAGMENT = "strict-javascript-jsdoc-closed-total-functions/v11"
 _PYTHON_PROOF_SOURCE_FRAGMENTS = {
     _DAGCERT_FRAGMENT,
+    _DAGCERT_ASSERTION_FRAGMENT,
     "closed-total-functions+safe-builtin-slices/v1",
     "caught-callable-dataclass-boundaries/v1",
     "scalar-nagini-contracts/v44",
@@ -95,6 +103,8 @@ class MaledictusVerifiedInterface:
     symbol: str
     parameters: tuple[tuple[str, str], ...]
     return_type: str
+    execution: str = "synchronous"
+    record_parameters: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = ()
 
 
 def verify_with_maledictus(
@@ -205,6 +215,16 @@ def verify_with_maledictus(
         if boundary.adapter_symbol not in adapter_symbols:
             adapter_symbols.append(boundary.adapter_symbol)
         requested_symbols[adapter_path] = tuple(adapter_symbols)
+    for call in embedded_calls:
+        consumer_path = Path(call.consumer_path).as_posix()
+        if consumer_path not in normalized_files_set:
+            raise MaledictusVerificationError(
+                f"embedded external consumer is outside the sealed source closure: {consumer_path}"
+            )
+        consumer_symbols = list(requested_symbols.get(consumer_path, ()))
+        if call.operation_symbol not in consumer_symbols:
+            consumer_symbols.append(call.operation_symbol)
+        requested_symbols[consumer_path] = tuple(consumer_symbols)
     normalized_files = tuple(sorted(normalized_files_set))
     if not normalized_files:
         raise MaledictusVerificationError("Maledictus received no bound operation files")
@@ -460,11 +480,13 @@ def verify_with_maledictus(
         else:
             expected_scope = "all-source-symbol-bodies"
         language = requested_languages.get(returned_path, "python")
-        expected_fragment: str | set[str] = {
-            "python": _DAGCERT_FRAGMENT,
-            "typescript": _TYPESCRIPT_FRAGMENT,
-            "javascript": _JAVASCRIPT_FRAGMENT,
-        }[language]
+        expected_fragment: str | set[str]
+        if language == "python":
+            expected_fragment = _DAGCERT_OPERATION_FRAGMENTS
+        elif language == "typescript":
+            expected_fragment = _TYPESCRIPT_FRAGMENT
+        else:
+            expected_fragment = _JAVASCRIPT_FRAGMENT
         if returned_path in normalized_proof_only_files:
             if language != "python":
                 raise MaledictusVerificationError(
@@ -630,15 +652,24 @@ def _validate_verified_interfaces(
         raise MaledictusVerificationError(
             f"Maledictus returned the wrong number of verified interfaces for {path!r}"
         )
-    expected_rows = [{
-        "symbol": item.symbol,
-        "execution": "synchronous",
-        "parameters": [
-            {"name": name, "type_name": type_name}
-            for name, type_name in item.parameters
-        ],
-        "return_type": item.return_type,
-    } for item in expected]
+    from .javascript_interfaces import (
+        JavaScriptInterface, JavaScriptInterfaceError, compiler_parameter_rows,
+    )
+
+    expected_rows = []
+    for item in expected:
+        try:
+            parameters = compiler_parameter_rows(JavaScriptInterface(
+                item.execution, item.parameters, item.return_type, item.record_parameters,
+            ))
+        except JavaScriptInterfaceError as exc:
+            raise MaledictusVerificationError(str(exc)) from exc
+        expected_rows.append({
+            "symbol": item.symbol,
+            "execution": item.execution,
+            "parameters": parameters,
+            "return_type": item.return_type,
+        })
     if value != expected_rows:
         raise MaledictusVerificationError(
             f"Maledictus compiler-derived interface does not match the declared interface for "
@@ -704,6 +735,10 @@ def _validate_external_contract_results(
         heap_scope = (
             "provider-import-and-heap-contract-conformance-assumed; heap-returning-"
             "factory-binding-class-layout-method-and-permission-effects-checked-at-adapter"
+            if overlay["exception_policy"] == "assume-no-exception"
+            else "provider-import-and-heap-contract-conformance-assumed; typed-heap-"
+            "exsures-outcome-union-propagated; class-layout-method-and-permission-effects-"
+            "checked-at-adapter"
         )
         expected_symbols = {
             binding.provider.symbol
@@ -744,49 +779,86 @@ def _validate_external_contract_results(
                 else:
                     reported_type_names.add(qualified_name[len(prefix):])
         if isinstance(nominal_types, list) and nominal_types:
-            expected_scope = nominal_scope
+            expected_scopes = {nominal_scope}
         elif isinstance(heap_types, list) and heap_types:
-            expected_scope = heap_scope
+            expected_scopes = {heap_scope}
         else:
-            expected_scope = scalar_scope
+            # A provider module can export only functions while those functions return or
+            # consume heap objects declared by another overlay (for example builtins.open
+            # returning io.TextIOWrapper).  Maledictus then correctly reports the typed-heap
+            # proof scope even though this provider's own heap_types list is empty.  Both
+            # values below are verifier-owned, versioned proof scopes; arbitrary scope text
+            # remains rejected.
+            expected_scopes = {scalar_scope, heap_scope}
+        mismatches: list[str] = []
+        expected_stub_hash = sha256(stub_path.read_bytes()).hexdigest()
+        if result.get("stub_path") != stub_relative:
+            mismatches.append(
+                f"stub_path={result.get('stub_path')!r}, expected {stub_relative!r}"
+            )
+        if result.get("sha256") != expected_stub_hash:
+            mismatches.append("stub SHA-256 differs")
+        if result.get("exception_policy") != overlay["exception_policy"]:
+            mismatches.append(
+                f"exception_policy={result.get('exception_policy')!r}, expected "
+                f"{overlay['exception_policy']!r}"
+            )
+        if result.get("scope") not in expected_scopes:
+            mismatches.append(
+                f"scope={result.get('scope')!r}, expected one of {sorted(expected_scopes)!r}"
+            )
+        if not reported_types_are_valid:
+            mismatches.append("nominal_types or heap_types is malformed")
         if (
-            result.get("stub_path") != stub_relative
-            or result.get("sha256") != sha256(stub_path.read_bytes()).hexdigest()
-            or result.get("exception_policy") != overlay["exception_policy"]
-            or result.get("scope") != expected_scope
-            or not reported_types_are_valid
-            or (
-                isinstance(nominal_types, list)
-                and bool(nominal_types)
-                and isinstance(heap_types, list)
-                and bool(heap_types)
-            )
-            or (
-                isinstance(nominal_types, list)
-                and isinstance(heap_types, list)
-                and set(nominal_types) & set(heap_types)
-            )
-            or not isinstance(returned_functions, list)
-            or not all(isinstance(item, str) for item in returned_functions)
-            or returned_functions != sorted(set(returned_functions))
-            or not expected_symbols <= (set(returned_functions) | reported_type_names)
-            or not isinstance(exception_types, list)
+            isinstance(nominal_types, list)
+            and nominal_types
+            and isinstance(heap_types, list)
+            and heap_types
+        ):
+            mismatches.append("both nominal_types and heap_types are nonempty")
+        if (
+            isinstance(nominal_types, list)
+            and isinstance(heap_types, list)
+            and set(nominal_types) & set(heap_types)
+        ):
+            mismatches.append("nominal_types and heap_types overlap")
+        functions_are_valid = (
+            isinstance(returned_functions, list)
+            and all(isinstance(item, str) for item in returned_functions)
+            and returned_functions == sorted(set(returned_functions))
+        )
+        if not functions_are_valid:
+            mismatches.append("functions is not a sorted unique string list")
+        elif isinstance(returned_functions, list) and (missing_symbols := expected_symbols - (
+            set(returned_functions) | reported_type_names
+        )):
+            mismatches.append(f"missing provider symbols {sorted(missing_symbols)!r}")
+        if (
+            not isinstance(exception_types, list)
             or not all(isinstance(item, str) for item in exception_types)
             or len(exception_types) != len(set(exception_types))
-            or not isinstance(declared_exceptions, list)
+        ):
+            mismatches.append("exception_types is not a unique string list")
+        if (
+            not isinstance(declared_exceptions, list)
             or not all(isinstance(item, str) for item in declared_exceptions)
             or len(declared_exceptions) != len(set(declared_exceptions))
-            or (
-                overlay["exception_policy"] == "assume-no-exception"
-                and declared_exceptions != []
-            )
-            or (
-                overlay["exception_policy"] == "declared-by-exsures"
-                and not declared_exceptions
-            )
         ):
+            mismatches.append("declared_exceptions is not a unique string list")
+        elif (
+            overlay["exception_policy"] == "assume-no-exception"
+            and declared_exceptions
+        ):
+            mismatches.append("assume-no-exception provider declared exceptions")
+        elif (
+            overlay["exception_policy"] == "declared-by-exsures"
+            and not declared_exceptions
+        ):
+            mismatches.append("declared-by-exsures provider declared no exceptions")
+        if mismatches:
             raise MaledictusVerificationError(
-                f"Maledictus external contract evidence does not exactly bind {key!r}"
+                f"Maledictus external contract evidence does not exactly bind {key!r}: "
+                + "; ".join(mismatches)
             )
     if returned != set(expected):
         raise MaledictusVerificationError("Maledictus omitted an external contract result")

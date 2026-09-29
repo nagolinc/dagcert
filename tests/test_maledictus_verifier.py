@@ -99,6 +99,42 @@ def test_digest_pinned_maledictus_response_is_exactly_bound(
     assert result["python_typechecker"] == _proved_response(root, digest)["python_typechecker"]
 
 
+def test_semantically_discharged_operation_assertions_retain_exact_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    root, executable, digest = _fixture(tmp_path)
+    response = _proved_response(root, digest)
+    response["files"][0]["fragment"] = (
+        "dagcert-closed-typed-operations+semantic-assertions/v1"
+    )
+    response["obligations"] = [{
+        "id": "work:assert:0",
+        "expectation": "prove",
+        "status": "proved",
+        "source": "app.py",
+        "line": 1,
+        "column": 1,
+        "counterexample": None,
+    }]
+
+    def fake_run(arguments, **_kwargs):
+        return CompletedProcess(arguments, 0, json.dumps(response), "")
+
+    monkeypatch.setattr("dagcert.maledictus_verifier.run", fake_run)
+    result = verify_with_maledictus(
+        root,
+        ["app.py"],
+        {"app.py": ("work",)},
+        source_fingerprint="source-fingerprint",
+        executable=executable,
+        expected_executable_sha256=digest,
+    )
+
+    assert result["files"][0]["fragment"] == (
+        "dagcert-closed-typed-operations+semantic-assertions/v1"
+    )
+
+
 def test_embedded_external_call_keeps_local_work_in_one_proved_operation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
@@ -460,6 +496,21 @@ def test_heap_factory_result_and_nominal_type_evidence_are_exactly_bound(
     assert isinstance(external_contracts, list)
     external_contract = external_contracts[0]
     assert isinstance(external_contract, dict)
+    # A function-only provider can return a heap object whose class is declared by a
+    # different overlay. The typed-heap scope remains exact even though this provider
+    # contributes no provider-local heap type.
+    external_contract["heap_types"] = []
+    cross_overlay_result = verify_with_maledictus(
+        root,
+        ["heap_boundary.py"],
+        {"heap_boundary.py": ("open_cell",)},
+        source_fingerprint="source-fingerprint",
+        executable=executable,
+        expected_executable_sha256=digest,
+        external_boundaries=(boundary,),
+    )
+    assert cross_overlay_result["external_contracts"] == response["external_contracts"]
+
     external_contract["heap_types"] = ["different_module.Cell"]
     with pytest.raises(
         MaledictusVerificationError,
