@@ -22,6 +22,8 @@ Use the focused examples together:
    a synchronous function argument.
 6. `external-verified-leaf` binds any non-Python application stage to a registered verifier and
    leaves platform behavior as an explicit assumption.
+7. `multi-external-worker` keeps several library effects inside the one real worker invocation and
+   composes their typed provider contracts without inventing scheduler nodes.
 
 The capstone must not add an aggregate observer task or a measured pipeline stopwatch. End-to-end
 latency comes from the structured expression, confidence from its typed leaves, and queue behavior

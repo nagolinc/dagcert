@@ -19,7 +19,7 @@ class MaledictusVerificationError(RuntimeError):
 
 _REQUEST_SCHEMA = "maledictus-verification-request/v5"
 _RESPONSE_SCHEMA = "maledictus-verification-result/v8"
-_DAGCERT_FRAGMENT = "dagcert-closed-typed-operations/v3"
+_DAGCERT_FRAGMENT = "dagcert-closed-typed-operations/v4"
 _TYPESCRIPT_FRAGMENT = "strict-typescript-closed-total-functions/v11"
 _JAVASCRIPT_FRAGMENT = "strict-javascript-jsdoc-closed-total-functions/v11"
 _PYTHON_PROOF_SOURCE_FRAGMENTS = {
@@ -33,6 +33,7 @@ _PYTHON_PROOF_SOURCE_FRAGMENTS = {
     "transitive-source-nominal-reference-contracts/v4",
     "transitive-source-heap-contracts/v64",
     "transitive-source-heap-contracts/v65",
+    "transitive-source-heap-contracts/v66",
 }
 _RESPONSE_FIELDS = {
     "schema", "verifier", "version", "status", "proof_obligation",
@@ -480,10 +481,12 @@ def verify_with_maledictus(
                 "checked-external-heap-contracts/v5",
                 "checked-external-heap-contracts/v6",
                 "checked-external-heap-contracts/v7",
+                "checked-external-heap-contracts/v8",
                 "transitive-source+checked-external-scalar-contracts/v33",
                 "transitive-source+checked-external-nominal-reference-contracts/v4",
                 "transitive-source+checked-external-heap-contracts/v64",
                 "transitive-source+checked-external-heap-contracts/v65",
+                "transitive-source+checked-external-heap-contracts/v66",
             }
         fragment_matches = (
             result.get("fragment") in expected_fragment

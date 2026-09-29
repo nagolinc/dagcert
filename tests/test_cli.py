@@ -159,6 +159,7 @@ def test_installed_help_exposes_generic_structured_workflow_examples(capsys):
         "async-channel",
         "browser-fetch",
         "external-verified-leaf",
+        "multi-external-worker",
         "composed-worker-pipeline",
     ):
         assert topic in listing
@@ -178,3 +179,8 @@ def test_installed_help_exposes_generic_structured_workflow_examples(capsys):
     browser_fetch = capsys.readouterr().out
     assert "real JavaScript `fetch` request" in browser_fetch
     assert "JavaScript `boolean` to Python `bool`" in browser_fetch
+    assert main(["help", "multi-external-worker"]) == 0
+    multi_external = capsys.readouterr().out
+    assert "one Dagcert task" in multi_external
+    assert "Queue[PreparedJob]" in multi_external
+    assert "except Full" in multi_external

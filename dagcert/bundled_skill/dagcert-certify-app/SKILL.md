@@ -97,6 +97,11 @@ Heap-returning provider calls stay in that same operation too: use a checked Mal
 contract for the factory and methods, state every `Result()` permission explicitly, and state
 `Ensures(Result() is self)` when a context manager's `__enter__` returns its receiver. Never split
 factory, method, or `with` lifecycle steps into artificial DAG tasks.
+If the worker calls several external adapters, declare every boundary in `external_calls` and prove
+the complete worker with all reachable provider overlays in one Maledictus request. Do not settle
+for isolated adapter proofs. Missing overlay coverage, conflicting contracts for the same provider
+module, or any uncaught declared exception must refuse issuance. See
+`dagcert help multi-external-worker`.
 For shared external containers, retain the real generic payload. A source-owned
 `Queue[Job] | None` state cell with one exact typed setter and a checked `Queue[T]` provider
 contract may be consumed directly by the adapter; never replace `Job` with `object`, packed text,
@@ -116,7 +121,8 @@ must prove executable behavior for the complete declared input type without trus
 
 Use `--proof-backend maledictus` only with both `--proof-backend-executable` and
 `--proof-backend-sha256`, and pass the same selection to lint, issue, and verify. Never switch
-backends after a refusal. Maledictus v3 requires `dagcert-closed-typed-operations/v3`. Its response
+backends after a refusal. Maledictus operation fragment v4 requires
+`dagcert-closed-typed-operations/v4`. Its response
 v8 must
 include the exact strict-mypy package, runtime executable and bundle, configuration, and support
 hashes. Dagcert retains that identity in the certificate and requires an exact match on verification.

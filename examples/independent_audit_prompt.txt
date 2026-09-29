@@ -88,6 +88,11 @@ operation-to-adapter import and direct-call edge, the adapter's literal boundary
 overlay, and exhaustive handling of `ExternalSuccess`, `ExternalRaised`, and
 `ExternalTypeViolation`. Reject an imported-but-unused boundary, a call made by a different
 operation in the same file, or unproved glue between artificial task nodes.
+When one operation calls several external adapters, require one proof request to compose every
+reachable provider overlay and every declared exceptional path. Reject proofs that verify each
+adapter in isolation but never prove the worker containing them together; reject missing overlay
+coverage, conflicting contracts for the same provider module, erased generic payloads, and an
+uncaught typed provider exception such as `queue.Full`.
 
 For application-owned imports, confirm that the certificate's
 `source_verification.proof_source_closure` begins at the task-bound operation, recursively includes

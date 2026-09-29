@@ -39,7 +39,7 @@ def _proved_response(root: Path, executable_digest: str) -> dict[str, object]:
             "symbols": ["work"],
             "scope": "all-source-symbol-bodies",
             "result": "proved",
-            "fragment": "dagcert-closed-typed-operations/v3",
+            "fragment": "dagcert-closed-typed-operations/v4",
         }],
         "source_imports": [],
         "external_contracts": [],
@@ -151,7 +151,7 @@ def test_embedded_external_call_keeps_local_work_in_one_proved_operation(
             "symbols": ["normalize"],
             "scope": "all-source-symbol-bodies",
             "result": "proved",
-            "fragment": "dagcert-closed-typed-operations/v3",
+            "fragment": "dagcert-closed-typed-operations/v4",
         },
         {
             "path": "boundary.py",
@@ -227,6 +227,176 @@ def test_embedded_external_call_keeps_local_work_in_one_proved_operation(
     assert len(result["files"]) == 2
 
 
+def test_one_worker_seals_multiple_external_adapter_overlays(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    root = tmp_path / "multi-adapter-app"
+    root.mkdir()
+    (root / "app.py").write_text("# response template\n", encoding="utf-8")
+    worker = root / "worker.py"
+    worker.write_text(
+        "from first_adapter import first\n"
+        "from second_adapter import second\n\n"
+        "def run(value: int) -> int:\n"
+        "    return second(first(value))\n",
+        encoding="utf-8",
+    )
+    first_adapter = root / "first_adapter.py"
+    first_adapter.write_text(
+        "from first_provider import increment\n\n"
+        "def first(value: int) -> int:\n"
+        "    return increment(value)\n",
+        encoding="utf-8",
+    )
+    second_adapter = root / "second_adapter.py"
+    second_adapter.write_text(
+        "from second_provider import double\n\n"
+        "def second(value: int) -> int:\n"
+        "    return double(value)\n",
+        encoding="utf-8",
+    )
+    first_stub = root / "first_contract.py"
+    first_stub.write_text("# first provider contract\n", encoding="utf-8")
+    second_stub = root / "second_contract.py"
+    second_stub.write_text("# second provider contract\n", encoding="utf-8")
+    executable = tmp_path / "multi-adapter-maledictus.exe"
+    executable.write_bytes(b"multi adapter verifier")
+    digest = sha256(executable.read_bytes()).hexdigest()
+
+    boundaries = (
+        MaledictusExternalBoundary(
+            "provider.first", "first_adapter.py", "first", "first_contract.py",
+            "first_provider", ("increment",), "assume-no-exception",
+        ),
+        MaledictusExternalBoundary(
+            "provider.second", "second_adapter.py", "second", "second_contract.py",
+            "second_provider", ("double",), "assume-no-exception",
+        ),
+    )
+    calls = (
+        MaledictusEmbeddedExternalCall(
+            "worker.py", "run", "provider.first", "first_adapter.py", "first",
+        ),
+        MaledictusEmbeddedExternalCall(
+            "worker.py", "run", "provider.second", "second_adapter.py", "second",
+        ),
+    )
+    response = _proved_response(root, digest)
+    response["files"] = [
+        {
+            "path": "first_adapter.py",
+            "sha256": sha256(first_adapter.read_bytes()).hexdigest(),
+            "symbols": ["first"],
+            "scope": "all-source-symbol-bodies",
+            "result": "proved",
+            "fragment": "checked-external-scalar-contracts/v26",
+        },
+        {
+            "path": "second_adapter.py",
+            "sha256": sha256(second_adapter.read_bytes()).hexdigest(),
+            "symbols": ["second"],
+            "scope": "all-source-symbol-bodies",
+            "result": "proved",
+            "fragment": "checked-external-scalar-contracts/v26",
+        },
+        {
+            "path": "worker.py",
+            "sha256": sha256(worker.read_bytes()).hexdigest(),
+            "symbols": ["run"],
+            "scope": "all-source-symbol-bodies",
+            "result": "proved",
+            "fragment": "dagcert-closed-typed-operations/v4",
+        },
+    ]
+    response["source_imports"] = [
+        {
+            "importer_path": "worker.py",
+            "module": "first_adapter",
+            "provider_path": "first_adapter.py",
+            "provider_sha256": sha256(first_adapter.read_bytes()).hexdigest(),
+            "imported_symbols": ["first"],
+        },
+        {
+            "importer_path": "worker.py",
+            "module": "second_adapter",
+            "provider_path": "second_adapter.py",
+            "provider_sha256": sha256(second_adapter.read_bytes()).hexdigest(),
+            "imported_symbols": ["second"],
+        },
+    ]
+    response["external_contracts"] = [
+        {
+            "adapter_path": adapter,
+            "module": module,
+            "stub_path": stub,
+            "sha256": sha256((root / stub).read_bytes()).hexdigest(),
+            "functions": [function],
+            "nominal_types": [],
+            "heap_types": [],
+            "exception_types": [],
+            "exception_policy": "assume-no-exception",
+            "declared_exceptions": [],
+            "scope": (
+                "provider-import-conformance-and-normal-return-assumed; adapter-symbol-"
+                "binding-call-sites-and-preconditions-verified"
+            ),
+        }
+        for adapter, module, stub, function in (
+            ("first_adapter.py", "first_provider", "first_contract.py", "increment"),
+            ("second_adapter.py", "second_provider", "second_contract.py", "double"),
+        )
+    ]
+    response["embedded_external_calls"] = [
+        {
+            "consumer_path": "worker.py",
+            "consumer_sha256": sha256(worker.read_bytes()).hexdigest(),
+            "operation_symbol": "run",
+            "boundary_id": boundary_id,
+            "adapter_path": adapter,
+            "adapter_sha256": sha256((root / adapter).read_bytes()).hexdigest(),
+            "adapter_symbol": symbol,
+            "scope": "source-import-and-direct-call-bound-to-typed-external-outcome-union",
+        }
+        for boundary_id, adapter, symbol in (
+            ("provider.first", "first_adapter.py", "first"),
+            ("provider.second", "second_adapter.py", "second"),
+        )
+    ]
+
+    def fake_run(arguments, **_kwargs):
+        request = json.loads(Path(arguments[-1]).read_text(encoding="utf-8"))
+        assert request["external_contract_overlays"] == [
+            {
+                "adapter_path": "first_adapter.py",
+                "module": "first_provider",
+                "stub_path": "first_contract.py",
+                "exception_policy": "assume-no-exception",
+            },
+            {
+                "adapter_path": "second_adapter.py",
+                "module": "second_provider",
+                "stub_path": "second_contract.py",
+                "exception_policy": "assume-no-exception",
+            },
+        ]
+        return CompletedProcess(arguments, 0, json.dumps(response), "")
+
+    monkeypatch.setattr("dagcert.maledictus_verifier.run", fake_run)
+    result = verify_with_maledictus(
+        root,
+        ["worker.py"],
+        {"worker.py": ("run",)},
+        source_fingerprint="source-fingerprint",
+        executable=executable,
+        expected_executable_sha256=digest,
+        external_boundaries=boundaries,
+        embedded_external_calls=calls,
+    )
+
+    assert len(result["external_contracts"]) == 2
+    assert len(result["embedded_external_calls"]) == 2
+
+
 def test_heap_factory_result_and_nominal_type_evidence_are_exactly_bound(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
@@ -249,7 +419,7 @@ def test_heap_factory_result_and_nominal_type_evidence_are_exactly_bound(
         "symbols": ["open_cell"],
         "scope": "all-source-symbol-bodies",
         "result": "proved",
-        "fragment": "checked-external-heap-contracts/v6",
+        "fragment": "checked-external-heap-contracts/v8",
     }]
     response["external_contracts"] = [{
         "adapter_path": "heap_boundary.py",
@@ -324,7 +494,7 @@ def test_tampered_embedded_external_call_evidence_refuses(
         "symbols": ["decode"],
         "scope": "all-source-symbol-bodies",
         "result": "proved",
-        "fragment": "dagcert-closed-typed-operations/v3",
+        "fragment": "dagcert-closed-typed-operations/v4",
     })
     response["embedded_external_calls"] = [{
         "consumer_path": "app.py",
@@ -622,7 +792,7 @@ def _source_import_fixture(
             "symbols": ["consume"],
             "scope": "all-source-symbol-bodies",
             "result": "proved",
-            "fragment": "dagcert-closed-typed-operations/v3",
+            "fragment": "dagcert-closed-typed-operations/v4",
         },
         {
             "path": "produced.py",
@@ -630,7 +800,7 @@ def _source_import_fixture(
             "symbols": ["build"],
             "scope": "all-source-symbol-bodies",
             "result": "proved",
-            "fragment": "dagcert-closed-typed-operations/v3",
+            "fragment": "dagcert-closed-typed-operations/v4",
         },
     ]
     response["source_imports"] = [{
@@ -684,7 +854,7 @@ def _package_source_import_fixture(
             "symbols": ["consume"],
             "scope": "all-source-symbol-bodies",
             "result": "proved",
-            "fragment": "dagcert-closed-typed-operations/v3",
+            "fragment": "dagcert-closed-typed-operations/v4",
         },
         {
             "path": "pkg/__init__.py",
@@ -692,7 +862,7 @@ def _package_source_import_fixture(
             "symbols": [],
             "scope": "all-source-symbol-bodies",
             "result": "proved",
-            "fragment": "dagcert-closed-typed-operations/v3",
+            "fragment": "dagcert-closed-typed-operations/v4",
         },
         {
             "path": "pkg/records.py",
@@ -700,7 +870,7 @@ def _package_source_import_fixture(
             "symbols": [],
             "scope": "all-source-symbol-bodies",
             "result": "proved",
-            "fragment": "dagcert-closed-typed-operations/v3",
+            "fragment": "dagcert-closed-typed-operations/v4",
         },
     ]
     response["source_imports"] = [{
@@ -966,7 +1136,7 @@ def _callable_response(
                 "composed-exit-effects"
             ),
             "result": "proved",
-            "fragment": "dagcert-closed-typed-operations/v3",
+            "fragment": "dagcert-closed-typed-operations/v4",
         },
         {
             "path": "provider.py",
@@ -976,7 +1146,7 @@ def _callable_response(
                 "hash-bound-source-callback-signature-body-and-complete-exit-effects"
             ),
             "result": "proved",
-            "fragment": "dagcert-closed-typed-operations/v3",
+            "fragment": "dagcert-closed-typed-operations/v4",
         },
     ]
     response["python_callable_bindings"] = [
@@ -1158,7 +1328,7 @@ def test_external_callable_overlay_and_hash_evidence_are_exactly_bound(
             "composed-exit-effects"
         ),
         "result": "proved",
-        "fragment": "dagcert-closed-typed-operations/v3",
+        "fragment": "dagcert-closed-typed-operations/v4",
     }]
     response["external_contracts"] = [{
         "adapter_path": "consumer.py",

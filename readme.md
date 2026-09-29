@@ -146,7 +146,7 @@ one-input annotation and closed return union, rejects `Any` throughout those bou
 runs strict mypy over the real implementation body itself, and requires an explicitly selected,
 digest-pinned proof backend to prove the complete bound file has no undeclared exceptional exit.
 Nagini/Viper remains the default. The independently distributed Maledictus executable is available
-as an alternate backend for its advertised `dagcert-closed-typed-operations/v3` fragment. The
+as an alternate backend for its advertised `dagcert-closed-typed-operations/v4` fragment. The
 JSON contract cannot invent `input_type` or `output_type` labels.
 Decorator provenance is resolved from imports: a same-named local decorator or a shadowing local
 `dagcert`/`dataclasses` module is rejected. The operation marker preserves the callable's exact
@@ -197,6 +197,13 @@ logic stay inside the surrounding operation. Maledictus composes the factory and
 including a one-item `with factory(...) as value:` lifecycle. The stub must state every transferred
 permission and, when `__enter__` returns the receiver, explicitly state `Ensures(Result() is self)`.
 
+One operation may call several source-owned external adapters. Dagcert sends every declared
+overlay in one proof request, and Maledictus composes every nonconflicting provider contract
+reachable from that worker. A missing overlay, two different contracts for the same provider
+module, an uncaught declared exception, or an undeclared external outcome refuses the proof. This
+does not turn library calls into scheduler tasks; use `dagcert help multi-external-worker` for the
+minimal environment/provider/typed-queue pattern.
+
 The heap proof also preserves source-owned frozen records through closed generic providers and
 shared typed state. A checked `Queue[T]` contract can be specialized as `Queue[PreparedJob]`; a
 source module may expose `Queue[PreparedJob] | None` through one exact typed setter, and a production
@@ -231,8 +238,9 @@ dagcert lint dag_contract.json --requirements english_requirements.json `
 Pass the same three backend options to `issue` and `verify`. Verification recomputes the proof and
 requires the complete v8 result—including its strict typechecker identity, callable-binding, and
 embedded external-call evidence—to match the certificate.
-Maledictus v3 accepts the narrow source-owned Dagcert operation fragment plus explicit source or
-external-contract callable providers. Unsupported provider forms fail closed. On Windows, select
+Maledictus operation fragment v4 accepts the narrow source-owned Dagcert operation surface plus
+explicit source or external-contract callable providers. Unsupported provider forms fail closed.
+On Windows, select
 the packaged executable beside
 its pinned `libz3.dll`, not a bare Cargo output missing its runtime.
 

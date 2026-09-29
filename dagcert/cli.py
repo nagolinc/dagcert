@@ -145,6 +145,10 @@ HELP_TOPICS = {
         "one logical task with typed local work before and after an external call",
         "docs/example-nested-external-call.md",
     ),
+    "multi-external-worker": (
+        "one logical worker invocation using several typed external providers",
+        "docs/example-multi-external-worker.md",
+    ),
     "imported-helpers": (
         "one logical task with recursively proved application-owned helper modules",
         "docs/example-imported-helpers.md",
