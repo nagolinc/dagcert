@@ -4,7 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from dagcert.proof_sources import ProofSourceError, resolve_python_proof_sources
+from dagcert.proof_sources import (
+    ProofSourceError,
+    resolve_python_import_from_edges,
+    resolve_python_proof_sources,
+)
 
 
 def _manifest(root: Path) -> list[str]:
@@ -98,6 +102,43 @@ def test_package_member_import_includes_the_source_module(
         edge.module == "pkg.helper" and edge.provider_path == "pkg/helper.py"
         for edge in closure.edges
     )
+
+
+def test_package_member_import_reports_the_bound_child_module_provider(
+    tmp_path: Path,
+):
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "__init__.py").write_text("VALUE: int = 1\n", encoding="utf-8")
+    (package / "helper.py").write_text("VALUE: int = 2\n", encoding="utf-8")
+    (tmp_path / "worker.py").write_text(
+        "from pkg import helper\n\nVALUE: int = helper.VALUE\n", encoding="utf-8"
+    )
+
+    edges = resolve_python_import_from_edges(
+        tmp_path, ["pkg/__init__.py", "pkg/helper.py", "worker.py"]
+    )
+
+    assert [
+        (edge.importer_path, edge.module, edge.provider_path, edge.imported_symbols)
+        for edge in edges
+    ] == [("worker.py", "pkg.helper", "pkg/helper.py", ())]
+
+
+def test_package_value_import_still_reports_the_initializer_symbol(tmp_path: Path):
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "__init__.py").write_text("VALUE: int = 1\n", encoding="utf-8")
+    (tmp_path / "worker.py").write_text("from pkg import VALUE\n", encoding="utf-8")
+
+    edges = resolve_python_import_from_edges(
+        tmp_path, ["pkg/__init__.py", "worker.py"]
+    )
+
+    assert [
+        (edge.importer_path, edge.module, edge.provider_path, edge.imported_symbols)
+        for edge in edges
+    ] == [("worker.py", "pkg", "pkg/__init__.py", ("VALUE",))]
 
 
 def test_ambiguous_application_module_refuses(tmp_path: Path):

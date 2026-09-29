@@ -97,7 +97,12 @@ Heap-returning provider calls stay in that same operation too: use a checked Mal
 contract for the factory and methods, state every `Result()` permission explicitly, and state
 `Ensures(Result() is self)` when a context manager's `__enter__` returns its receiver. Never split
 factory, method, or `with` lifecycle steps into artificial DAG tasks.
-See `dagcert help nested-external-call`.
+For shared external containers, retain the real generic payload. A source-owned
+`Queue[Job] | None` state cell with one exact typed setter and a checked `Queue[T]` provider
+contract may be consumed directly by the adapter; never replace `Job` with `object`, packed text,
+or an observer task. Treat every state read as a fresh optional snapshot and model its `None`
+outcome. Initialization, persistence, capacity, and liveness remain separate proof obligations.
+See `dagcert help nested-external-call` and `dagcert help async-channel`.
 
 Write the production operation boundary in its strongly typed form before modeling it. For Python,
 use an explicit input class, explicit named outcome classes, an inline closed return union, and

@@ -176,6 +176,91 @@ def resolve_python_proof_sources(
     )
 
 
+def resolve_python_import_from_edges(
+    source_root: str | Path,
+    files: Iterable[str],
+) -> tuple[ProofSourceEdge, ...]:
+    """Resolve the exact source providers named by Python ``from`` imports.
+
+    Python permits ``from package import child`` to bind the source module
+    ``package.child`` rather than a value declared by ``package.__init__``.  The
+    proof-source closure already resolves both candidates so it can hash-seal
+    every file Python may execute.  This projection selects the provider that
+    supplies each imported binding for verifier result comparison, while leaving
+    package-initializer execution edges in the closure itself.
+
+    Plain ``import module`` statements are intentionally not projected here.
+    Backends that support their attribute semantics validate them separately.
+    """
+
+    root = Path(source_root).resolve()
+    normalized_files = tuple(sorted({Path(path).as_posix() for path in files}))
+    closure = resolve_python_proof_sources(root, normalized_files, normalized_files)
+    source_edges = {
+        (edge.importer_path, edge.module): edge
+        for edge in closure.edges
+        if edge.kind == "source-import"
+    }
+    path_modules = {
+        path: module
+        for path in normalized_files
+        if (module := _module_name(path)) is not None
+    }
+    selected: dict[tuple[str, str, str], set[str]] = {}
+
+    for importer_path in normalized_files:
+        source_path = root / importer_path
+        try:
+            tree = ast.parse(source_path.read_bytes(), filename=importer_path)
+        except (OSError, SyntaxError) as exc:
+            raise ProofSourceError(
+                f"cannot inspect proof source imports for {importer_path!r}: {exc}"
+            ) from exc
+        importer_module = path_modules.get(importer_path)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            module = _absolute_import_module(
+                importer_path, importer_module, node.level, node.module
+            )
+            if module is None:
+                continue
+            base_edge = source_edges.get((importer_path, module))
+            for alias in node.names:
+                if alias.name == "*":
+                    if base_edge is not None:
+                        raise ProofSourceError(
+                            f"proved source import {importer_path!r} uses unsupported "
+                            "wildcard import"
+                        )
+                    continue
+                child_edge = source_edges.get(
+                    (importer_path, f"{module}.{alias.name}")
+                )
+                provider = child_edge or base_edge
+                if provider is None:
+                    continue
+                key = (
+                    provider.importer_path,
+                    provider.module,
+                    provider.provider_path,
+                )
+                symbols = selected.setdefault(key, set())
+                if child_edge is None:
+                    symbols.add(alias.name)
+
+    return tuple(
+        ProofSourceEdge(
+            importer_path,
+            module,
+            provider_path,
+            tuple(sorted(symbols)),
+            "source-import",
+        )
+        for (importer_path, module, provider_path), symbols in sorted(selected.items())
+    )
+
+
 def _module_name(path: str) -> str | None:
     parts = list(Path(path).with_suffix("").parts)
     if parts and parts[-1] == "__init__":

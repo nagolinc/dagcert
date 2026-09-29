@@ -43,6 +43,57 @@ class QueueTakeResponse:
     status: str
 ```
 
+When the production enqueue adapter reads a shared external queue, keep that real shape in the
+source proof. Do not erase the payload to `object`, serialize the records into strings, or invent a
+separate Dagcert task for the `put_nowait` call. Maledictus accepts source-owned records and one
+closed typed state cell:
+
+```python
+# records.py
+@dataclass(frozen=True)
+class QueuePutRequest:
+    job: PreparedJob
+
+@dataclass(frozen=True)
+class QueuePutResponse:
+    accepted: bool
+
+# queue_state.py
+from queue import Queue
+from records import PreparedJob
+
+work_queue: Queue[PreparedJob] | None = None
+
+def configure_work_queue(value: Queue[PreparedJob]) -> None:
+    global work_queue
+    work_queue = value
+```
+
+The adapter remains one logical production boundary and handles the genuinely possible
+unconfigured state:
+
+```python
+from dagcert.runtime import external_boundary
+from app_state import queue_state
+from records import QueuePutRequest, QueuePutResponse
+
+@external_boundary("stdlib.queue.put")
+def put_job(request: QueuePutRequest) -> QueuePutResponse:
+    destination = queue_state.work_queue
+    if destination is None:
+        return QueuePutResponse(False)
+    destination.put_nowait(request.job)
+    return QueuePutResponse(True)
+```
+
+Bind `queue` to a checked generic external contract whose `put_nowait` parameter is `T`.
+Maledictus monomorphizes it as `Queue[PreparedJob]`, hash-seals `records.py`, `queue_state.py`, and
+their exact import edges, and rejects another payload type. The state proof is intentionally only a
+fresh atomic `Queue[PreparedJob] | None` snapshot; initialization order, persistence, queue history,
+capacity, and liveness need their own Dagcert claims. Use `assume-no-exception` only for a provider
+configuration that really cannot raise on this call. Do not use it to hide a possible full-queue
+outcome.
+
 Join the independently valid producer and consumer subgraphs with the channel:
 
 ```json

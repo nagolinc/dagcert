@@ -197,6 +197,15 @@ logic stay inside the surrounding operation. Maledictus composes the factory and
 including a one-item `with factory(...) as value:` lifecycle. The stub must state every transferred
 permission and, when `__enter__` returns the receiver, explicitly state `Ensures(Result() is self)`.
 
+The heap proof also preserves source-owned frozen records through closed generic providers and
+shared typed state. A checked `Queue[T]` contract can be specialized as `Queue[PreparedJob]`; a
+source module may expose `Queue[PreparedJob] | None` through one exact typed setter, and a production
+adapter may read it and call `put_nowait` without packing the job, weakening it to `object`, or
+splitting the library call into a fake task. Package-member imports bind the actual child module and
+every participating source file is hash-sealed. The proof treats each state read as a fresh atomic
+snapshot and grants no initialization, persistence, capacity, or liveness fact. See
+`dagcert help async-channel`.
+
 The v14 certificate seals strict-mypy output, the pinned verifier identity and proof scope, and
 a manifest hash of the source-verification kernel and typing stubs. For Maledictus, response v8
 also requires and retains the exact strict-mypy package, runtime executable, complete runtime

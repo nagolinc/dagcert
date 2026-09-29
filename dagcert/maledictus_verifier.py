@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 from dataclasses import dataclass
 from hashlib import sha256
 import json
@@ -10,6 +9,8 @@ from pathlib import Path
 from subprocess import TimeoutExpired, run
 from tempfile import TemporaryDirectory
 from typing import Iterable, Literal, Mapping
+
+from .proof_sources import ProofSourceError, resolve_python_import_from_edges
 
 
 class MaledictusVerificationError(RuntimeError):
@@ -31,6 +32,7 @@ _PYTHON_PROOF_SOURCE_FRAGMENTS = {
     "transitive-source-scalar-contracts/v33",
     "transitive-source-nominal-reference-contracts/v4",
     "transitive-source-heap-contracts/v64",
+    "transitive-source-heap-contracts/v65",
 }
 _RESPONSE_FIELDS = {
     "schema", "verifier", "version", "status", "proof_obligation",
@@ -477,9 +479,11 @@ def verify_with_maledictus(
                 "checked-external-nominal-reference-contracts/v4",
                 "checked-external-heap-contracts/v5",
                 "checked-external-heap-contracts/v6",
+                "checked-external-heap-contracts/v7",
                 "transitive-source+checked-external-scalar-contracts/v33",
                 "transitive-source+checked-external-nominal-reference-contracts/v4",
                 "transitive-source+checked-external-heap-contracts/v64",
+                "transitive-source+checked-external-heap-contracts/v65",
             }
         fragment_matches = (
             result.get("fragment") in expected_fragment
@@ -550,49 +554,21 @@ def _validate_source_import_results(
         for path in normalized_files
         if requested_languages.get(path, "python") == "python"
     ]
-    module_to_path: dict[str, str] = {}
-    for path in python_paths:
-        module = _python_module_name(path)
-        if module in module_to_path:
-            raise MaledictusVerificationError(
-                f"bound Python files have duplicate module name {module!r}"
-            )
-        module_to_path[module] = path
-
-    imports: dict[tuple[str, str, str], set[str]] = {}
-    for importer_path in python_paths:
-        source_path = root / importer_path
-        try:
-            tree = ast.parse(source_path.read_bytes(), filename=importer_path)
-        except (OSError, SyntaxError) as exc:
-            raise MaledictusVerificationError(
-                f"cannot reconstruct source imports for {importer_path!r}: {exc}"
-            ) from exc
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.ImportFrom) or node.level != 0:
-                continue
-            imported_module = node.module
-            if imported_module is None or imported_module not in module_to_path:
-                continue
-            provider_path = module_to_path[imported_module]
-            key = (importer_path, imported_module, provider_path)
-            imported = imports.setdefault(key, set())
-            for alias in node.names:
-                if alias.name == "*":
-                    raise MaledictusVerificationError(
-                        f"proved source import {importer_path!r} uses unsupported wildcard import"
-                    )
-                imported.add(alias.name)
-
+    try:
+        import_edges = resolve_python_import_from_edges(root, python_paths)
+    except ProofSourceError as exc:
+        raise MaledictusVerificationError(
+            f"cannot reconstruct source imports: {exc}"
+        ) from exc
     expected_rows = [
         {
-            "importer_path": importer_path,
-            "module": module,
-            "provider_path": provider_path,
-            "provider_sha256": expected_hashes[provider_path],
-            "imported_symbols": sorted(symbols),
+            "importer_path": edge.importer_path,
+            "module": edge.module,
+            "provider_path": edge.provider_path,
+            "provider_sha256": expected_hashes[edge.provider_path],
+            "imported_symbols": list(edge.imported_symbols),
         }
-        for (importer_path, module, provider_path), symbols in sorted(imports.items())
+        for edge in import_edges
     ]
     required_fields = {
         "importer_path",
@@ -632,17 +608,6 @@ def _validate_source_import_results(
         raise MaledictusVerificationError(
             "Maledictus source import results do not exactly match the bound source graph"
         )
-
-
-def _python_module_name(path: str) -> str:
-    parts = list(Path(path).with_suffix("").parts)
-    if parts and parts[-1] == "__init__":
-        parts.pop()
-    if not parts or any(not part.isidentifier() for part in parts):
-        raise MaledictusVerificationError(
-            f"bound Python source path has no importable module name: {path!r}"
-        )
-    return ".".join(parts)
 
 
 def _validate_verified_interfaces(

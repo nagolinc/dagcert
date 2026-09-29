@@ -643,6 +643,76 @@ def _source_import_fixture(
     return root, executable, digest, response
 
 
+def _package_source_import_fixture(
+    tmp_path: Path,
+) -> tuple[Path, Path, str, dict[str, object]]:
+    root = tmp_path / "package-member-app"
+    package = root / "pkg"
+    package.mkdir(parents=True)
+    initializer = package / "__init__.py"
+    initializer.write_text('"""Application package."""\n', encoding="utf-8")
+    provider = package / "records.py"
+    provider.write_text(
+        "from dataclasses import dataclass\n\n"
+        "@dataclass(frozen=True)\n"
+        "class Request:\n"
+        "    value: str\n",
+        encoding="utf-8",
+    )
+    consumer = root / "consume.py"
+    consumer.write_text(
+        "from dataclasses import dataclass\n"
+        "from dagcert.runtime import operation\n"
+        "from pkg import records\n\n"
+        "@dataclass(frozen=True)\n"
+        "class Completed:\n"
+        "    value: str\n\n"
+        "@operation\n"
+        "def consume(request: records.Request) -> Completed:\n"
+        "    return Completed(request.value)\n",
+        encoding="utf-8",
+    )
+    (root / "app.py").write_text("# response template\n", encoding="utf-8")
+    executable = tmp_path / "package-member-maledictus.exe"
+    executable.write_bytes(b"package member verifier")
+    digest = sha256(executable.read_bytes()).hexdigest()
+    response = _proved_response(root, digest)
+    response["files"] = [
+        {
+            "path": "consume.py",
+            "sha256": sha256(consumer.read_bytes()).hexdigest(),
+            "symbols": ["consume"],
+            "scope": "all-source-symbol-bodies",
+            "result": "proved",
+            "fragment": "dagcert-closed-typed-operations/v3",
+        },
+        {
+            "path": "pkg/__init__.py",
+            "sha256": sha256(initializer.read_bytes()).hexdigest(),
+            "symbols": [],
+            "scope": "all-source-symbol-bodies",
+            "result": "proved",
+            "fragment": "dagcert-closed-typed-operations/v3",
+        },
+        {
+            "path": "pkg/records.py",
+            "sha256": sha256(provider.read_bytes()).hexdigest(),
+            "symbols": [],
+            "scope": "all-source-symbol-bodies",
+            "result": "proved",
+            "fragment": "dagcert-closed-typed-operations/v3",
+        },
+    ]
+    response["source_imports"] = [{
+        "importer_path": "consume.py",
+        "module": "pkg.records",
+        "provider_path": "pkg/records.py",
+        "provider_sha256": sha256(provider.read_bytes()).hexdigest(),
+        "imported_symbols": [],
+    }]
+    return root, executable, digest, response
+
+
 def test_maledictus_source_import_edge_is_recomputed_from_bound_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
@@ -664,6 +734,62 @@ def test_maledictus_source_import_edge_is_recomputed_from_bound_files(
     )
 
     assert result["source_imports"] == response["source_imports"]
+
+
+def test_maledictus_accepts_exact_package_submodule_import_edge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    root, executable, digest, response = _package_source_import_fixture(tmp_path)
+    monkeypatch.setattr(
+        "dagcert.maledictus_verifier.run",
+        lambda arguments, **_kwargs: CompletedProcess(
+            arguments, 0, json.dumps(response), "",
+        ),
+    )
+
+    result = verify_with_maledictus(
+        root,
+        ["consume.py"],
+        {"consume.py": ("consume",)},
+        proof_only_files=["pkg/__init__.py", "pkg/records.py"],
+        source_fingerprint="source-fingerprint",
+        executable=executable,
+        expected_executable_sha256=digest,
+    )
+
+    assert result["source_imports"] == response["source_imports"]
+
+
+def test_maledictus_rejects_package_initializer_substitution_for_child_module(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    root, executable, digest, response = _package_source_import_fixture(tmp_path)
+    edges = response["source_imports"]
+    assert isinstance(edges, list)
+    assert isinstance(edges[0], dict)
+    edges[0].update(
+        module="pkg",
+        provider_path="pkg/__init__.py",
+        provider_sha256=sha256((root / "pkg" / "__init__.py").read_bytes()).hexdigest(),
+        imported_symbols=["records"],
+    )
+    monkeypatch.setattr(
+        "dagcert.maledictus_verifier.run",
+        lambda arguments, **_kwargs: CompletedProcess(
+            arguments, 0, json.dumps(response), "",
+        ),
+    )
+
+    with pytest.raises(MaledictusVerificationError, match="bound source graph"):
+        verify_with_maledictus(
+            root,
+            ["consume.py"],
+            {"consume.py": ("consume",)},
+            proof_only_files=["pkg/__init__.py", "pkg/records.py"],
+            source_fingerprint="source-fingerprint",
+            executable=executable,
+            expected_executable_sha256=digest,
+        )
 
 
 def test_maledictus_proof_only_import_is_hash_bound_without_becoming_a_root(
