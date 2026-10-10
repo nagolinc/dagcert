@@ -226,5 +226,7 @@ def test_native_index_requires_the_real_declared_argument_type(
     assert response["status"] == "refused", response
     assert any(item["code"] in {
         "frontend.python.typecheck.index", "frontend.python.typecheck.arg-type",
+        # Full pinned typeshed exposes Sequence's integer/slice overloads.
+        "frontend.python.typecheck.call-overload",
     } for item in response["diagnostics"]), response
     assert response["obligations"] == [], response
