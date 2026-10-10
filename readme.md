@@ -309,6 +309,13 @@ requires the complete v8 result—including its strict typechecker identity, cal
 embedded external-call evidence—to match the certificate.
 Maledictus operation fragment v4 accepts the narrow source-owned Dagcert operation surface plus
 explicit source or external-contract callable providers. Unsupported provider forms fail closed.
+Source relations require the additional
+`dagcert-closed-typed-operations+semantic-postconditions/v1` fragment: an ordinary typing/exception
+proof or a generic heap proof is not a substitute. The sealed proof view adds outcome-guarded
+native postconditions to the actual function, so `finally` and context-manager cleanup run before
+the final returned value is checked. Read access to closed frozen input records does not require
+an application `Requires` annotation and does not grant ownership of referenced mutable state.
+An older backend lacking this joint fragment explicitly refuses relational verification.
 On Windows, select
 the packaged executable beside
 its pinned `libz3.dll`, not a bare Cargo output missing its runtime.

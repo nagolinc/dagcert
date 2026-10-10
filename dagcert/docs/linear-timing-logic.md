@@ -86,15 +86,32 @@ exactly one only when completed and none when incomplete. Thus the type union
 cannot manufacture termination. Multiple names for the same source field are
 equated; changing a variable's name cannot create contradictory source premises.
 
-The initial source adapter translates exact top-level Python `int` and `bool`
-fields and their linear integer/Boolean postconditions. The original predicate
+The source adapter translates exact Python `int` and `bool` fields, including
+finite nested projections through source-owned frozen field-only dataclasses,
+and their linear integer/Boolean postconditions. For example,
+`result.turn_id == input.narration.turn.id` follows the actual source annotations
+and imported record identities; it does not collapse the records into strings or
+replace them with an application-supplied schema. The original predicate
 is submitted to the real source verifier, and its SMT version is constructed
 mechanically from that same predicate. Callers cannot supply an unrelated
-arithmetic formula and attach a source-proof label. Nested object projections,
-Python division and numeric truthiness are explicitly outside this adapter;
+arithmetic formula and attach a source-proof label. The sealed projection schema
+is a finite nominal graph: recursive record references are back edges, and a
+finite requested path has no arbitrary depth cap. Extraction terminates on
+repeated record identities and refuses unresolved cyclic import aliases.
+Wildcard imports and conditionally rebound record, decorator, or primitive names
+do not establish projection provenance. An extracted unresolved root remains
+explicitly unresolved; it cannot fall back to an older flat field schema.
+
+Each traversed record must be an actual frozen dataclass. Mutable records,
+optional/union/container hops, external object fields, Python division and
+numeric truthiness are explicitly outside this adapter;
 they are not restrictions on the mathematical LRA language. Python integers are
 relaxed to reals only in the conservative direction: proving the implication
-for all reals also covers their integer values.
+for all reals also covers their integer values. A `float` is not silently treated
+as an exact real, and a Boolean is not silently treated as an integer. Extracting
+a path proves neither that it is non-null under an optional annotation nor that
+the program satisfies the relation: the original whole-operation semantic proof
+is still mandatory, including entry snapshots and final-exit behavior.
 
 Similarly, a missing completion event has a presence flag. Its timestamp payload
 has no meaning when absent. Assigning zero, a large timeout value or a finite

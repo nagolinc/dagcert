@@ -20,6 +20,7 @@ import z3  # type: ignore[import-untyped]
 from .contract import Contract, Task
 from .linear_logic import LinearLogicError, validate_formula
 from .relations import RelationError, SourceRelation, parse_relation_predicate
+from .source_types import SourceSignature
 
 
 class TheoremSourceError(ValueError):
@@ -68,6 +69,46 @@ def _task(contract: Contract, name: str, outcome: str) -> Task:
     return task
 
 
+def _projection_type(signature: SourceSignature, outcome: str, parts: list[str]) -> str | None:
+    """Follow this finite path through nominal source records, including cycles."""
+    if not signature.projection_roots and not signature.projection_records:
+        # Old signatures remain usable for their original top-level surface.
+        if len(parts) != 2:
+            raise TheoremSourceError("nested projection requires a compiler-extracted source record graph")
+        fields = dict(signature.input_fields) if parts[0] == "input" else dict(
+            dict(signature.outcome_fields).get(outcome, ())
+        )
+        return fields.get(parts[1])
+    roots = dict(signature.projection_roots)
+    records = {record.identity: record for record in signature.projection_records}
+    if len(roots) != len(signature.projection_roots) or len(records) != len(signature.projection_records):
+        raise TheoremSourceError("source projection graph contains duplicate identities")
+    key = roots.get("input" if parts[0] == "input" else f"result.{outcome}")
+    for index, field_name in enumerate(parts[1:], start=1):
+        record = records.get(key or "")
+        if record is None:
+            raise TheoremSourceError(f"{'.'.join(parts[:index])}: no source-owned record projection")
+        if len(parts) > 2 and not record.frozen:
+            raise TheoremSourceError(
+                f"{'.'.join(parts[:index])}: nested projection requires a source-owned frozen field-only record"
+            )
+        fields_by_name = {field.name: field for field in record.fields}
+        if len(fields_by_name) != len(record.fields):
+            raise TheoremSourceError(f"source record {record.identity} has duplicate fields")
+        field = fields_by_name.get(field_name)
+        if field is None:
+            raise TheoremSourceError(f"{'.'.join(parts[:index + 1])}: no compiler-extracted source field")
+        if index == len(parts) - 1:
+            return field.scalar
+        if field.record is None:
+            raise TheoremSourceError(
+                f"{'.'.join(parts[:index + 1])}: annotation {field.annotation!r} is not a "
+                "resolved direct source-record edge; optional, union, collection, and external hops are not assumed"
+            )
+        key = field.record
+    return None
+
+
 def _bindings(variables: Mapping[str, Any], contract: Contract) -> tuple[_Binding, ...]:
     result: list[_Binding] = []
     for name, descriptor in variables.items():
@@ -96,16 +137,12 @@ def _bindings(variables: Mapping[str, Any], contract: Contract) -> tuple[_Bindin
             expected = "bool"
         else:
             parts = field.split(".")
-            if (len(parts) != 2 or parts[0] not in ("input", "result")
-                or not parts[1].isidentifier() or parts[1].startswith("__")):
+            if (len(parts) < 2 or parts[0] not in ("input", "result")
+                or any(not part.isidentifier() or part.startswith("__") for part in parts[1:])):
                 raise TheoremSourceError(
-                    f"{name}: source binding requires an exact top-level input.x/result.x projection; "
-                    "nested projections are outside this source bridge, not outside LRA"
+                    f"{name}: source binding requires an exact input/result field projection"
                 )
-            fields = dict(signature.input_fields) if parts[0] == "input" else dict(
-                dict(signature.outcome_fields).get(outcome, ())
-            )
-            source_type = fields.get(parts[1])
+            source_type = _projection_type(signature, outcome, parts)
             if source_type not in ("int", "bool"):
                 raise TheoremSourceError(
                     f"{name}: {field} must be a compiler-extracted int or bool field, got {source_type!r}; "
@@ -208,9 +245,14 @@ class _Predicate:
                 return _Term(text, "real", node.value)
             raise TheoremSourceError("source predicate constants must be bool or exact int; floats/strings/None are outside this bridge")
         if isinstance(node, ast.Attribute):
-            if not isinstance(node.value, ast.Name) or node.value.id not in ("input", "result"):
-                raise TheoremSourceError("source predicate requires top-level bound input.x/result.x projections")
-            field = f"{node.value.id}.{node.attr}"
+            path: list[str] = []
+            root: ast.expr = node
+            while isinstance(root, ast.Attribute):
+                path.append(root.attr)
+                root = root.value
+            if not isinstance(root, ast.Name) or root.id not in ("input", "result"):
+                raise TheoremSourceError("source predicate requires bound input/result field projections")
+            field = ".".join((root.id, *reversed(path)))
             term = self.fields.get(field)
             if term is None:
                 raise TheoremSourceError(f"source predicate field {field!r} has no variable binding for this invocation/outcome")

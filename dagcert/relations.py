@@ -1,9 +1,10 @@
 """Source-bound relational obligations discharged by the existing proof backend.
 
-This module constructs proof obligations; it does not prove Python expressions.  A
-deterministic, temporary proof view adds outcome-conditioned assertions at every
-return of the real operation.  Mypy and the selected semantic verifier check that
-view, and the result binds both the original source and the transformation.
+This module constructs proof obligations; it does not prove Python expressions.
+A deterministic temporary proof view adds outcome-conditioned postconditions (or
+return assertions where supported) to the real operation. Mypy and the selected
+semantic verifier check that view; native postconditions preserve cleanup before
+the final return. The result binds the original source and the transformation.
 """
 
 from __future__ import annotations
@@ -36,7 +37,7 @@ class SourceRelation:
     predicate: str
 
 
-_TRANSFORMATION = "compiler-bound-outcome-relations/v3"
+_TRANSFORMATION = "compiler-bound-outcome-relations/v4"
 _NAGINI_TYPE_STUB = """from typing import TypeVar
 
 T = TypeVar("T")
@@ -534,13 +535,14 @@ def verify_source_relations(
     exits: dict[str, int] = {}
     transformations: dict[str, str] = {}
     for (relative_file, symbol), items in sorted(groups.items()):
-        # Backend postconditions run after cleanup. Nagini supports them natively;
-        # the alternate backend continues to use semantically proved assertions.
+        # Native postconditions run after cleanup, preserving Python's original
+        # control flow, including replaced returns and exception-suppressing exits.
         owner_signature = next(
             signature for signature in signatures
             if signature.path == relative_file and signature.symbol == symbol
         )
-        use_postconditions = (
+        maledictus_postconditions = proof_backend is not None and proof_backend.name == "maledictus"
+        use_postconditions = maledictus_postconditions or (
             (proof_backend is None or proof_backend.name == "nagini")
             and len(owner_signature.outcome_types) == 1
         )
@@ -553,9 +555,11 @@ def verify_source_relations(
         proof_content[relative_file] = generated.encode("utf-8")
         exits[f"{relative_file}:{symbol}"] = count
         transformations[f"{relative_file}:{symbol}"] = (
-            "nagini-native-postconditions" if use_postconditions else "all-return-assertions"
+            "maledictus-native-postconditions" if maledictus_postconditions
+            else "nagini-native-postconditions" if use_postconditions
+            else "all-return-assertions"
         )
-    if proof_backend is None or proof_backend.name == "nagini":
+    if any(value.endswith("native-postconditions") for value in transformations.values()):
         # Type signatures only: the real contract semantics come from the pinned
         # verifier's own nagini_contracts implementation, never from these stubs.
         # Do not install Nagini's Java tooling or conflicting mypy on the host.
@@ -598,6 +602,11 @@ def verify_source_relations(
                     contract, view, source_manifest_paths=proof_content,
                 ),
                 proof_backend=proof_backend,
+                required_postcondition_files=(
+                    {relative for relative, _ in groups}
+                    if proof_backend is not None and proof_backend.name == "maledictus"
+                    else ()
+                ),
             )
     except SourceTypeError as exc:
         raise RelationError(f"source relational proof refused: {exc}") from exc

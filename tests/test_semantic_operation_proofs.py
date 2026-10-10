@@ -66,13 +66,14 @@ def joint_proof(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr("dagcert.maledictus_verifier.run", backend)
 
-    def verify(*, proof_only=False):
+    def verify(*, proof_only=False, postconditions=False):
         return verify_with_maledictus(
             root, [] if proof_only else ["worker.py"],
             {} if proof_only else {"worker.py": ("work",)},
             source_fingerprint="joint-proof-source", executable=executable,
             expected_executable_sha256=digest,
             proof_only_files=["worker.py"] if proof_only else [],
+            required_postcondition_files=["worker.py"] if postconditions else [],
         )
 
     return response, file_result, verify
@@ -114,3 +115,22 @@ def test_joint_file_cannot_override_overall_refutation(joint_proof):
     response["status"] = "refuted"
     with pytest.raises(MaledictusVerificationError, match="did not prove every bound operation"):
         verify()
+
+
+def test_native_postconditions_require_the_exact_joint_proof_fragment(joint_proof):
+    _, file_result, verify = joint_proof
+    file_result["fragment"] = "dagcert-closed-typed-operations+semantic-postconditions/v1"
+    assert verify(postconditions=True)["files"][0]["fragment"] == file_result["fragment"]
+
+
+@pytest.mark.parametrize("fragment", [
+    "dagcert-closed-typed-operations/v4",
+    "dagcert-closed-typed-operations+semantic-assertions/v1",
+    "heap-method-contracts/v76",
+    "dagcert-closed-typed-operations+semantic-postconditions/v999",
+])
+def test_native_postcondition_view_cannot_accept_a_weaker_proof(joint_proof, fragment):
+    _, file_result, verify = joint_proof
+    file_result["fragment"] = fragment
+    with pytest.raises(MaledictusVerificationError, match="does not exactly bind"):
+        verify(postconditions=True)

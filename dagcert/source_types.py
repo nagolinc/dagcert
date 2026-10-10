@@ -122,6 +122,25 @@ def type_enforcement_descriptor() -> dict[str, object]:
 
 
 @dataclass(frozen=True, slots=True)
+class SourceProjectionField:
+    """One real annotation, optionally linked to a source record or scalar."""
+
+    name: str
+    annotation: str
+    record: str | None = None
+    scalar: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SourceProjectionRecord:
+    identity: str
+    path: str
+    symbol: str
+    frozen: bool
+    fields: tuple[SourceProjectionField, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class SourceSignature:
     language: str
     path: str
@@ -133,6 +152,8 @@ class SourceSignature:
     outcome_fields: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = ()
     execution: str = "synchronous"
     record_parameters: RecordParameters = ()
+    projection_roots: tuple[tuple[str, str | None], ...] = ()
+    projection_records: tuple[SourceProjectionRecord, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +182,7 @@ def check_python_sources(
     callable_bindings: Iterable[MaledictusCallableBinding] = (),
     embedded_external_calls: Iterable[MaledictusEmbeddedExternalCall] = (),
     proof_backend: SourceProofBackend | None = None,
+    required_postcondition_files: Iterable[str] = (),
 ) -> dict[str, object]:
     """Run strict mypy and external exception verification over real implementation files.
 
@@ -178,6 +200,12 @@ def check_python_sources(
     concrete_embedded_calls = tuple(embedded_external_calls)
     selected_backend = proof_backend or SourceProofBackend()
     selected_backend.validate()
+    required_postcondition_files = tuple(Path(path).as_posix() for path in required_postcondition_files)
+    if required_postcondition_files:
+        if not prove_exceptions or selected_backend.name != "maledictus":
+            raise SourceTypeError("joint native postcondition scope requires an enabled Maledictus operation proof")
+        if not set(required_postcondition_files) <= {item.path for item in proof_bound_signatures}:
+            raise SourceTypeError("joint native postcondition scope must name bound operation source files")
     root = Path(source_root).resolve()
     manifest_paths = (
         None if source_manifest_paths is None
@@ -364,6 +392,7 @@ def check_python_sources(
                     source_fingerprint=source_fingerprint,
                     executable=selected_backend.executable,
                     expected_executable_sha256=selected_backend.executable_sha256,
+                    required_postcondition_files=required_postcondition_files,
                     proof_only_files=(
                         proof_source_closure.proof_only_files
                         if proof_source_closure is not None else ()
@@ -599,9 +628,16 @@ def read_python_signature(
             strict=True,
         )
     )
+    projection_roots, projection_records = _source_projection_graph(
+        root, path, tree,
+        (("input", parameter.annotation), *(
+            (f"result.{_annotation(item, 'outcome')}", item) for item in outcome_nodes
+        )),
+    )
     return SourceSignature(
         "python", Path(relative_path).as_posix(), symbol, input_type,
         tuple(dict.fromkeys(outcomes)), function.lineno, input_fields, outcome_fields,
+        projection_roots=projection_roots, projection_records=projection_records,
     )
 
 
@@ -1046,6 +1082,241 @@ def _external_provider_call_names(
                 if returned_class is not None:
                     calls.add(f"{returned_class}.{descendant.func.attr}")
     return calls
+
+
+def _source_projection_graph(
+    root: Path,
+    implementation: Path,
+    tree: ast.Module,
+    roots: tuple[tuple[str, ast.expr], ...],
+) -> tuple[tuple[tuple[str, str | None], ...], tuple[SourceProjectionRecord, ...]]:
+    """Extract a finite nominal graph, not an infinitely expanded field tree.
+
+    This records only source syntax and identity; strict mypy and the selected
+    semantic backend still establish the annotations and the actual predicate.
+    Unsupported/opaque fields remain in the schema without a traversable edge.
+    A recursive record creates an ordinary back edge, not a depth cutoff.
+    """
+    modules: dict[Path, ast.Module] = {implementation: tree}
+    uncertain_bindings: dict[Path, tuple[bool, set[str]]] = {}
+
+    class ConditionalBindings(ast.NodeVisitor):
+        """Collect lexical module bindings, never interpret conditional execution."""
+
+        def __init__(self) -> None:
+            self.names: set[str] = set()
+            self.wildcard = False
+
+        def visit_Name(self, node: ast.Name) -> None:
+            if isinstance(node.ctx, (ast.Store, ast.Del)):
+                self.names.add(node.id)
+
+        def visit_alias(self, node: ast.alias) -> None:
+            if node.name == "*":
+                self.wildcard = True
+            else:
+                self.names.add(node.asname or node.name.split(".")[0])
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            self.names.add(node.name)  # The body belongs to another lexical scope.
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+            self.names.add(node.name)
+
+        def visit_ClassDef(self, node: ast.ClassDef) -> None:
+            self.names.add(node.name)
+
+        def visit_Lambda(self, node: ast.Lambda) -> None:
+            pass
+
+        def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+            if node.name is not None:
+                self.names.add(node.name)
+            self.generic_visit(node)
+
+        def visit_MatchAs(self, node: ast.MatchAs) -> None:
+            if node.name is not None:
+                self.names.add(node.name)
+            self.generic_visit(node)
+
+        def visit_MatchStar(self, node: ast.MatchStar) -> None:
+            if node.name is not None:
+                self.names.add(node.name)
+
+    def uncertainty(owner: Path, current: ast.Module) -> tuple[bool, set[str]]:
+        if owner not in uncertain_bindings:
+            collector = ConditionalBindings()
+            for statement in current.body:
+                if isinstance(statement, ast.ImportFrom) and any(alias.name == "*" for alias in statement.names):
+                    collector.wildcard = True
+                elif not isinstance(statement, (
+                    ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef,
+                    ast.Import, ast.ImportFrom, ast.Assign, ast.AnnAssign, ast.AugAssign,
+                )):
+                    collector.visit(statement)
+            uncertain_bindings[owner] = collector.wildcard, collector.names
+        return uncertain_bindings[owner]
+
+    def module_path(owner: Path, module: str, level: int) -> Path | None:
+        base = owner.parent if level else root
+        for _ in range(max(0, level - 1)):
+            base = base.parent
+        location = base.joinpath(*module.split(".")) if module else base
+        candidates = (location.with_suffix(".py"), location / "__init__.py")
+        for candidate in candidates:
+            candidate = candidate.resolve()
+            if not candidate.is_relative_to(root) or not candidate.is_file():
+                continue
+            return candidate
+        return None
+
+    def read_module(path: Path) -> ast.Module:
+        if path not in modules:
+            try:
+                text = path.read_text(encoding="utf-8")
+                parsed = ast.parse(text, filename=str(path), type_comments=True)
+            except (OSError, UnicodeError, SyntaxError) as exc:
+                raise SourceTypeError(f"cannot read source record module {path.relative_to(root)}: {exc}") from exc
+            _reject_type_escape_hatches(parsed, text, path.relative_to(root).as_posix())
+            _reject_trusted_module_shadowing(root, path)
+            modules[path] = parsed
+        return modules[path]
+
+    def resolve(
+        owner: Path, annotation: ast.expr,
+    ) -> tuple[Path, ast.Module, ast.ClassDef] | None:
+        if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+            try:
+                annotation = ast.parse(annotation.value, mode="eval").body
+            except SyntaxError:
+                return None
+        name = _qualified_name(annotation)
+        if name is None:
+            return None  # Union/optional/collection edges require a different proof.
+        seen: set[tuple[Path, str]] = set()
+        while (owner, name) not in seen:
+            seen.add((owner, name))
+            current = read_module(owner)
+            parts = name.split(".")
+            wildcard, conditional_names = uncertainty(owner, current)
+            if wildcard or parts[0] in conditional_names:
+                return None
+            matches: list[ast.stmt] = []
+            for statement in current.body:
+                if isinstance(statement, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                    if statement.name == parts[0]:
+                        matches.append(statement)
+                elif isinstance(statement, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                    targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+                    if any(isinstance(item, ast.Name) and item.id == parts[0]
+                           for target in targets for item in ast.walk(target)):
+                        matches.append(statement)
+                elif isinstance(statement, (ast.Import, ast.ImportFrom)):
+                    if any((alias.asname or alias.name.split(".")[0]) == parts[0]
+                           for alias in statement.names):
+                        matches.append(statement)
+            if len(matches) != 1:
+                return None
+            binding = matches[0]
+            if isinstance(binding, ast.ClassDef):
+                return (owner, current, binding) if len(parts) == 1 else None
+            if isinstance(binding, ast.ImportFrom):
+                alias = next(alias for alias in binding.names
+                             if (alias.asname or alias.name) == parts[0])
+                if binding.module is None:
+                    target = module_path(owner, alias.name, binding.level)
+                    name = ".".join(parts[1:])
+                else:
+                    target = module_path(owner, binding.module, binding.level)
+                    name = ".".join((alias.name, *parts[1:]))
+            elif isinstance(binding, ast.Import):
+                alias = next(alias for alias in binding.names
+                             if (alias.asname or alias.name.split(".")[0]) == parts[0])
+                imported = alias.name.split(".")
+                if not alias.asname and parts[:len(imported)] != imported:
+                    return None
+                target = module_path(owner, alias.name, 0)
+                name = ".".join(parts[1:] if alias.asname else parts[len(imported):])
+            else:
+                return None  # A runtime alias is not a statically resolved record.
+            if target is None or not name:
+                return None
+            owner = target
+        return None  # Cyclic re-export, distinct from a valid recursive field graph.
+
+    def identity(path: Path, node: ast.ClassDef) -> str:
+        return f"{path.relative_to(root).as_posix()}:{node.name}"
+
+    pending: dict[str, tuple[Path, ast.Module, ast.ClassDef]] = {}
+    result_roots: list[tuple[str, str | None]] = []
+    for label, annotation in roots:
+        resolved = resolve(implementation, annotation)
+        if resolved is not None:
+            key = identity(resolved[0], resolved[2])
+            pending[key] = resolved
+            result_roots.append((label, key))
+        else:
+            # An extracted-but-unresolved root is not a legacy absent schema.
+            result_roots.append((label, None))
+    records: dict[str, SourceProjectionRecord] = {}
+    while pending:
+        key, (owner, current, node) = pending.popitem()
+        if key in records:
+            continue
+        trusted = _trusted_decorators(current)[2]
+        wildcard, conditional_names = uncertainty(owner, current)
+        decorator = node.decorator_list[0] if len(node.decorator_list) == 1 else None
+        decorator_name = _qualified_name(decorator.func) if isinstance(decorator, ast.Call) else None
+        decorator_binding = decorator_name.split(".")[0] if decorator_name is not None else None
+        decorator_imports = sum(
+            (alias.asname or alias.name.split(".")[0]) == decorator_binding
+            for imported in current.body if isinstance(imported, (ast.Import, ast.ImportFrom))
+            for alias in imported.names
+        )
+        frozen = (
+            not node.bases and not node.keywords and len(node.decorator_list) == 1
+            and isinstance(node.decorator_list[0], ast.Call)
+            and _qualified_name(node.decorator_list[0].func) in trusted
+            and decorator_imports == 1
+            and not wildcard and decorator_binding not in conditional_names
+            and any(keyword.arg == "frozen" and isinstance(keyword.value, ast.Constant)
+                    and keyword.value.value is True for keyword in node.decorator_list[0].keywords)
+            and all(isinstance(statement, (ast.AnnAssign, ast.Pass))
+                    or isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Constant)
+                    and isinstance(statement.value.value, str) for statement in node.body)
+        )
+        fields: list[SourceProjectionField] = []
+        for statement in node.body:
+            if not isinstance(statement, ast.AnnAssign) or not isinstance(statement.target, ast.Name):
+                continue
+            annotation_text = _annotation(statement.annotation, f"record {key} field")
+            unwrapped = statement.annotation
+            if isinstance(unwrapped, ast.Constant) and isinstance(unwrapped.value, str):
+                try:
+                    unwrapped = ast.parse(unwrapped.value, mode="eval").body
+                except SyntaxError:
+                    pass
+            scalar = None
+            if isinstance(unwrapped, ast.Name) and unwrapped.id in {"int", "bool", "float", "str", "bytes"}:
+                rebound = wildcard or unwrapped.id in conditional_names or unwrapped.id in _top_level_rebindings(current) or any(
+                    (alias.asname or alias.name.split(".")[0]) == unwrapped.id
+                    for imported in current.body if isinstance(imported, (ast.Import, ast.ImportFrom))
+                    for alias in imported.names
+                )
+                if not rebound:
+                    scalar = unwrapped.id
+            nested = resolve(owner, statement.annotation) if frozen and scalar is None else None
+            nested_key = identity(nested[0], nested[2]) if nested is not None else None
+            if nested is not None and nested_key not in records:
+                assert nested_key is not None
+                pending[nested_key] = nested
+            fields.append(SourceProjectionField(statement.target.id, annotation_text, nested_key, scalar))
+        if len({field.name for field in fields}) != len(fields):
+            frozen = False
+        records[key] = SourceProjectionRecord(
+            key, owner.relative_to(root).as_posix(), node.name, frozen, tuple(fields),
+        )
+    return tuple(result_roots), tuple(records[key] for key in sorted(records))
 
 
 def _variant_field_schema(

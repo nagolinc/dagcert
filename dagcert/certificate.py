@@ -158,6 +158,11 @@ def _serialized_primitives(contract: Contract, analysis_mapping: dict[str, Any])
     """Return the exact JSON shape stored in a certificate (tuples become arrays)."""
     tasks = [asdict(item) for item in contract.tasks]
     for task in tasks:
+        signature = task.get("source_signature")
+        if isinstance(signature, dict):
+            for key in ("projection_roots", "projection_records"):
+                if contract.schema != "dagcert-contract/v12" or not signature.get(key):
+                    signature.pop(key, None)
         if not task["external_calls"]:
             task.pop("external_calls", None)
         if contract.schema not in {"dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11", "dagcert-contract/v12"} or not task["callable_bindings"]:

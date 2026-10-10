@@ -23,15 +23,20 @@ _DAGCERT_FRAGMENT = "dagcert-closed-typed-operations/v4"
 _DAGCERT_ASSERTION_FRAGMENT = (
     "dagcert-closed-typed-operations+semantic-assertions/v1"
 )
+_DAGCERT_POSTCONDITION_FRAGMENT = (
+    "dagcert-closed-typed-operations+semantic-postconditions/v1"
+)
 _DAGCERT_OPERATION_FRAGMENTS = {
     _DAGCERT_FRAGMENT,
     _DAGCERT_ASSERTION_FRAGMENT,
+    _DAGCERT_POSTCONDITION_FRAGMENT,
 }
 _TYPESCRIPT_FRAGMENT = "strict-typescript-closed-total-functions/v11"
 _JAVASCRIPT_FRAGMENT = "strict-javascript-jsdoc-closed-total-functions/v11"
 _PYTHON_PROOF_SOURCE_FRAGMENTS = {
     _DAGCERT_FRAGMENT,
     _DAGCERT_ASSERTION_FRAGMENT,
+    _DAGCERT_POSTCONDITION_FRAGMENT,
     "closed-total-functions+safe-builtin-slices/v1",
     "caught-callable-dataclass-boundaries/v1",
     "scalar-nagini-contracts/v44",
@@ -122,6 +127,7 @@ def verify_with_maledictus(
     embedded_external_calls: Iterable[MaledictusEmbeddedExternalCall] = (),
     languages_by_file: Mapping[str, str] | None = None,
     verified_interfaces: Iterable[MaledictusVerifiedInterface] = (),
+    required_postcondition_files: Iterable[str] = (),
 ) -> dict[str, object]:
     """Run one exact, digest-pinned Maledictus request and validate its complete response."""
 
@@ -152,6 +158,7 @@ def verify_with_maledictus(
     normalized_proof_only_files = {
         Path(path).as_posix() for path in proof_only_files
     }
+    postcondition_files = {Path(path).as_posix() for path in required_postcondition_files}
     requested_languages = {
         Path(path).as_posix(): language
         for path, language in (languages_by_file or {}).items()
@@ -229,6 +236,8 @@ def verify_with_maledictus(
     if not normalized_files:
         raise MaledictusVerificationError("Maledictus received no bound operation files")
     request_files: list[dict[str, object]] = []
+    if not postcondition_files <= set(normalized_files):
+        raise MaledictusVerificationError("postcondition proof requested for an unbound source file")
     expected_hashes: dict[str, str] = {}
     for relative in normalized_files:
         path = (root / relative).resolve()
@@ -248,6 +257,8 @@ def verify_with_maledictus(
                 f"Maledictus source file has no bound symbols: {relative}"
             )
         language = requested_languages.get(relative, "python")
+        if relative in postcondition_files and language != "python":
+            raise MaledictusVerificationError("native postcondition scope requires Python operation source")
         if language not in {"python", "javascript", "typescript"}:
             raise MaledictusVerificationError(
                 f"unsupported Maledictus source language {language!r} for {relative}"
@@ -510,6 +521,11 @@ def verify_with_maledictus(
                 "transitive-source+checked-external-heap-contracts/v65",
                 "transitive-source+checked-external-heap-contracts/v66",
             }
+        if returned_path in postcondition_files:
+            # The generated semantic view needs BOTH the complete operation proof
+            # and actual post-cleanup relation discharge. A heap-only proof or the
+            # ordinary closed-outcome fragment is not a substitute.
+            expected_fragment = _DAGCERT_POSTCONDITION_FRAGMENT
         fragment_matches = (
             result.get("fragment") in expected_fragment
             if isinstance(expected_fragment, set)
