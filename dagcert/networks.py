@@ -19,6 +19,9 @@ from .curves import Curve, CurveError
 from .quantities import quantity_service, ordered_prefix_lower, compose_monotone
 from .relations import SourceRelation, parse_relation_predicate
 from .scheduling import leftover_service, reserved_services, batch_work_demand
+from .network_transfer import (
+    advance_upper, conservation_relations, map_relations, measurement, validate_transfer,
+)
 
 if TYPE_CHECKING:
     from .contract import Contract, Task
@@ -103,6 +106,8 @@ def parse_network_spec(row: Mapping[str, Any]) -> Mapping[str, Any]:
         "withheld": {"task", "unit", "upper"},
         "allocation": {"server", "shares", "lag_work"},
         "policy": {"task", "mode"},
+        "quantity_map": {"task", "source", "unit", "outcome_quantities", "factor"},
+        "transfer": {"task", "source", "bindings", "delay_ms"},
     }
     ids: set[str] = set()
     for envelope in network["envelopes"]:
@@ -169,6 +174,18 @@ def parse_network_spec(row: Mapping[str, Any]) -> Mapping[str, Any]:
                 raise NetworkError("workload requires every source outcome's useful quantity")
         elif kind == "withheld":
             _curve(envelope["upper"], "withheld quantity upper", cumulative=False)
+        elif kind == "quantity_map":
+            _text(envelope["source"], "quantity map source")
+            if _number(envelope["factor"], "quantity conversion factor") < 0:
+                raise NetworkError("quantity conversion factor must be nonnegative")
+            if not isinstance(envelope["outcome_quantities"], Mapping):
+                raise NetworkError("quantity conversion requires every source outcome's quantity")
+        elif kind == "transfer":
+            _text(envelope["source"], "quantity transfer source")
+            if not isinstance(envelope["bindings"], Mapping):
+                raise NetworkError("quantity transfer bindings must be a source outcome object")
+            if _number(envelope["delay_ms"], "quantity transfer delay") < 0:
+                raise NetworkError("quantity transfer delay must be nonnegative")
         elif kind == "allocation":
             _text(envelope["server"], "allocation server")
             for name in ("shares", "lag_work"):
@@ -204,6 +221,11 @@ def network_references(spec: Mapping[str, Any]) -> set[str]:
         if "task" in envelope:
             refs.add(f"task:{envelope['task']}")
         refs.update(f"task:{task}" for task in envelope.get("tasks", []))
+        if envelope["kind"] == "transfer":
+            for binding in envelope["bindings"].values():
+                if isinstance(binding, Mapping) and binding.get("kind") in {"channel", "external_handoff"}:
+                    prefix = "channel" if binding["kind"] == "channel" else "external-handoff"
+                    refs.add(f"{prefix}:{binding.get('id')}")
     refs.update(f"task:{item['task']}" for item in spec["network"]["relations"])
     return refs
 
@@ -212,7 +234,11 @@ def network_relations(spec: Mapping[str, Any], contract: Contract) -> list[Sourc
     tasks = contract.task_by_id
     result = [SourceRelation(row["id"], row["task"], row["outcome"], row["predicate"])
               for row in spec["network"]["relations"]]
+    envelopes = {row["id"]: row for row in spec["network"]["envelopes"]}
     for envelope in spec["network"]["envelopes"]:
+        if envelope["kind"] == "quantity_map":
+            result.extend(map_relations(envelope, envelopes, contract))
+            continue
         if envelope["kind"] != "workload":
             continue
         task = tasks.get(envelope["task"])
@@ -238,6 +264,12 @@ def network_relations(spec: Mapping[str, Any], contract: Contract) -> list[Sourc
                 f"quantity:{envelope['id']}:{outcome}", task.id, outcome,
                 f"{quantity} >= 0 and {quantity} - {quantity} == 0",
             ))
+    # Expression evaluation records the source accounting obligations needed by
+    # the actual substitutions/convolutions. The normal source-proof gate then
+    # proves these against code; a valid arithmetic curve alone is insufficient.
+    model = NetworkModel(spec, contract)
+    model.expression(spec["expression"])
+    result.extend(dict.fromkeys(model.source_obligations))
     ids = [item.id for item in result]
     if len(set(ids)) != len(ids):
         raise NetworkError("network source relation IDs must be unique")
@@ -260,6 +292,8 @@ class Signal:
     interval: bool = False
     scope: str = "prefix"
     identity: str | None = None
+    measurement: str | None = None
+    input_quantities: tuple[str, ...] = ()
 
 
 _SERVICES = {"strict_work_service", "work_service", "quantity_service"}
@@ -295,6 +329,7 @@ class NetworkModel:
         self.end = None if spec["end_ms"] is None else _number(spec["end_ms"], "end_ms")
         self.lookahead = Fraction(0)
         self.all_time = False
+        self.source_obligations: list[SourceRelation] = []
 
     def premise(self, identifier: Any, kind: str) -> Mapping[str, Any]:
         row = self.envelopes.get(identifier) if isinstance(identifier, str) else None
@@ -343,6 +378,8 @@ class NetworkModel:
                     raise NetworkError("ingress cannot replace a source-owned upstream edge")
                 if task.source_signature is not None and dict(task.source_signature.input_fields).get(row["input_field"]) not in ("int", "float"):
                     raise NetworkError("arrival quantity must identify a numeric source input field")
+            if row["kind"] == "transfer":
+                validate_transfer(row, self.envelopes, self.contract)
             if row["kind"] == "allocation":
                 server = self.envelopes.get(row["server"])
                 if server is None or server["kind"] != "worker":
@@ -410,6 +447,7 @@ class NetworkModel:
                 "withheld" if operator == "withheld_upper" else "ingress", bound,
                 frozenset({row["task"]}), interval=row.get("window") == "interval",
                 identity=f"withheld:{row['id']}" if operator == "withheld_upper" else f"input:{row['task']}:{row['input_field']}",
+                input_quantities=() if operator == "withheld_upper" else (f"input.{row['input_field']}",),
             )
         if operator == "worker_service":
             row = self.premise(operand, "worker")
@@ -447,7 +485,43 @@ class NetworkModel:
             if all(quantity == 0 for quantity in row["outcome_quantities"].values()):
                 curve = Curve.constant(0)
             return Signal(curve, row["unit"], "quantity_service", "lower", work.tasks, work.server, True,
-                          identity=f"output:{row['task']}:{row['unit']}:{json.dumps(row['outcome_quantities'], sort_keys=True)}")
+                          identity=f"output:{row['task']}:{row['unit']}:{json.dumps(row['outcome_quantities'], sort_keys=True)}",
+                          measurement=row["id"])
+        if operator in {"transfer", "quantity_map"}:
+            _fields(operand, {"input", "rule"}, operator)
+            row = self.premise(operand["rule"], operator)
+            source = measurement(row["source"], self.envelopes)
+            # Delay jitter requires the upstream interval upper at t + delay.
+            # Prefix lower bounds only look backwards, but evaluating with the
+            # additional horizon here is deliberately avoided for those bounds.
+            signal = self.expression(operand["input"])
+            if (signal.kind != "completed" or signal.measurement != row["source"]
+                or signal.tasks != frozenset({source["task"]}) or signal.unit != source["unit"]):
+                raise NetworkError(f"{operator} requires the actual derived source quantity; arithmetic cannot invent a new physical stream")
+            if operator == "quantity_map":
+                factor = _number(row["factor"], "quantity conversion factor")
+                return Signal(signal.curve.scale(factor), row["unit"], "completed", signal.bound,
+                              signal.tasks, interval=signal.interval, scope=signal.scope,
+                              identity=f"output:{row['task']}:{row['unit']}:{json.dumps(row['outcome_quantities'], sort_keys=True)}",
+                              measurement=row["id"])
+            delay = _number(row["delay_ms"], "quantity transfer delay")
+            if signal.bound == "lower":
+                curve = signal.curve.shift(delay)
+            elif signal.bound == "upper" and signal.interval:
+                self.lookahead += delay
+                try:
+                    signal = self.expression(operand["input"])
+                finally:
+                    self.lookahead -= delay
+                curve = advance_upper(signal.curve, delay)
+            elif signal.bound == "upper":
+                curve = signal.curve
+            else:
+                raise NetworkError("quantity transfer requires a directed production bound")
+            return Signal(curve, signal.unit, "ingress", signal.bound,
+                          frozenset({row["task"]}), interval=signal.interval, scope=signal.scope,
+                          identity=f"transfer:{row['id']}:{signal.identity}",
+                          input_quantities=validate_transfer(row, self.envelopes, self.contract))
         if operator == "leftover_service":
             _fields(operand, {"server", "cross_demand", "blocking_work", "policy"}, "leftover service")
             server, demand = self.expression(operand["server"]), self.expression(operand["cross_demand"])
@@ -532,7 +606,9 @@ class NetworkModel:
             return Signal(curve, values[0].unit, kind, direction,
                           frozenset().union(*(item.tasks for item in values)), values[0].server if services else None,
                           all(item.interval or item.kind == "constant" for item in values), scope,
-                          values[0].identity if kind != "quantity" else None)
+                          values[0].identity if kind != "quantity" else None,
+                          values[0].measurement if kind != "quantity" else None,
+                          values[0].input_quantities if kind != "quantity" else ())
         if not isinstance(operand, list) or len(operand) != 2:
             raise NetworkError(f"unknown network operator or invalid operand {operator!r}")
         if operator == "compose":
@@ -578,7 +654,9 @@ class NetworkModel:
             kind = left.kind if left.kind in _SERVICES or preserves_quantity_bound else "quantity"
             return Signal(left.curve.scale(amount) if operator == "scale" else left.curve.shift(amount),
                           left.unit, kind, left.bound, left.tasks, left.server, left.interval, left.scope,
-                          left.identity if kind != "quantity" else None)
+                          left.identity if kind != "quantity" else None,
+                          left.measurement if kind != "quantity" else None,
+                          left.input_quantities if kind != "quantity" else ())
         if left.unit != right.unit:
             raise NetworkError("cannot combine unlike quantity units")
         if operator == "subtract":
@@ -593,14 +671,26 @@ class NetworkModel:
                 raise NetworkError("departure convolution requires a source-bound service operand")
             if left.kind != "ingress" or left.bound != "lower" or left.tasks != right.tasks:
                 raise NetworkError("departure convolution requires matching source task ingress lower, not spare capacity or another task's arrivals")
+            if right.measurement is None:
+                raise NetworkError("departure convolution needs source output accounting, not raw worker capacity")
+            self.source_obligations.extend(conservation_relations(
+                measurement(right.measurement, self.envelopes), left.input_quantities, self.contract,
+            ))
             return Signal(left.curve.convolution(right.curve), left.unit, "completed", "lower", right.tasks,
-                          identity=right.identity or f"completed-work:{right.server}:{','.join(sorted(right.tasks))}")
+                          identity=right.identity or f"completed-work:{right.server}:{','.join(sorted(right.tasks))}",
+                          measurement=right.measurement)
         if operator == "deconvolve":
             if (left.bound != "upper" or not left.interval or left.kind != "ingress"
                 or right.kind not in _SERVICES or left.tasks != right.tasks):
                 raise NetworkError("departure deconvolution requires matching interval ingress upper and source-bound service")
+            if right.measurement is None:
+                raise NetworkError("departure deconvolution needs source output accounting, not raw worker capacity")
+            self.source_obligations.extend(conservation_relations(
+                measurement(right.measurement, self.envelopes), left.input_quantities, self.contract,
+            ))
             return Signal(left.curve.deconvolution(right.curve), left.unit, "completed", "upper", right.tasks, interval=True,
-                          identity=right.identity or f"completed-work:{right.server}:{','.join(sorted(right.tasks))}")
+                          identity=right.identity or f"completed-work:{right.server}:{','.join(sorted(right.tasks))}",
+                          measurement=right.measurement)
         if operator == "ordered_prefix":
             if (left.bound != "lower" or right.bound != "upper" or right.kind != "withheld"
                 or left.kind != "completed" or left.tasks != right.tasks):

@@ -22,6 +22,18 @@ class StateProof:
 def prove_state_claim(
     claim: StateClaim, contract: Contract, analysis: AnalysisReport,
 ) -> StateProof:
+    if claim.kind == "lra_theorem":
+        from .theorems import TheoremError, prove_theorem
+
+        try:
+            proof = prove_theorem(claim.id, contract)
+            return StateProof(claim.id, True,
+                f"SMT-LIB LRA theorem proved; mode={claim.specification['mode']}; "
+                f"{len(proof.checks)} checked implications; "
+                f"whole-envelope failure upper={proof.failure_probability_upper}; "
+                "conditional on retained source, completion and engineering premises")
+        except TheoremError as exc:
+            return StateProof(claim.id, False, str(exc))
     if claim.kind == "relational_invariant":
         from .induction import prove_inductive_invariant
 

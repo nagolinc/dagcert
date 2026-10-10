@@ -151,6 +151,29 @@ proved adapter can appear at real startup, refresh, or request call sites withou
 source decorator identity. Evidence retains both identities. See
 `dagcert help alternative-producers`.
 
+### General timing proof language
+
+Dagcert 0.23 exposes **first-order linear real arithmetic (SMT-LIB LRA)** as a
+general proof language, not an enumeration of application-specific timing rules.
+Every finite formula in that family is accepted for decision: exact rational
+linear arithmetic, Boolean combinations, piecewise relations, and arbitrarily
+nested real/Boolean quantifiers. Relational composition, substitution, conjunction,
+disjunction and quantification remain inside the family. New application concepts
+expressible there need formulas or reusable lemmas, not a new core operator.
+
+Pinned Z3 quantifier elimination and arithmetic decision procedures establish
+valid implications or refute them. Resource exhaustion/unknown never certifies.
+This does not promise automatic invariant discovery, nonlinear mathematics, or
+complete verification of arbitrary application source.
+
+Source-mode `lra_theorem` claims bind actual compiler-extracted fields and
+backend-proved relations, retain engineering hypotheses and their probability
+events through lemma imports, and recheck every deduction. An assumed conclusion
+with an irrelevant source fact is refused as a source-derived claim. Pure
+mathematical certificates have separate commands and cannot replace an application
+certificate. See [`dagcert help timing-logic`](dagcert/docs/linear-timing-logic.md)
+and run `python -m examples.timing_logic --certify`.
+
 V7+ tasks also distinguish resource effects at task start from effects on each typed completion
 outcome. Kernel-owned state claims cover affine lifecycle invariants, finite-horizon
 producer/consumer supply, a separate bounded dispatch wait, and generic `curve_bound` expressions.
@@ -180,6 +203,12 @@ infinite variable-streaming theorem. The example explicitly distinguishes
 the proved policies from whole deployed applications and their external
 timing/ownership assumptions. Pure source-policy tasks need no invented
 stopwatch timing; any timing claim still requires its actual timing premises.
+
+Actual completed quantity can feed another source-bound task through `transfer`
+and can change units through a source-proved `quantity_map`. Convolutions prove
+input/output conservation on every outcome; service capacity or discarded work
+cannot masquerade as useful departures. These are convenient network-calculus
+front ends, not the boundary of the general LRA language.
 
 For Python, each v7+ task points to the production source file and symbol. Dagcert reads the real
 one-input annotation and closed return union, rejects `Any` throughout those boundary variants,

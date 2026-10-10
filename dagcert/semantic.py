@@ -14,7 +14,14 @@ from .source_types import SourceProofBackend, SourceTypeError
 def contract_relations(contract: Contract) -> tuple[SourceRelation, ...]:
     relations: list[SourceRelation] = []
     for claim in contract.state_claims:
-        if claim.kind == "relational_invariant":
+        if claim.kind == "lra_theorem":
+            from .theorems import theorem_relations
+
+            relations.extend(
+                replace(item, id=f"{claim.id}/{item.id}")
+                for item in theorem_relations(claim.id, contract)
+            )
+        elif claim.kind == "relational_invariant":
             from .induction import relation_source_obligations
 
             relations.extend(

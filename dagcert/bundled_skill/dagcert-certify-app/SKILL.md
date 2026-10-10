@@ -102,6 +102,15 @@ declares finite source-outcome paths over those primitives.
   available service, and analyze finite-buffer refill periods including restart
   delay. A fast average, min of unmatched stream totals, scheduler weights, or a
   successful model-only example does not establish the application guarantee.
+- For a timing relation not covered by those convenience operators, read
+  `dagcert help timing-logic`. The general family is first-order linear real
+  arithmetic, including quantifiers and finite piecewise relations. Build reusable
+  mathematical lemmas and source-mode `lra_theorem` claims; do not request another
+  application-specific kernel opcode for a relation already expressible there.
+  Bind actual fields and source postconditions, preserve completion guards and
+  dispatch premises, and retain all imported assumptions and scoped failure events.
+  A mathematics-only artifact is not an application certificate. The source adapter
+  and invariant discovery are separate from the completeness of the math language.
 
 Reconstruct the execution graph from source before writing the contract. Represent independently
 scheduled stages, actual worker pools, queues, reservations, resource transfers, ordering rules,

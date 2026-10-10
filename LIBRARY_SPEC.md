@@ -200,7 +200,18 @@ policy, or queue liveness.
 
 ### State claims
 
-State claims combine lifecycle proof schemas with a generic real-time calculus:
+State claims expose a general mathematical language plus convenient lifecycle
+and network-calculus front ends:
+
+- `lra_theorem` accepts first-order linear real arithmetic (SMT-LIB LRA), including
+  exact rational coefficients, arbitrary Boolean combinations, finite piecewise
+  relations, and nested real/Boolean quantifiers. Relational composition,
+  substitution, negation, conjunction, disjunction and further quantification
+  remain in the same language. Application-specific mathematical lemmas do not
+  require registering new core operators;
+- `relational_invariant` binds actual source fields to initialization and
+  all-outcome preservation obligations, with real backend postconditions and
+  solver-checked induction;
 
 - `linear_invariant` checks one affine resource expression in the initial state and every declared
   start/completion transition;
@@ -224,6 +235,31 @@ overallocated. See [the timing algebra guide](dagcert/docs/timing-algebra.md) or
 `dagcert help timing-algebra` for the schema and examples. Source verification is unchanged.
 
 Failures report the concrete transition, finite-horizon trace, or exact curve extremum.
+
+The precise general-family guarantee is: every finite first-order rational LRA
+formula is expressible and admitted to its decision procedure. Given consistent
+premises, a valid implication can be certified, and an invalid one refuted.
+Pinned Z3 performs native parsing, typing, quantifier elimination and arithmetic
+decision. Solver `unknown`, interruption or resource failure never produces a
+certificate. There is no application-pattern whitelist or arbitrary formula cap.
+Decidability is not a fixed execution-time guarantee. Nonlinear variable products,
+arbitrary unknown functions, unbounded integer arithmetic and automatic invariant
+synthesis are outside this promise.
+
+Source-mode theorems use actual compiler-extracted projections and backend-proved
+predicates. Completion guards prevent postconditions from manufacturing liveness.
+Engineering hypotheses, whole-event failure budgets and horizons survive every
+lemma import; source projection aliases and consistent invocation substitutions
+are checked. A source-derived claim must depend on source behavior, not only on an
+envelope that assumes the conclusion. External assumption truth remains explicit,
+not inferred by arithmetic. Mathematical lemmas cannot replace application
+certificates. Source-language adapter support is a separate scope from the LRA
+family. See [the general language guide](dagcert/docs/linear-timing-logic.md).
+
+Quantity networks reuse completed departures through typed `transfer` edges
+and source-proved `quantity_map` conversions. Actual input/output conservation
+is verified for each downstream outcome. Worker capacity, dropped inputs and
+unmatched output cannot silently become useful transferred work.
 
 ### Timing
 
@@ -304,7 +340,8 @@ It consumes the same mandatory requirements file and cannot substitute different
 
 ### Kernel claim algebra
 
-The claim algebra is deliberately closed and small. Numeric expressions support finite literals,
+English requirement formulas use a small numeric accessor layer; it is not the
+expressiveness boundary of the general `lra_theorem` proof language. Numeric expressions support finite literals,
 certified timing upper/lower bounds, worker concurrency, resource capacity/initial state,
 minimum all-outcome task production/consumption, composition upper bounds,
 finite-composition failure-probability upper bounds and success-probability lower bounds,
@@ -461,9 +498,11 @@ with an existing release-signing system when cryptographic authorship is require
 The public API exports the four primitive dataclasses, evidence recording/loading, analysis,
 generic checker protocol, source hashing, issuance, and verification. The CLI exposes only:
 
-- `init`, `install-skill`;
+- `init`, `install-skill`, `help`;
 - `lint`, `fingerprint`, `analyze`, `check-result`;
-- `issue`, `verify`.
+- `issue`, `verify`;
+- `prove-math`, `verify-math` for separately labeled mathematical implications,
+  never substitutes for application certificates.
 
 The certificate kernel does not depend on presentation routes. The agent workflow nevertheless
 installs two default application surfaces unless the user explicitly opts out: the unchanged

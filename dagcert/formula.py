@@ -576,8 +576,12 @@ def _number(value: Any, state: _EvaluationState, label: str) -> float:
                 + (f"; counterexample: {detail}" if detail else "")
             )
         if operator == "state_claim_success_probability_lower":
+            if claim.kind == "lra_theorem":
+                from .theorems import prove_theorem
+
+                return float(1 - prove_theorem(claim.id, state.contract).failure_probability_upper)
             if claim.kind != "curve_bound":
-                raise FormulaError("state probability requires a curve_bound proof")
+                raise FormulaError("state probability requires a curve_bound or lra_theorem proof")
             from .temporal import temporal_failure_upper
 
             return float(1 - temporal_failure_upper(claim.specification))

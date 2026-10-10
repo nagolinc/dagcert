@@ -263,6 +263,21 @@ def analyze_contract(
         )
 
     for state_claim in contract.state_claims:
+        if state_claim.kind == "lra_theorem":
+            from .theorems import prove_theorem
+
+            theorem = prove_theorem(state_claim.id, contract)
+            assumptions.append(
+                f"state-claim:{state_claim.id} is a {state_claim.specification['mode']} LRA theorem; "
+                "source postconditions apply only on completed invocations; completion, "
+                "dispatch, and platform behavior are not inferred from safety"
+            )
+            for event in theorem.events.values():
+                assumptions.append(
+                    f"state-claim:{state_claim.id}/{event['event']} assumes {event['assumption']}; "
+                    f"formula={event['formula']}; whole-envelope failure probability <= "
+                    f"{event['failure_probability_upper']}; horizon_ms={event['horizon_ms']}"
+                )
         if state_claim.kind == "relational_invariant":
             assumptions.append(
                 f"state-claim:{state_claim.id} initial-state and transition-scope premise: "

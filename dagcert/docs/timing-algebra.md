@@ -1,5 +1,10 @@
 # Timing algebra: streams, service, and inventory
 
+This is the convenient network-calculus front end. For the general recognized
+mathematical family, reusable lemmas, relational composition and quantifiers,
+see `dagcert help timing-logic`. First-order LRA formulas do not need a new
+kernel operator whenever a new application pattern appears.
+
 For variable-sized output, shared workers, batches, retry accounting, keyed
 progress, and persistent state, start with `dagcert help timing-systems` and
 `python -m examples.timing_systems --certify`. The count-only example below is
@@ -23,6 +28,38 @@ evaluates the model, not the source-proof backend, and does not issue a certific
 `dagcert lint`, issuance, and verification gates still apply to source certification.
 
 ## What the curves mean
+
+### Reusing actual variable-quantity departures
+
+A derived completed-output curve can feed another real task. In a quantity
+network, wrap it with `{"transfer": {"input": expression, "rule": "edge"}}`.
+The `transfer` envelope names the downstream `task`, upstream measurement
+`source`, `delay_ms`, and `bindings` for every producing upstream outcome.
+Each binding selects a real typed `dependency` (with its `input_field`, or
+`null` for the whole input), `channel` (`id`), or supported `external_handoff`
+(`id`). It retains the common explicit assumption, horizon and failure budget.
+It cannot invent a fresh arrival stream at an internal edge. Transport delay,
+identity-preserving delivery and exactly-once useful transfer must hold under
+that declared envelope.
+
+For a change of measure, `{"quantity_map": {"input": expression, "rule": "map"}}`
+selects a `quantity_map` envelope: `task`, upstream `source`, destination `unit`,
+exact rational `factor`, and `outcome_quantities` for every outcome. The actual
+source backend proves that each new output quantity equals the factor times
+its old quantity. An outcome that contributes zero cannot silently become useful
+work. The resulting quantity can itself be transferred and composed again.
+
+Convolution additionally proves input/output quantity conservation against the
+actual downstream operation on every outcome. A failed task that discards its
+input is not a lossless server. Retained retry work needs explicit backlog and
+failure accounting; it is not removed to make a service curve pass. Native
+cross-language field-mapping restrictions still apply to external transports.
+
+`tests/test_networks.py` includes two-, three-, five- and eight-stage chains,
+real typed channels, unit conversion in the middle of a real three-stage source
+certificate, and source-proof refusals for dropped input and false conversion.
+
+### Arrival and service semantics
 
 An arrival envelope bounds actual task activations, at the point where `start_resources` applies.
 It does not count offered HTTP requests or queue entries before activation. A service envelope

@@ -5,11 +5,16 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import replace
 from fractions import Fraction
+import json
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from dagcert.contract import Contract, Implementation, StateClaim, Task, TaskOutcome, Worker
+from dagcert.contract import (
+    ChannelDequeue, ChannelEnqueue, Contract, Implementation, StateClaim, Task,
+    TaskOutcome, TypedChannel, TypedDependency, Worker,
+)
 from dagcert.induction import parse_induction_spec
 from dagcert.networks import (
     NetworkError, NetworkModel, network_references, network_relations,
@@ -450,3 +455,270 @@ def test_unused_envelopes_and_duplicate_workers_are_not_hidden() -> None:
     row["network"]["envelopes"].append(duplicate)
     passed, diagnostic = _prove(row, contract)
     assert not passed and "each physical worker once" in diagnostic
+
+
+def _pipeline(length: int = 3) -> tuple[dict[str, Any], Contract]:
+    """No fresh ingress after stage zero: all intermediate curves are derived."""
+    tasks: list[Task] = []
+    envelopes: list[dict[str, Any]] = []
+    expression: dict[str, Any] = {"arrival_lower": "source"}
+    for index in range(length):
+        name = f"stage{index}"
+        task = _task(name)
+        if index:
+            task = replace(task, input_type="Completed", depends_on=(f"stage{index - 1}",),
+                           typed_dependencies=(TypedDependency(f"stage{index - 1}", "Completed"),))
+            envelopes.append(_envelope(
+                f"edge{index}", "transfer", task=name, source=f"cost{index - 1}",
+                bindings={"Completed": {"kind": "dependency", "input_field": None}}, delay_ms=2,
+            ))
+            expression = {"transfer": {"input": expression, "rule": f"edge{index}"}}
+        else:
+            envelopes.append(_arrival(name, "source", rate=2))
+        tasks.append(task)
+        server = _worker(name)
+        server["id"] = f"server{index}"
+        envelopes.extend([server, _workload(name, f"cost{index}")])
+        expression = {"convolve": [expression, _service({"worker_service": f"server{index}"}, f"cost{index}")]}
+    row = _row(envelopes, expression)
+    row.update(start_ms=100, end_ms=200, bound=0)
+    return row, _contract(*tasks)
+
+
+@pytest.mark.parametrize("length", [2, 3, 5, 8])
+def test_derived_variable_quantity_outputs_compose_across_arbitrary_pipeline_depth(length: int) -> None:
+    row, contract = _pipeline(length)
+    passed, diagnostic = _prove(row, contract)
+    assert passed, diagnostic
+    signal = NetworkModel(parse_network_spec(row), contract).expression(row["expression"])
+    # Every server has rate 3/2, latency 18; each real handoff adds 2.
+    expected = max(Fraction(0), Fraction(3, 2) * (100 - 18 * length - 2 * (length - 1)))
+    assert signal.curve.value(100) == expected
+    assert signal.kind == "completed" and signal.tasks == frozenset({f"stage{length - 1}"})
+
+
+def test_quantity_transfer_cannot_skip_an_edge_or_change_its_source_measurement() -> None:
+    row, contract = _pipeline()
+    second_edge = next(item for item in row["network"]["envelopes"] if item["id"] == "edge2")
+    second_edge["source"] = "cost0"
+    passed, diagnostic = _prove(row, contract)
+    assert not passed and "actual derived source quantity" in diagnostic
+    row, contract = _pipeline()
+    second_input = row["expression"]["convolve"][0]["transfer"]
+    second_input["input"] = {"add": [second_input["input"], second_input["input"]]}
+    passed, diagnostic = _prove(row, contract)
+    assert not passed and "arithmetic cannot invent" in diagnostic
+
+
+def test_transfer_must_include_every_producing_outcome_but_not_nonproducing_failures() -> None:
+    row, contract = _pipeline(2)
+    cost = next(item for item in row["network"]["envelopes"] if item["id"] == "cost0")
+    cost["outcome_quantities"]["Failed"] = "result.quantity"
+    passed, diagnostic = _prove(row, contract)
+    assert not passed and "every producing source outcome" in diagnostic
+
+
+def test_success_only_transfer_retains_upstream_failure_workload_and_probability() -> None:
+    from dagcert.temporal import temporal_failure_upper
+
+    row, contract = _pipeline(3)
+    for item in row["network"]["envelopes"]:
+        if item["kind"] == "workload":
+            item["failure_probability_upper"] = "1/1000"
+        if item["kind"] == "transfer":
+            item["failure_probability_upper"] = "1/10000"
+    assert _prove(row, contract)[0]
+    assert temporal_failure_upper(parse_network_spec(row)) == Fraction(32, 10000)
+
+
+def test_transfer_keeps_full_unit_check_at_the_downstream_service() -> None:
+    row, contract = _pipeline(2)
+    next(item for item in row["network"]["envelopes"] if item["id"] == "cost1")["unit"] = "bytes"
+    passed, diagnostic = _prove(row, contract)
+    assert not passed and "unlike quantity units" in diagnostic
+
+
+def test_typed_channel_transfer_preserves_the_nested_source_quantity_projection() -> None:
+    row, contract = _pipeline(2)
+    consumer = contract.tasks[1]
+    assert consumer.source_signature is not None
+    consumer = replace(consumer, input_type="DequeueRequest", depends_on=(), typed_dependencies=(),
+                       source_signature=replace(consumer.source_signature,
+                                                input_type="DequeueRequest", input_fields=(("payload", "Completed"),)))
+    channel = TypedChannel("queue", "queue-slots", "Completed", ChannelEnqueue("stage0", "Completed"),
+                           ChannelDequeue("stage1", "Completed", "payload"))
+    contract = replace(contract, tasks=(contract.tasks[0], consumer), channels=(channel,))
+    transfer = next(item for item in row["network"]["envelopes"] if item["kind"] == "transfer")
+    transfer["bindings"] = {"Completed": {"kind": "channel", "id": "queue"}}
+    assert _prove(row, contract)[0]
+    spec = parse_network_spec(row)
+    assert "channel:queue" in network_references(spec)
+    relations = network_relations(spec, contract)
+    predicates = [item.predicate for item in relations if item.task_id == "stage1"]
+    assert "input.payload.quantity < 0 or result.quantity == input.payload.quantity" in predicates
+    transfer["bindings"]["Completed"]["id"] = "another-queue"
+    passed, diagnostic = _prove(row, contract)
+    assert not passed and "actual typed channel" in diagnostic
+
+
+def test_source_bound_unit_conversion_generates_all_outcome_relations_and_reuses_result() -> None:
+    row, contract = _pipeline(3)
+    row["network"]["envelopes"].append(_envelope(
+        "pixels", "quantity_map", task="stage2", source="cost2", unit="pixels",
+        outcome_quantities={"Completed": "result.batches", "Failed": 0}, factor=2,
+    ))
+    row["expression"] = {"quantity_map": {"input": row["expression"], "rule": "pixels"}}
+    row["bound"] = 126
+    assert _prove(row, contract)[0]
+    signal = NetworkModel(parse_network_spec(row), contract).expression(row["expression"])
+    assert signal.curve.value(100) == 126 and signal.unit == "pixels"
+    relations = network_relations(parse_network_spec(row), contract)
+    mappings = [item for item in relations if item.id.startswith("quantity-map:")]
+    assert {item.outcome_type for item in mappings} == {"Completed", "Failed"}
+    assert any(item.predicate == "result.batches >= 0 and result.batches - result.batches == 0 and 1 * result.batches == 2 * result.quantity" for item in mappings)
+    # Mapping proofs are source obligations, never conclusions inferred from annotations.
+    assert any(item.predicate == "0 >= 0 and 0 - 0 == 0 and 1 * 0 == 2 * 0" for item in mappings)
+
+
+def test_a_verified_measurement_conversion_can_feed_a_further_stage() -> None:
+    row, contract = _pipeline(3)
+    row["network"]["envelopes"].append(_envelope(
+        "pixels", "quantity_map", task="stage1", source="cost1", unit="pixels",
+        outcome_quantities={"Completed": "result.batches", "Failed": 0}, factor=2,
+    ))
+    edge = next(item for item in row["network"]["envelopes"] if item["id"] == "edge2")
+    edge["source"] = "pixels"
+    upstream = row["expression"]["convolve"][0]["transfer"]
+    upstream["input"] = {"quantity_map": {"input": upstream["input"], "rule": "pixels"}}
+    next(item for item in row["network"]["envelopes"] if item["id"] == "cost2")["unit"] = "pixels"
+    passed, diagnostic = _prove(row, contract)
+    assert passed, diagnostic
+
+
+def test_actual_fan_out_reuses_upstream_bound_without_double_allocating_a_worker() -> None:
+    row, contract = _pipeline(2)
+    branch = replace(_task("branch"), input_type="Completed", depends_on=("stage0",),
+                     typed_dependencies=(TypedDependency("stage0", "Completed"),))
+    contract = _contract(*contract.tasks, branch)
+    server = _worker("branch")
+    server["id"] = "branch-server"
+    row["network"]["envelopes"].extend([
+        server, _workload("branch", "branch-cost"),
+        _envelope("branch-edge", "transfer", task="branch", source="cost0",
+                  bindings={"Completed": {"kind": "dependency", "input_field": None}}, delay_ms=2),
+    ])
+    upstream = row["expression"]["convolve"][0]["transfer"]["input"]
+    branch_expression = {"convolve": [
+        {"transfer": {"input": upstream, "rule": "branch-edge"}},
+        _service({"worker_service": "branch-server"}, "branch-cost"),
+    ]}
+    row["expression"] = {"min": [row["expression"], branch_expression]}
+    passed, diagnostic = _prove(row, contract)
+    assert passed, diagnostic
+    signal = NetworkModel(parse_network_spec(row), contract).expression(row["expression"])
+    assert signal.kind == "quantity"  # A numeric minimum is not a keyed join.
+    assert signal.curve.value(100) == 93
+
+
+def _real_pipeline(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """Install three actual typed stages; no mocked checker or observer task."""
+    root = tmp_path / "pipeline"
+    root.mkdir()
+    source = "from dataclasses import dataclass\nfrom dagcert.runtime import operation\n\n"
+    for name in ("Request", "First", "Second", "Third"):
+        source += f"@dataclass(frozen=True)\nclass {name}:\n    quantity: int\n    batches: int\n\n"
+    for index, (input_type, output_type) in enumerate(zip(("Request", "First", "Second"), ("First", "Second", "Third"))):
+        input_quantity = "batches" if index == 2 else "quantity"
+        source += (
+            f"@operation\ndef stage{index}(request: {input_type}) -> {output_type}:\n"
+            f"    quantity = request.{input_quantity}\n"
+            "    if quantity < 0:\n        quantity = 0\n"
+            f"    return {output_type}(quantity, quantity * 2)\n\n"
+        )
+    (root / "operations.py").write_text(source, encoding="utf-8")
+    row, _ = _pipeline(3)
+    tasks = []
+    for index, outcome in enumerate(("First", "Second", "Third")):
+        cost = next(item for item in row["network"]["envelopes"] if item["id"] == f"cost{index}")
+        cost["outcome_quantities"] = {outcome: "result.quantity"}
+        if index:
+            edge = next(item for item in row["network"]["envelopes"] if item["id"] == f"edge{index}")
+            edge["bindings"] = {
+                ("First", "Second")[index - 1]: {"kind": "dependency", "input_field": None},
+            }
+        tasks.append({
+            "id": f"stage{index}", "role": "operation", "worker": f"stage{index}",
+            "implementation": {"language": "python", "path": "operations.py", "symbol": f"stage{index}"},
+            "outcomes": [{"type": outcome, "resources": {}, "metadata": {}}],
+            "depends_on": ([{"task": f"stage{index - 1}", "outcome_type": ("First", "Second")[index - 1]}] if index else []),
+            "start_resources": {}, "timings": {}, "error_budget": None, "external_contract": None,
+        })
+    row["network"]["envelopes"].append(_envelope(
+        "pixels", "quantity_map", task="stage1", source="cost1", unit="pixels",
+        outcome_quantities={"Second": "result.batches"}, factor=2,
+    ))
+    edge = next(item for item in row["network"]["envelopes"] if item["id"] == "edge2")
+    edge["source"] = "pixels"
+    downstream_input = row["expression"]["convolve"][0]["transfer"]
+    downstream_input["input"] = {"quantity_map": {"input": downstream_input["input"], "rule": "pixels"}}
+    next(item for item in row["network"]["envelopes"] if item["id"] == "cost2")["unit"] = "pixels"
+    row["bound"] = 63
+    document = {
+        "schema": "dagcert-contract/v12",
+        "workers": [{"id": f"stage{index}", "concurrency": 1} for index in range(3)],
+        "tasks": tasks, "resources": [], "channels": [], "external_handoffs": [],
+        "external_boundaries": [], "compositions": [], "state_claims": [row], "metadata": {},
+    }
+    contract = root / "dag_contract.json"
+    contract.write_text(json.dumps(document, indent=2), encoding="utf-8")
+    requirements = root / "english_requirements.json"
+    requirements.write_text(json.dumps({
+        "schema": "dagcert-english-requirements/v2", "metadata": {},
+        "claims": [{
+            "id": "pipeline-production", "basis": "derived",
+            "statement": "Under the stated input, service and exact-once handoff envelopes, the three actual stages produce at least 63 pixels by 100ms and throughout the following 100ms window. A source-proved conversion changes the middle stage's output quantity into the final stage's input quantity.",
+            "primitive_refs": ["state-claim:network-bound", "task:stage0", "task:stage1", "task:stage2"],
+            "checker_refs": [],
+            "assumptions": list(dict.fromkeys(item["assumption"] for item in row["network"]["envelopes"])),
+            "formula": {"eq": [{"state_claim_proved": "state-claim:network-bound"}, 1]},
+        }],
+    }, indent=2), encoding="utf-8")
+    evidence = root / "evidence.jsonl"
+    evidence.write_text("", encoding="utf-8")
+    return contract, requirements, evidence
+
+
+def test_actual_three_stage_quantity_certificate_issues_and_independently_verifies(tmp_path: Path) -> None:
+    from dagcert.certificate import issue_certificate, verify_certificate
+
+    contract, requirements, evidence = _real_pipeline(tmp_path)
+    certificate = contract.parent / "artifacts" / "certificate.json"
+    document = issue_certificate(contract, evidence, certificate, requirements_path=requirements, source_root=contract.parent)
+    assert document["source_verification"]["relations"]["status"] == "proved"
+    verification = verify_certificate(certificate, contract_path=contract, evidence_path=evidence,
+                                      requirements_path=requirements, source_root=contract.parent)
+    assert verification.valid, verification.problems
+
+
+def test_real_source_verifier_refuses_fabricated_quantity_conversion(tmp_path: Path) -> None:
+    from dagcert.certificate import CertificateError, issue_certificate
+
+    contract, requirements, evidence = _real_pipeline(tmp_path)
+    document = json.loads(contract.read_text(encoding="utf-8"))
+    document["state_claims"][0]["network"]["envelopes"][-1]["factor"] = 3
+    contract.write_text(json.dumps(document, indent=2), encoding="utf-8")
+    with pytest.raises(CertificateError, match="source relational proof refused"):
+        issue_certificate(contract, evidence, contract.parent / "artifacts" / "certificate.json",
+                          requirements_path=requirements, source_root=contract.parent)
+
+
+def test_real_source_verifier_refuses_a_stage_that_silently_discards_arriving_quantity(tmp_path: Path) -> None:
+    from dagcert.certificate import CertificateError, issue_certificate
+
+    contract, requirements, evidence = _real_pipeline(tmp_path)
+    source_path = contract.parent / "operations.py"
+    source = source_path.read_text(encoding="utf-8")
+    source_path.write_text(source.replace("return Second(quantity, quantity * 2)", "return Second(0, 0)"), encoding="utf-8")
+    with pytest.raises(CertificateError, match="source relational proof refused"):
+        issue_certificate(contract, evidence, contract.parent / "artifacts" / "certificate.json",
+                          requirements_path=requirements, source_root=contract.parent)

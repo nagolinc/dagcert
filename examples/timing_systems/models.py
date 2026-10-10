@@ -17,7 +17,9 @@ def _curve(rate: int | str, delay: int = 0, burst: int = 0) -> dict[str, Any]:
 def _premise(identifier: str, kind: str, assumption: str, **fields: Any) -> dict[str, Any]:
     return {
         "id": identifier, "kind": kind, "assumption": assumption,
-        "horizon_ms": None, "failure_probability_upper": 0, **fields,
+        # This is one engineering budget for the WHOLE all-time envelope,
+        # never a per-request failure rate promoted to an infinite guarantee.
+        "horizon_ms": None, "failure_probability_upper": "1/10000", **fields,
     }
 
 
@@ -108,7 +110,7 @@ def streaming_bound() -> dict[str, Any]:
             }},
         ]},
         "operator": "gte", "bound": 400, "start_ms": 0, "end_ms": None,
-        "metadata": {"scope": "Conditional all-time refill busy periods; NOT an estimate of unknown future stochastic tails."},
+        "metadata": {"scope": "All-time refill busy periods with four declared whole-horizon engineering failure budgets of 1/10000 each; NOT per-call probabilities or estimates of unknown future stochastic tails."},
     }
 
 
@@ -144,14 +146,14 @@ def requirements_document(contract: dict[str, Any]) -> dict[str, Any]:
         "schema": "dagcert-english-requirements/v2",
         "claims": [{
             "id": "five-source-policies-and-variable-stream",
-            "statement": "Under the explicit initialization, atomic-state ownership, scheduling and interval workload premises, the five example policies preserve their stated safety invariants and local accounting relations. The finite streaming buffer stays within capacity and retains at least 400ms during every refill busy period for all time, including variable sized output and individually slow pieces. This is not a certificate of five complete deployed applications.",
-            "basis": "derived", "primitive_refs": refs, "checker_refs": [],
+            "statement": "Under the explicit initialization and atomic-state ownership premises, the five example policies preserve their stated safety invariants and local accounting relations. Given each of the four whole-horizon engineering envelopes has failure probability at most 1/10000, the probability of retaining at least 400ms of reserve in every refill busy period for all time is at least 0.9996; the probability of any streaming interruption in that modeled lifetime is at most 0.0004. Output lengths and production times vary, and some pieces take longer to produce than to play. This is not a certificate of five complete deployed applications.",
+            "basis": "chance", "primitive_refs": refs, "checker_refs": [],
             "assumptions": [
                 "Every declared initialization and mutation-scope premise holds; no unmodeled code mutates the retained state.",
-                "Every network envelope holds for all relevant intervals, not just one measured run. Failed attempts and zero-output outcomes remain included.",
+                "For each of the four network envelopes, the probability that it fails anywhere over the entire unbounded modeled lifetime is at most 1/10000. These are explicit engineering assumptions, not per-call failure rates or statistically inferred measurements. They need not be independent. Failed attempts and zero-output outcomes remain included in the workload envelope.",
                 "The interval workload relation, not a per-job stopwatch maximum, bounds production. Scheduler restart delay is included explicitly.",
                 "The example constructs segment descriptors; an application must replace platform rendering, queue persistence and callback execution with its own source-bound paths and explicit platform contracts.",
             ],
-            "formula": {"eq": [{"state_claim_proved": "state-claim:stream.infinite-reserve"}, 1]},
+            "formula": {"gte": [{"state_claim_success_probability_lower": "state-claim:stream.infinite-reserve"}, 0.9996]},
         }], "metadata": {},
     }

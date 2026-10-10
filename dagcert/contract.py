@@ -1677,6 +1677,14 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
                 specification = parse_induction_spec(row)
             except InductionError as exc:
                 raise ContractError(f"state_claim {claim_id}: {exc}") from exc
+        elif kind == "lra_theorem":
+            from .theorems import TheoremError, parse_theorem_spec
+            from .linear_logic import LinearLogicError
+
+            try:
+                specification = parse_theorem_spec(row)
+            except (TheoremError, LinearLogicError) as exc:
+                raise ContractError(f"state_claim {claim_id}: {exc}") from exc
         elif kind == "curve_bound":
             from .temporal import TemporalError, parse_temporal_spec
 
@@ -1687,7 +1695,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
         else:
             raise ContractError(
                 f"state_claim {claim_id}.kind must be linear_invariant, "
-                "bounded_non_starvation, bounded_response, relational_invariant, or curve_bound"
+                "bounded_non_starvation, bounded_response, relational_invariant, lra_theorem, or curve_bound"
             )
         state_claims.append(StateClaim(
             claim_id,
@@ -2705,6 +2713,13 @@ def _validate(contract: Contract) -> None:
             try:
                 relation_source_obligations(spec, contract)
             except InductionError as exc:
+                raise ContractError(f"state_claim {claim.id}: {exc}") from exc
+        elif claim.kind == "lra_theorem":
+            from .theorems import TheoremError, prove_theorem
+
+            try:
+                prove_theorem(claim.id, contract)
+            except TheoremError as exc:
                 raise ContractError(f"state_claim {claim.id}: {exc}") from exc
         elif claim.kind == "curve_bound":
             from .temporal import TemporalError, validate_temporal_spec

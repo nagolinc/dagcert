@@ -109,3 +109,24 @@ requirement was added; an observed average is not a universal premise.
 Use `basis: chance` with `state_claim_success_probability_lower` for nonzero
 envelope probabilities. `basis: derived` proves the conditional implication.
 Measurements can challenge assumptions but do not replace source/algebra proof.
+
+The shipped streaming example uses four whole-horizon engineering budgets of
+`1/10000`: playback demand, effective renderer service, variable-work accounting,
+and refill-controller scheduling. Its actual chance formula requires
+`state_claim_success_probability_lower >= 0.9996`. If all four envelopes hold,
+the source-bound timing proof retains at least 400ms in every refill period,
+including variable-length pieces whose individual production time can exceed
+their playback duration. The union bound therefore gives:
+
+```text
+P(any modeled interruption over the entire unbounded lifetime) <= 0.0004
+```
+
+Each budget applies to failure of the **whole envelope anywhere in that
+lifetime**, not to a request or a time slice. These deliberately explicit
+engineering assumptions are not statistically established by this example,
+and they do not estimate an actual platform's infinite-lifetime reliability.
+Independence is neither assumed nor required. A finite-horizon premise cannot
+support the all-time claim; a per-request failure rate cannot be substituted.
+The deterministic initialization and exclusive-state-ownership premises remain
+necessary in addition to the four probabilistic envelopes.

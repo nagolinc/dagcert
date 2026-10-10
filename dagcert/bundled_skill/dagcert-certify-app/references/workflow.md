@@ -250,6 +250,14 @@ booleans remain supplementary evidence.
 
 ## User-requested independent audit handoff
 
+Before claiming a missing application-specific timing operator is a blocker,
+read `dagcert help timing-logic`. Generic `lra_theorem` claims accept the complete
+first-order linear-real formula family. Bind source facts and scoped engineering
+premises, compose reusable lemmas, and let the solver check the implication.
+Do not substitute a standalone `prove-math` certificate for the app certificate;
+it proves mathematics, not that the production system implements its premises.
+The source adapter and supplied invariants remain separate obligations.
+
 Run the optional example's `prepare` command with the exact mandatory English requirements file.
 There is no second claims file that can diverge. It writes one `claim-NNN` directory per claim,
 each with its own sealed packet,

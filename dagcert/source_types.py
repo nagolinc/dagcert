@@ -78,6 +78,7 @@ def type_enforcement_descriptor() -> dict[str, object]:
         "maledictus_verifier.py", "proof_sources.py", "python_verifier.py", "source_types.py",
         "state_model.py", "curves.py", "temporal.py", "quantities.py", "scheduling.py",
         "relations.py", "relation_types.py", "induction.py", "semantic.py", "networks.py", "nagini_launcher.py",
+        "linear_logic.py", "linear_certificates.py", "theorems.py", "theorem_sources.py", "network_transfer.py",
         "javascript_interfaces.py", "source_calls.py",
         "nagini_stubs/dagcert/__init__.pyi", "nagini_stubs/dagcert/runtime.pyi",
         "mypy_stubs/dagcert/__init__.pyi", "mypy_stubs/dagcert/runtime.pyi",
@@ -91,11 +92,12 @@ def type_enforcement_descriptor() -> dict[str, object]:
         manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
     ).encode("utf-8")
     return {
-        "provider": "dagcert.python/v16",
+        "provider": "dagcert.python/v17",
         "dagcert_version": VERSION,
         "static_analysis": "source-ast+strict-mypy/v1",
         "source_relations": "sealed-backend-checked-entry-to-exit-predicates/v1",
         "induction_checker": {"name": "z3", "version": z3.get_version_string()},
+        "mathematical_family": "SMT-LIB/LRA-with-quantifier-elimination/v1",
         "mypy_import_surface": "sealed-type-preserving-dagcert-stub/v1",
         "decorator_provenance": "trusted-imports-and-shadow-rejection/v1",
         "operation_marker": "type-preserving/v1",

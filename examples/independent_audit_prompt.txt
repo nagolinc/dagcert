@@ -110,6 +110,18 @@ time horizon must match the claim; per-request probabilities or finite runs do
 not establish a forever guarantee. Explicit assumptions must describe genuine
 leaf/platform/scheduler premises, not restate an unproved application result.
 
+For general `lra_theorem` claims, distinguish the complete mathematical LRA
+language from its application bindings. Trace every source projection to the
+real backend-proved predicate, including completion/selected-outcome guards.
+Imported lemmas retain their hypotheses; a mathematical implication is not a
+new platform fact. Require dispatch and atomic application bounds where the
+promise concerns an actual visible transition, not merely readiness arithmetic.
+Check invocation identities, horizons, shared versus distinct envelope events,
+missing-event flags, unit conversions and true extrema rather than finite
+sentinels for infinity. A standalone `prove-math` artifact is not an application
+certificate. Reject an assumption that simply supplies the desired application
+conclusion even if an irrelevant source fact has been attached to the proof.
+
 Reject the opposite distortion too: an ordinary function call is not a worker, queue, or scheduling
 boundary. In particular, preprocessing, one external-library call, and postprocessing performed by
 one worker invocation must not be inflated into three DAG tasks merely because the middle call uses

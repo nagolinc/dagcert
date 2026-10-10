@@ -191,7 +191,11 @@ def audit_translation(
         if f"state-claim:{state_claim.id}" not in referenced_primitives:
             continue
         specification = state_claim.specification
-        if state_claim.kind == "relational_invariant":
+        if state_claim.kind == "lra_theorem":
+            from .theorems import theorem_references
+
+            coverage_primitives.update(theorem_references(state_claim.id, contract))
+        elif state_claim.kind == "relational_invariant":
             from .induction import induction_references
 
             coverage_primitives.update(induction_references(specification))
@@ -360,6 +364,16 @@ def audit_translation(
                     if not reference.startswith("state-claim:"):
                         continue
                     temporal_claim = contract.state_claim_by_id.get(reference.split(":", 1)[1])
+                    if temporal_claim is not None and temporal_claim.kind == "lra_theorem":
+                        from .theorems import prove_theorem
+
+                        theorem = prove_theorem(temporal_claim.id, contract)
+                        if temporal_claim.specification["mode"] != "source":
+                            findings.append(f"claim {claim.id} cites a mathematical lemma as an application guarantee; bind the actual source in a source theorem")
+                        if not claim.assumptions:
+                            findings.append(f"claim {claim.id} must disclose its source and engineering-envelope hypotheses")
+                        if theorem.failure_probability_upper > 0 and reference not in _temporal_probability_references(claim.formula):
+                            findings.append(f"claim {claim.id} has probabilistic theorem envelopes; use state_claim_success_probability_lower in a chance claim")
                     if temporal_claim is not None and temporal_claim.kind == "relational_invariant":
                         if not claim.assumptions:
                             findings.append(
@@ -504,7 +518,11 @@ def _formula_timing_premises(
         if state_claim is None:
             return
         specification = state_claim.specification
-        if state_claim.kind == "curve_bound":
+        if state_claim.kind == "lra_theorem":
+            from .theorems import theorem_references
+
+            result.update(ref for ref in theorem_references(state_claim.id, contract) if ref.startswith("timing:"))
+        elif state_claim.kind == "curve_bound":
             from .temporal import temporal_references
 
             result.update(ref for ref in temporal_references(specification) if ref.startswith("timing:"))

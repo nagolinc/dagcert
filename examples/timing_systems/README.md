@@ -28,10 +28,27 @@ floor **400ms** for every refill period over an unbounded horizon. Increasing
 the outage allowance fails the claim despite unchanged asymptotic speed.
 Source induction checks capacity; no overflow curve is silently clipped.
 
+The example also makes a numerical chance claim. Each of its four envelopes
+declares a probability of failure at most `1/10000` **anywhere over the entire
+unbounded modeled lifetime**. The kernel applies the union bound:
+
+```text
+P(any modeled streaming interruption) <= 4 / 10000 = 0.0004
+P(reserve stays >= 400ms in every refill period) >= 0.9996
+```
+
+This needs no independence assumption. These are explicit, strong engineering
+premises about whole-horizon events, not per-request failure rates, estimates
+from successful samples, or a claim that a real machine has those probabilities.
+A per-request `1/10000` failure rate would not justify this all-time result.
+An application that can justify only finite-horizon envelopes must certify that
+horizon instead. The source ownership and initialization premises still apply.
+
 The example constructs descriptors, not video. Actual rendering, common-key
 delivery, persistence, controller wakeup and effective service remain explicit
 integration premises. Its certificate covers the toy source policies and
-conditional timing theorem, not five deployed systems or unmodeled glue.
+conditional probability-bearing timing theorem, not five deployed systems or
+unmodeled glue.
 
 Generated artifacts go under `.cache/timing-systems`. Empty measurements are
 intentional for conditional source/algebra claims; `--certify` still runs the

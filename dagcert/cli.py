@@ -121,6 +121,10 @@ HELP_TOPICS = {
         "variable-size streams, shared workers, batches, retries, identity and source-bound induction",
         "docs/timing-systems.md",
     ),
+    "timing-logic": (
+        "General linear timing logic, composable source facts, and mathematical certificates",
+        "docs/linear-timing-logic.md",
+    ),
     "timing-algebra": (
         "real-time calculus: service, arrivals, inventory, burst recovery, and timing expressiveness",
         "docs/timing-algebra.md",
@@ -241,6 +245,11 @@ def parser() -> ArgumentParser:
     verify = commands.add_parser("verify", help="verify exact source, primitives, timings, and checker results")
     _certificate_arguments(verify)
     verify.add_argument("certificate")
+    prove_math = commands.add_parser("prove-math", help="certify a mathematical SMT-LIB/LRA implication; not an application certificate")
+    prove_math.add_argument("request", help="JSON with variables, assumptions and conclusion")
+    prove_math.add_argument("--output", required=True)
+    verify_math = commands.add_parser("verify-math", help="independently recheck a mathematical LRA certificate")
+    verify_math.add_argument("certificate")
     return root
 
 
@@ -289,6 +298,24 @@ def main(argv: list[str] | None = None) -> int:
             return _install_skill(args)
         if args.command == "help":
             return _help(args)
+        if args.command == "prove-math":
+            from .linear_certificates import issue_math_certificate
+
+            request = json.loads(Path(args.request).read_text(encoding="utf-8"))
+            if not isinstance(request, dict) or set(request) != {"variables", "assumptions", "conclusion"}:
+                raise ValueError("mathematical request must contain variables, assumptions, conclusion")
+            certificate = issue_math_certificate(request["variables"], request["assumptions"], request["conclusion"])
+            path = Path(args.output)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(certificate, indent=2) + "\n", encoding="utf-8")
+            print(f"Mathematical LRA certificate issued: {path}. This is not an application certificate.")
+            return 0
+        if args.command == "verify-math":
+            from .linear_certificates import verify_math_certificate
+
+            result = verify_math_certificate(json.loads(Path(args.certificate).read_text(encoding="utf-8")))
+            print(json.dumps(result.as_dict(), indent=2))
+            return 0 if result.status == "valid" else 1
         if args.command == "lint":
             lint_root = (
                 Path(args.source_root).resolve()
