@@ -1,0 +1,43 @@
+{
+  "schema": "dagcert-english-requirements/v2",
+  "claims": [
+    {
+      "id": "reserve-stays-thirty-percent-full",
+      "statement": "Conditional on the declared all-time arrival and service envelopes, the two producing workers keep the reserve at least 30 percent full for all t >= 0, while the admitted flow stays within its 100-item capacity.",
+      "primitive_refs": [
+        "state-claim:reserve-at-least-thirty-percent",
+        "resource:reserve",
+        "task:produce-first",
+        "task:produce-second",
+        "task:consume",
+        "timing:produce-first/duration",
+        "timing:produce-first/dispatch",
+        "timing:produce-second/duration",
+        "timing:produce-second/dispatch",
+        "timing:consume/duration",
+        "timing:consume/dispatch"
+      ],
+      "checker_refs": [],
+      "assumptions": [
+        "The reserve initially contains 50 items and has capacity 100; no task outside this contract changes it.",
+        "At the time origin there are no preexisting active invocations or undelivered handoffs; all later work is counted by these activation envelopes.",
+        "For each producer, admitted invocation counts in every interval of t milliseconds lie between max(0, (t-100)/100) and 1+t/100 for all time.",
+        "Consumer admissions reserve one item immediately; counts in every interval lie between max(0, (t-50)/50) and 1+t/50 for all time.",
+        "Each worker has one dedicated, work-conserving slot providing t worker-milliseconds in every backlogged interval of length t; no unmodeled competing work or blocking reduces that availability.",
+        "timing:produce-first/duration, timing:produce-second/duration, and timing:consume/duration are assumed upper bounds of 9 ms each.",
+        "timing:produce-first/dispatch, timing:produce-second/dispatch, and timing:consume/dispatch are assumed wait upper bounds of 1 ms each.",
+        "Every producer completion adds exactly one item, every consumer admission removes exactly one item, and no overflow discard or failure path changes those declared effects."
+      ],
+      "basis": "derived",
+      "formula": {
+        "eq": [
+          {"state_claim_proved": "state-claim:reserve-at-least-thirty-percent"},
+          1
+        ]
+      }
+    }
+  ],
+  "metadata": {
+    "purpose": "Explicit conditional reserve promise, with measurements unnecessary for assumed envelopes."
+  }
+}

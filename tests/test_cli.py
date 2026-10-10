@@ -54,7 +54,7 @@ def test_cli_lint_rejects_incomplete_translation(project, capsys, monkeypatch):
     assert main([
         "lint", str(project["contract"]), "--requirements", str(requirements)
     ]) == 2
-    assert "formal timings lack an English claim" in capsys.readouterr().err
+    assert "formula references are not declared" in capsys.readouterr().err
 
 
 def test_cli_lint_checks_external_contracts_with_the_exact_manifest(
@@ -141,11 +141,13 @@ def test_installed_help_lists_and_reads_database_ui_guide(capsys):
 
     assert main(["help", "database-ui"]) == 0
     guide = capsys.readouterr().out
-    assert "database entries appear correctly in the UI" in guide
+    assert "Database-to-UI run-report workflow" in guide
+    assert "observation-only route is the bad path" in guide
     assert "examples.optional_browser_checker" in guide
     assert "examples.certified_database_ui" in guide
     assert "insertion" in guide and "pagination" in guide
-    assert "--check-result" in guide
+    assert "cannot establish a certificate promise" in guide
+    assert "dagcert issue" not in guide
 
 
 def test_installed_help_exposes_generic_structured_workflow_examples(capsys):

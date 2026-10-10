@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dagcert"
-version = "0.20.4"
+version = "0.21.0"
 description = "Plain-English certificates over workers, tasks, resources, and timings"
 readme = "readme.md"
 requires-python = ">=3.12"
@@ -96,6 +96,11 @@ examples = [
     "certified_nested_external_call/*.md",
     "certified_nested_external_call/artifacts/*.json",
     "certified_nested_external_call/artifacts/*.jsonl",
+    "timing_algebra/*.py",
+    "timing_algebra/*.json",
+    "timing_algebra/*.md",
+    "timing_algebra/artifacts/*.json",
+    "timing_algebra/artifacts/*.jsonl",
     "stats_viewer/*.html",
     "stats_viewer/*.css",
     "stats_viewer/*.js",

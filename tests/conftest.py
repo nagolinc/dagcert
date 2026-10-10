@@ -95,12 +95,23 @@ def project(tmp_path: Path) -> dict[str, object]:
         "schema": "dagcert-english-requirements/v2",
         "claims": [{
             "id": "work-completes",
-            "statement": "The declared work task completes within 10 ms for the measured source.",
-            "primitive_refs": ["task:work", "timing:work/normal"],
+            "statement": "Every typed outcome of the source-proved work task acquires exactly one declared state slot.",
+            "primitive_refs": [
+                "task:work",
+                "resource:state",
+                "guarantee:work/acquire/state",
+            ],
             "checker_refs": [],
             "assumptions": [],
-            "basis": "observed",
-            "formula": None,
+            "basis": "derived",
+            "formula": {
+                "eq": [
+                    {
+                        "task_guaranteed_acquire": ["task:work", "resource:state"],
+                    },
+                    1,
+                ],
+            },
         }],
         "metadata": {},
     }, indent=2), encoding="utf-8")

@@ -12,12 +12,16 @@
     },
     {
       "id": "parse-and-accept-time",
-      "statement": "On the exact typed ParsedUrl success path, the composed certified duration of parsing and application acceptance is below 20 ms.",
-      "primitive_refs": ["composition:parse-and-accept", "timing:url.parse/call", "timing:url.accept/completion"],
+      "statement": "Conditional on the declared duration envelopes and the exact typed ParsedUrl success path, parsing followed by application acceptance takes at most 20 ms.",
+      "primitive_refs": ["composition:parse-and-accept-envelope", "timing:url.parse/service-envelope", "timing:url.accept/service-envelope"],
       "checker_refs": [],
-      "assumptions": ["This is conditional on traversing the ParsedUrl outcome named by the composition."],
+      "assumptions": [
+        "timing:url.parse/service-envelope is an assumed duration upper bound of 10 ms.",
+        "timing:url.accept/service-envelope is an assumed duration upper bound of 10 ms.",
+        "This is conditional on traversing the ParsedUrl outcome named by the composition."
+      ],
       "basis": "derived",
-      "formula": {"lt": [{"composition_upper_ms": "composition:parse-and-accept"}, 20.0]}
+      "formula": {"lte": [{"composition_upper_ms": "composition:parse-and-accept-envelope"}, 20.0]}
     }
   ],
   "metadata": {"purpose": "Reference external-provider and downstream typed-DAG claims"}

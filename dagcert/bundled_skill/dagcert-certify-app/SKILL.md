@@ -1,6 +1,6 @@
 ---
 name: dagcert-certify-app
-description: Certify an application with dagcert by modeling its real worker/task/resource DAG, separating observed claims from kernel-derived formulas, collecting exact-source evidence, and optionally auditing application-specific observations. Use when a user says "certify this app", "use dag-certificate", or "use dagcert".
+description: Certify an application with dagcert by deriving every promise from its real worker/task/resource DAG, source-proved operations, and explicit engineering premises. Retained observations are supporting run evidence, never certificate claims. Use when a user says "certify this app", "use dag-certificate", or "use dagcert".
 ---
 
 # Certify an application with dagcert
@@ -31,9 +31,15 @@ Omit a surface only after an explicit user opt-out, and report that opt-out in t
 
 ## Rule 0: improve the experience; never certify a regression
 
-Certification observes and reports. It is not permission to redesign the application. Do not add
+Certification proves explicit guarantees. It is not permission to redesign the application. Do not add
 queues, limits, timeouts, retries, debounce, serialization, rejection, reduced concurrency,
 resource caps, fake fast paths, or altered behavior merely to pass. Report a truthful failure.
+
+**THE OBSERVATION-ONLY ROUTE IS THE BAD PATH.** A successful run belongs in `dagcert analyze`; it
+says nothing about the next run and is not a certificate. Presenting it as a guarantee will
+disappoint the user. Dagcert refuses `observed` certificate claims. Every certificate promise must
+be a `derived` or `chance` kernel formula over the actual DAG. Measurements may challenge or
+support explicit premises, but they never become the promised behavior by themselves.
 
 ## Model the actual execution DAG
 
@@ -81,6 +87,13 @@ declares finite source-outcome paths over those primitives.
 - V7 lifecycle effects distinguish task start from typed completion outcomes. Use kernel state
   claims for affine conservation, finite-horizon supply, and bounded dispatch; do not substitute a
   custom checker boolean for those proofs.
+- Use generic `curve_bound` state claims for streams, inventory floors, backlog, and delay/rate
+  bounds. Read `dagcert help timing-algebra` before constructing them. Bind actual task activations,
+  assumed duration/dispatch costs, effective worker availability, explicit routing, and every
+  typed resource effect. The kernel composes exact rational curves; new application nouns do not
+  require new kernel types. All-time bounds require explicitly all-time premises. A finite run or
+  finite invocation budget cannot establish a forever claim, but all-time claims are not generally
+  forbidden. Source verification remains mandatory.
 
 Reconstruct the execution graph from source before writing the contract. Represent independently
 scheduled stages, actual worker pools, queues, reservations, resource transfers, ordering rules,
@@ -164,15 +177,18 @@ is not a proof.
 
 ## Claim boundary
 
-Classify every claim before collecting evidence:
+Classify every requested behavior before collecting evidence. Retained-execution facts are run
+report material and must not appear as certificate claims.
 
-- `observed` describes only retained executions. Its formula is `null`. Application checkers may
-  support case-bounded semantic facts such as database-to-DOM correspondence.
 - `derived` contains a formula in Dagcert's fixed kernel algebra. It cannot cite a checker as proof.
-  The formula must use a declared multi-operation composition or bounds from at least two connected
-  tasks plus relevant worker/resource state.
-- `chance` contains either a finite-composition engineering-envelope formula or one external-contract
-  probability premise. A step with a declared task-local engineering error budget selects a
+  The formula uses a declared composition, kernel state proof, guaranteed typed resource effects,
+  or bounds from connected tasks with relevant worker/resource state.
+- `chance` contains a finite-composition formula, an external-contract probability premise, or
+  `state_claim_success_probability_lower` for a conditional `curve_bound` proof. Temporal envelopes
+  budget violations anywhere in their stated window; they are not per-call probabilities. Explicit
+  service `outcomes` restrict the actual source union only as part of a joint whole-window premise.
+  Without that premise every outcome contributes to resource bounds. A finite composition step
+  with a declared task-local engineering error budget selects a
   source-typed good outcome and cites that budget as an explicit assumption. A source-proved task
   whose complete outcome union is exactly the selected outcome contributes structural zero when its
   budget is null. It may instead declare a conservative nonzero budget without weakening its typed
@@ -194,12 +210,13 @@ composed latency with a summary task whose measured output is the desired conclu
 
 1. Run `dagcert init <app-root>` and replace every placeholder. Unless explicitly declined, install
    the literal `/stats` viewer and dismissible violation banner before application certification.
-2. Inventory the user's requested guarantees. Classify each as observed, derived, or chance and write its
-   exact scope and assumptions before evidence collection.
+2. Inventory the user's requested guarantees. Classify each as derived or chance and write its
+   exact scope and assumptions before evidence collection. Put observations in the evidence/run
+   report, never in the certificate promise set.
 3. Trace source paths and build the smallest faithful worker/task/resource DAG. Do not mirror every
    function, but do not omit state or scheduling boundaries material to a claim.
 4. Declare real workers, operation tasks, instrumentation, resources, structured finite
-   compositions, and any required lifecycle state claims.
+   compositions, and any required lifecycle or temporal curve state claims.
    Bind each task to the source symbol actually called by its production worker; do not write
    `input_type` or `output_type` labels in the contract.
 5. Put timing premises in `assumed` leaf timings. Model external-library behavior with a declared
@@ -212,7 +229,7 @@ composed latency with a summary task whose measured output is the desired conclu
 8. Encode derived claims as kernel formulas over the actual DAG. Do not use checker booleans or
    aggregate samples as proof premises.
 9. Run `dagcert issue`, then `dagcert verify` with identical inputs and exclusions.
-10. Report `CERTIFIED` only for the exact verified source and the exact observed/derived/chance scope.
+10. Report `CERTIFIED` only for the exact verified source and the exact derived/chance scope.
     Otherwise report `NOT CERTIFIED` and preserve the failures.
 
 Never fabricate samples, capacities, transitions, formulas, checker results, or a passing
@@ -227,6 +244,11 @@ missing queues or reservations, omitted failure transitions, average-rate substi
 bounds, mutually exclusive callers modeled as simultaneous dependencies, real joins weakened into
 alternatives, contextual external evidence attributed to the wrong call site, and any proof that
 does not resemble the actual application DAG.
+For temporal proofs, also check that service capacity is not substituted for actual production,
+all consumers and possible overflows are accounted for, routing has a real dispatch/delivery
+premise, shared worker/resource slots are not overcommitted, and finite assumptions have not been
+promoted to all-time promises. A conditional all-time envelope proof is valid in scope; an observed
+finite run is not its proof.
 
 The review remains advisory: it can invalidate a claim, but its `passed` boolean cannot establish a
 derived formula. Follow the per-claim handoff procedure in the workflow reference.

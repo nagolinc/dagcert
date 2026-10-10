@@ -110,19 +110,24 @@ def formula_references(formula: Mapping[str, Any]) -> tuple[str, ...]:
         if isinstance(value, Mapping):
             for operator, operand in value.items():
                 if operator in {
-                    "composition_upper_ms", "timing_upper_ms", "timing_lower_ms",
+                    "composition_upper_ms", "composition_required_successes",
+                    "timing_upper_ms", "timing_lower_ms",
                     "worker_concurrency", "resource_capacity", "resource_initial",
                     "composition_failure_probability_upper",
                     "composition_success_probability_lower",
                     "external_failure_probability_upper",
                     "external_success_probability_lower",
-                    "state_claim_proved",
+                    "state_claim_proved", "state_claim_success_probability_lower",
                 } and isinstance(operand, str):
                     references.add(operand)
-                elif operator in {"task_guaranteed_produce", "task_guaranteed_consume"}:
+                elif operator in {
+                    "task_guaranteed_acquire",
+                    "task_guaranteed_produce",
+                    "task_guaranteed_consume",
+                }:
                     task_ref, resource_ref = _effect_pair(operand, f"formula.{operator}")
                     references.update({task_ref, resource_ref})
-                    kind = "produce" if operator.endswith("produce") else "consume"
+                    kind = operator.rsplit("_", 1)[1]
                     references.add(
                         f"guarantee:{task_ref.split(':', 1)[1]}/{kind}/{resource_ref.split(':', 1)[1]}"
                     )
@@ -144,6 +149,7 @@ def formula_uses_error_budgets(formula: Mapping[str, Any]) -> bool:
             "composition_success_probability_lower",
             "external_failure_probability_upper",
             "external_success_probability_lower",
+            "state_claim_success_probability_lower",
         }
         for operator in formula
     ):
@@ -180,11 +186,47 @@ def validate_claim_formula(formula: Mapping[str, Any], *, basis: str) -> None:
 
 def _validate_chance_claim_formula(formula: Mapping[str, Any]) -> None:
     row = _single_operator(formula, "formula")
+    if "and" in row:
+        items = _items(row["and"], "formula.and", minimum=2)
+        if len(items) != 2 or not all(isinstance(item, Mapping) for item in items):
+            raise FormulaError(
+                "chance conjunction must contain exactly one probability bound and one "
+                "non-vacuous derived bound"
+            )
+        probability_items = [
+            item for item in items
+            if _chance_probability_comparison_reference(item) is not None
+        ]
+        derived_items = [item for item in items if item not in probability_items]
+        if len(probability_items) != 1 or len(derived_items) != 1:
+            raise FormulaError(
+                "chance conjunction must contain exactly one probability bound and one "
+                "non-vacuous derived bound"
+            )
+        probability_ref = _chance_probability_comparison_reference(probability_items[0])
+        assert probability_ref is not None
+        _validate_derived_claim_formula(derived_items[0], "formula.and.derived")
+        derived_compositions = {
+            reference for reference in formula_references(derived_items[0])
+            if reference.startswith("composition:")
+        }
+        if derived_compositions != {probability_ref}:
+            raise FormulaError(
+                "chance conjunction probability and derived bounds must cite the same composition"
+            )
+        _validate_direct_probability_comparison(probability_items[0])
+        return
+    _validate_direct_probability_comparison(row)
+
+
+def _validate_direct_probability_comparison(formula: Mapping[str, Any]) -> None:
+    row = _single_operator(formula, "formula")
     operator, operand = next(iter(row.items()))
     expected_probability_operators = {
         "gte": {
             "composition_success_probability_lower",
             "external_success_probability_lower",
+            "state_claim_success_probability_lower",
         },
         "lte": {
             "composition_failure_probability_upper",
@@ -207,6 +249,7 @@ def _validate_chance_claim_formula(formula: Mapping[str, Any]) -> None:
     _reference(
         probability[expected_probability_operator],
         "external-contract" if expected_probability_operator.startswith("external_")
+        else "state-claim" if expected_probability_operator.startswith("state_claim_")
         else "composition",
         f"formula.{operator}[0].{expected_probability_operator}",
     )
@@ -215,6 +258,24 @@ def _validate_chance_claim_formula(formula: Mapping[str, Any]) -> None:
     threshold = float(right)
     if not isfinite(threshold) or not 0.0 <= threshold <= 1.0:
         raise FormulaError("chance formula threshold must be finite and between 0 and 1")
+
+
+def _chance_probability_comparison_reference(formula: Mapping[str, Any]) -> str | None:
+    if len(formula) != 1:
+        return None
+    operator, operand = next(iter(formula.items()))
+    if operator not in {"gte", "lte"} or not isinstance(operand, list) or len(operand) != 2:
+        return None
+    left = operand[0]
+    if not isinstance(left, Mapping) or len(left) != 1:
+        return None
+    numeric_operator, reference = next(iter(left.items()))
+    expected = (
+        "composition_success_probability_lower"
+        if operator == "gte"
+        else "composition_failure_probability_upper"
+    )
+    return reference if numeric_operator == expected and isinstance(reference, str) else None
 
 
 def _validate_derived_claim_formula(formula: Mapping[str, Any], label: str) -> None:
@@ -320,6 +381,21 @@ def _validate_dag_surface(references: set[str], contract: Contract) -> None:
                 "v4 resource derivations must use task_guaranteed_produce/consume for every "
                 f"referenced task effect; missing {sorted(missing_guarantees)}"
             )
+    if not timing_tasks and guarantees:
+        guarantee_tasks = {
+            guarantee.split("/", 1)[0] for guarantee in guarantees
+        }
+        invalid_tasks = sorted(
+            task_id for task_id in guarantee_tasks
+            if task_id not in contract.task_by_id
+            or contract.task_by_id[task_id].role == "instrumentation"
+        )
+        if invalid_tasks:
+            raise FormulaError(
+                "guaranteed resource formulas require source-proved operation/external tasks; "
+                f"invalid tasks {invalid_tasks}"
+            )
+        return
     if len(timing_tasks) < 2 or not supporting_state:
         raise FormulaError(
             "derived formula must use a declared composition or bounds from at least two "
@@ -418,6 +494,18 @@ def _number(value: Any, state: _EvaluationState, label: str) -> float:
         for step in composition.steps:
             total += _step_upper_ms(step.task, step.timing, timing_by_ref, reference) * step.count
         return total
+    if operator == "composition_required_successes":
+        reference = _reference(operand, "composition", f"{label}.{operator}")
+        composition = state.contract.composition_by_id.get(reference)
+        if composition is None:
+            raise FormulaError(f"{label} cites unknown composition {reference!r}")
+        expression = composition.expression
+        if expression is None or expression.kind != "threshold_repeat":
+            raise FormulaError(
+                f"composition {reference} must be a top-level threshold_repeat to expose its "
+                "required success count"
+            )
+        return float(expression.required)
     if operator in {
         "composition_failure_probability_upper",
         "composition_success_probability_lower",
@@ -460,7 +548,11 @@ def _number(value: Any, state: _EvaluationState, label: str) -> float:
         if resource is None:
             raise FormulaError(f"{label} cites unknown resource {reference!r}")
         return resource.capacity if operator == "resource_capacity" else resource.initial
-    if operator in {"task_guaranteed_produce", "task_guaranteed_consume"}:
+    if operator in {
+        "task_guaranteed_acquire",
+        "task_guaranteed_produce",
+        "task_guaranteed_consume",
+    }:
         task_ref, resource_ref = _effect_pair(operand, f"{label}.{operator}")
         task_id = task_ref.split(":", 1)[1]
         resource_id = resource_ref.split(":", 1)[1]
@@ -469,9 +561,9 @@ def _number(value: Any, state: _EvaluationState, label: str) -> float:
             raise FormulaError(f"{label} cites unknown task {task_id!r}")
         if resource_id not in state.contract.resource_by_id:
             raise FormulaError(f"{label} cites unknown resource {resource_id!r}")
-        kind = "produce" if operator.endswith("produce") else "consume"
+        kind = operator.rsplit("_", 1)[1]
         return task.guaranteed_effect(resource_id, kind)
-    if operator == "state_claim_proved":
+    if operator in {"state_claim_proved", "state_claim_success_probability_lower"}:
         reference = _reference(operand, "state-claim", f"{label}.{operator}")
         claim = state.contract.state_claim_by_id.get(reference)
         if claim is None:
@@ -483,6 +575,12 @@ def _number(value: Any, state: _EvaluationState, label: str) -> float:
                 f"state claim {reference} failed: {proof.summary}"
                 + (f"; counterexample: {detail}" if detail else "")
             )
+        if operator == "state_claim_success_probability_lower":
+            if claim.kind != "curve_bound":
+                raise FormulaError("state probability requires a curve_bound proof")
+            from .temporal import temporal_failure_upper
+
+            return float(1 - temporal_failure_upper(claim.specification))
         return 1.0
     raise FormulaError(f"{label} uses unsupported numeric operator {operator!r}")
 

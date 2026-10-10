@@ -60,6 +60,47 @@ overlap only when their worker sets and acquired resources are disjoint. Complet
 is no earlier than reaching the Kth qualifying exit, so the same value is a safe conditional bound
 on the Kth success.
 
+The same threshold can prove a finite-window production-rate guarantee. A chance formula may
+conjoin exactly two bounds for the same threshold composition: the probability of reaching K and
+the derived lower production rate `K / all-N-upper-duration`:
+
+```json
+{
+  "and": [
+    {
+      "gte": [
+        {"composition_success_probability_lower": "composition:prepare-seven-of-ten"},
+        0.75
+      ]
+    },
+    {
+      "gt": [
+        {
+          "divide": [
+            {
+              "composition_required_successes":
+                "composition:prepare-seven-of-ten"
+            },
+            {
+              "divide": [
+                {"composition_upper_ms": "composition:prepare-seven-of-ten"},
+                1000
+              ]
+            }
+          ]
+        },
+        250
+      ]
+    }
+  ]
+}
+```
+
+This means: under the declared engineering envelopes, at least seven qualifying outputs arrive
+within the composition's 25 ms upper bound with probability at least 0.75, so the finite-window
+production rate is greater than 250 outputs/second. The rate is not an average measured from a
+successful run. It is recomputed from K and the DAG-derived duration bound.
+
 This operator proves a predeclared finite attempt prefix. It does not prove that inputs arrive, that
 the production controller dispatches the prefix, that an unbounded retry loop is live, or that a
 particular N makes a larger end-to-end chance claim positive. Those premises and remaining failure

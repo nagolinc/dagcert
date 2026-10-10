@@ -34,7 +34,14 @@
       },
       "depends_on": [],
       "timings": {
-        "call": {"metric": "duration", "upper_ms": 10, "minimum_samples": 3}
+        "call": {"metric": "duration", "upper_ms": 10, "minimum_samples": 3},
+        "service-envelope": {
+          "metric": "duration",
+          "upper_ms": 10,
+          "minimum_samples": 0,
+          "evidence": "assumed",
+          "safety_factor": 1
+        }
       }
     },
     {
@@ -49,7 +56,14 @@
       "external_contract": null,
       "depends_on": [{"task": "url.parse", "outcome_type": "ParsedUrl"}],
       "timings": {
-        "completion": {"metric": "duration", "upper_ms": 10, "minimum_samples": 3}
+        "completion": {"metric": "duration", "upper_ms": 10, "minimum_samples": 3},
+        "service-envelope": {
+          "metric": "duration",
+          "upper_ms": 10,
+          "minimum_samples": 0,
+          "evidence": "assumed",
+          "safety_factor": 1
+        }
       }
     }
   ],
@@ -61,6 +75,14 @@
         {"task": "url.accept", "timing": "completion", "count": 1, "outcome_type": "ParsedUrl"}
       ],
       "metadata": {"horizon": "one URL parse followed by one application acceptance"}
+    },
+    {
+      "id": "parse-and-accept-envelope",
+      "steps": [
+        {"task": "url.parse", "timing": "service-envelope", "count": 1, "outcome_type": "ParsedUrl"},
+        {"task": "url.accept", "timing": "service-envelope", "count": 1, "outcome_type": "ParsedUrl"}
+      ],
+      "metadata": {"horizon": "one URL parse followed by one application acceptance under the declared duration envelopes"}
     }
   ],
   "metadata": {"purpose": "Reference external-library contract with runtime conformance evidence"}

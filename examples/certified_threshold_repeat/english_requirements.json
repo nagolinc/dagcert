@@ -2,34 +2,13 @@
   "schema": "dagcert-english-requirements/v2",
   "claims": [
     {
-      "id": "seven-items-confidence",
-      "statement": "Under the declared engineering envelopes for the complete sampling-and-preparation attempt, at least seven of ten finite attempts produce PreparedItem values with probability at least 0.75.",
+      "id": "seven-items-throughput-confidence",
+      "statement": "Under the declared engineering envelopes for the complete sampling-and-preparation attempt, at least seven of ten finite attempts produce PreparedItem values within 25 ms with probability at least 0.75, giving a finite-window production rate greater than 250 prepared items per second.",
       "primitive_refs": [
         "composition:prepare-seven-of-ten",
         "error-budget:item.sample",
         "error-budget:item.prepare",
-        "resource:prepared-items"
-      ],
-      "checker_refs": [],
-      "assumptions": [
-        "Each sampling and preparation stage has bad-event probability at most 0.05, giving a complete-attempt envelope of at most 0.1 by the union bound.",
-        "The bound uses Markov's inequality over the number of bad outcomes and does not assume independent attempts."
-      ],
-      "basis": "chance",
-      "formula": {
-        "gte": [
-          {
-            "composition_success_probability_lower": "composition:prepare-seven-of-ten"
-          },
-          0.75
-        ]
-      }
-    },
-    {
-      "id": "finite-batch-decision-time",
-      "statement": "All ten finite attempt prefixes reach typed outcomes within 25 ms under the declared sampling and preparation worker bounds.",
-      "primitive_refs": [
-        "composition:prepare-seven-of-ten",
+        "resource:prepared-items",
         "worker:sampling-worker",
         "worker:preparation-worker",
         "timing:item.sample/completion",
@@ -37,16 +16,42 @@
       ],
       "checker_refs": [],
       "assumptions": [
+        "Each sampling and preparation stage has bad-event probability at most 0.05, giving a complete-attempt envelope of at most 0.1 by the union bound.",
+        "The bound uses Markov's inequality over the number of bad outcomes and does not assume independent attempts.",
         "The production controller can dispatch the first ten attempts unless seven qualifying outcomes stop the prefix earlier.",
         "Each sampling invocation reaches a typed outcome within two milliseconds and each preparation invocation within five milliseconds."
       ],
-      "basis": "derived",
+      "basis": "chance",
       "formula": {
-        "lte": [
+        "and": [
           {
-            "composition_upper_ms": "composition:prepare-seven-of-ten"
+            "gte": [
+              {
+                "composition_success_probability_lower": "composition:prepare-seven-of-ten"
+              },
+              0.75
+            ]
           },
-          25
+          {
+            "gt": [
+              {
+                "divide": [
+                  {
+                    "composition_required_successes": "composition:prepare-seven-of-ten"
+                  },
+                  {
+                    "divide": [
+                      {
+                        "composition_upper_ms": "composition:prepare-seven-of-ten"
+                      },
+                      1000
+                    ]
+                  }
+                ]
+              },
+              250
+            ]
+          }
         ]
       }
     }

@@ -1,4 +1,9 @@
-# Certified database-to-UI reference application
+# Legacy database-to-UI run-report example — not a certificate
+
+**The directory name is historical. Current Dagcert refuses this example's observation-only
+requirements.** Its retained Selenium/HTTP/SQLite results are useful run evidence, but they say
+nothing about the next run. Do not present them as a behavioral guarantee; that is the bad path and
+will disappoint the user.
 
 This is a real SQLite, HTTP, JavaScript, and Selenium reference application. See
 [artifacts/STATUS.md](artifacts/STATUS.md) for the latest retained certification result. The workflow
@@ -15,15 +20,12 @@ The ordinary non-streaming HTTP deadlines are 50 ms. Immediate browser DOM feedb
 rendering use the 16 ms defaults. The browser checks compare application-owned read-only SQL
 projections with Selenium observations using stable semantic row keys and visible fields.
 
-The SQLite list/insert/delete operations are real v5 Python task boundaries used by the production
-HTTP handlers. Dagcert extracts their named input and outcome classes and runs strict mypy. These
-tasks are explicitly observational instrumentation: the certificate does not claim Nagini proved
-SQLite, browser JavaScript, or Selenium. Browser
-DOM timings are explicitly modeled as typed instrumentation; the certificate does not pretend that
-Python type-checks the JavaScript implementation. The real Selenium/HTTP/SQLite projection checker
-supports those observed browser claims.
+The SQLite list/insert/delete operations are real Python boundaries used by the production HTTP
+handlers, but this legacy example does not provide a source-proved end-to-end browser DAG. Its
+browser timings and Selenium/HTTP/SQLite projections are run evidence only and cannot satisfy a
+certificate claim.
 
-## Attempt certification
+## Collect a run report
 
 From the Dagcert repository root, collect fresh evidence through real HTTP and Selenium boundaries:
 
@@ -66,15 +68,9 @@ py -m examples.optional_openai_luna_audit accept \
   --output examples/certified_database_ui/artifacts/independent-audit-result.json
 ```
 
-Finally issue and immediately verify a certificate that requires the projection checks. Attach the
-accepted independent audit only when that optional audit was freshly requested and completed:
-
-```text
-py -m examples.certified_database_ui.certify issue
-
-py -m examples.certified_database_ui.certify issue \
-  --audit-result artifacts/independent-audit-result.json
-```
+Do not run the historical `issue` command. Current Dagcert intentionally rejects these observed
+claims. A future certificate must replace them with source-proved derived/chance formulas over the
+actual browser/HTTP/application DAG.
 
 Collecting again changes the evidence digest and intentionally invalidates prior audit responses.
 Never reuse an audit response or certificate after collection or source changes.

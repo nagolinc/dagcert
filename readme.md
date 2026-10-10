@@ -5,8 +5,9 @@ resource can never become available, work arrives faster than it completes, deri
 permanently stale, or an “async” action quietly blocks the UI.
 
 Dagcert helps an LLM prove that the exact application performs and keeps making progress. It turns
-plain-English product promises into a formal task/resource model, measures the real implementation,
-and produces a certificate bound to the exact source and evidence.
+plain-English product promises into a formal task/resource model, proves those guarantees from the
+real execution DAG and explicit engineering premises, and binds the result to exact source and
+supporting evidence.
 
 It is designed to catch a large class of failures involving:
 
@@ -27,8 +28,10 @@ input and verification fails.
 
 Give the LLM building or maintaining your app this instruction:
 
-> **Certify this app with https://github.com/nagolinc/dagcert. Measure the real application, and do
-> not change product behavior merely to make the certificate pass.**
+> **Certify this app with https://github.com/nagolinc/dagcert. Derive every promise from the real
+> worker/task/resource DAG and source-proved operations. Use measurements only as supporting run
+> evidence, never as the promise itself, and do not change product behavior merely to make the
+> certificate pass.**
 
 That is the intended interface. The agent can install Dagcert, read its installed help, initialize
 the focused agent guide, inspect the complete examples, instrument the real runtime boundaries, and
@@ -58,10 +61,16 @@ reason to use different ones.
 
 ### Rule 0: certification must improve the user experience
 
-Certification is observational by default. It is not permission to add arbitrary finite queues,
+Certification is guarantee-first. It is not permission to add arbitrary finite queues,
 timeouts, rate limits, rejection, automatic retry, debounce delays, cancellation, or serialization
 points merely to obtain a passing certificate. A truthful failure is better than a certificate
 obtained by breaking the app.
+
+> **THE OBSERVATION-ONLY ROUTE IS THE BAD PATH.** A successful retained run belongs in
+> `dagcert analyze`; it says nothing about the next run and is not a certificate. Presenting a
+> benchmark report as a behavioral guarantee will disappoint the user. Dagcert therefore refuses
+> every `observed` certificate claim. Certificate promises must be `derived` or `chance` claims
+> over the actual DAG, source-proved leaves, and explicit engineering premises.
 
 ## The core library and what it can certify
 
@@ -76,9 +85,8 @@ The formal application model contains five primitives:
 - **timings** describe duration, arrival interval, waiting, or age, using measurements or explicit
   assumptions.
 
-Those primitives are enough to express conditional statements such as:
+Those primitives are enough to prove conditional statements such as:
 
-- every declared task has successful completion evidence;
 - every declared task has a feasible worker/resource path;
 - the declared graph has no structural blocked state;
 - task X receives enough work to avoid starvation after warm-up;
@@ -94,10 +102,11 @@ Every v7+ leaf names the source outcome traversed and every sequence boundary mu
 dependency edges. A fork/join binds each branch output to a field of the downstream source input
 record. A composition has no stopwatch of its own: Dagcert computes its bound from exact leaf
 duration cases, using `max` for a parallel region only when worker and acquired-resource capacity
-permit the declared overlap. Claims are `observed` (retained executions only), `derived`
-(a fixed-algebra deterministic formula), or `chance` (a finite-composition union bound over explicit
-engineering error budgets). Derived and chance claims cannot delegate proof to an arbitrary checker
-boolean.
+permit the declared overlap. Certificate claims are `derived` (a kernel deterministic formula)
+or `chance` (a kernel probability bound over explicit engineering premises). Chance premises may
+describe finite invocations, an external contract, or whole-window timing envelopes.
+Retained observations are run evidence reported by `dagcert analyze`; they are not certificate
+claims. Derived and chance claims cannot delegate proof to an arbitrary checker boolean.
 
 A `threshold_repeat` is the restricted finite K-of-N operator. In v12 its body may be one real task
 or a structured `sequence`, `parallel_all`, `finite_repeat`, `async_handoff`, or
@@ -110,6 +119,13 @@ resources, and leaf timings; it is therefore also an upper bound on the Kth qual
 when one occurs. The operator covers a predeclared finite attempt prefix. It does not prove that
 inputs arrive, that an application controller actually dispatches that prefix, or that an unbounded
 retry loop is live. See `dagcert help threshold-repeat`.
+
+The same operator can prove a chance throughput envelope without claiming infinite failure-free
+operation: `composition_required_successes` exposes the threshold's certified K, ordinary formula
+division derives `K / T` from that value and the all-N duration bound, and the chance clause proves
+the probability of reaching K. This expresses, for example, “with probability at least P,
+production exceeds the playback consumption rate over this declared window” without adding a
+domain-specific rate primitive.
 
 An `async_handoff` does not pretend that a queue-poll request already contains an unknown producer
 value. Its declared channel requires the producer's terminal outcome to equal the compiler-extracted
@@ -137,9 +153,20 @@ source decorator identity. Evidence retains both identities. See
 
 V7+ tasks also distinguish resource effects at task start from effects on each typed completion
 outcome. Kernel-owned state claims cover affine lifecycle invariants, finite-horizon
-producer/consumer supply, and a separate bounded dispatch wait. These deliberately restricted
-proofs return concrete failing transitions or finite-horizon traces; they are not a general temporal
-logic language.
+producer/consumer supply, a separate bounded dispatch wait, and generic `curve_bound` expressions.
+The latter provide real-time calculus over arrival, available-service, departure, and inventory
+envelopes. Addition, subtraction, min/max, time shifts, and min-plus convolution/deconvolution use
+exact rational piecewise-affine curves, with no sampled time grid. They express buffer floors,
+backlog ceilings, rolling throughput, and delay bounds without application-specific kernel types.
+
+An all-time curve bound is supported when every premise explicitly covers all time; finite call
+budgets or a successful session cannot establish it. Whole-window probabilistic envelopes use
+`state_claim_success_probability_lower`, which first proves the conditional bound and then unions
+the envelope and routing failure budgets. Worker capacity is not output: the derivation also needs
+actual activations, service/dispatch bounds, typed outcomes, and every producer/consumer effect.
+Source verification remains mandatory. See [`dagcert help timing-algebra`](dagcert/docs/timing-algebra.md)
+for twenty application patterns and run `python -m examples.timing_algebra` for the two-producer
+reserve example. These rules are not arbitrary temporal logic.
 
 For Python, each v7+ task points to the production source file and symbol. Dagcert reads the real
 one-input annotation and closed return union, rejects `Any` throughout those boundary variants,
@@ -263,17 +290,22 @@ outcome; Dagcert does not require or invent a semantically bad branch. A
 chance path requires each declared budget's good set to equal the exact typed outcome selected at
 that step. A source-proved task with exactly that one outcome needs no budget and contributes zero;
 it may still declare a conservative nonzero engineering budget without weakening the stronger
-typed-totality result. Unbudgeted conditional paths remain invalid. Chance claims directly compare
+typed-totality result. Unbudgeted conditional paths remain invalid. Finite-path chance claims directly compare
 the finite path's union-bound result with a literal probability; boolean fallback branches are
 rejected. The kernel sums finite invocation budgets, so correlation and burstiness cannot make the
 result falsely tighter.
 Retained observations only check consistency with those engineering assumptions; they do not
 statistically establish rare-event rates.
 
+Temporal chance claims instead declare whole-window arrival, service/outcome, and routing
+envelopes. A service envelope may restrict allowed outcomes only as an explicit joint premise
+covering every invocation in that window; the complete source outcome union remains checked.
+Finite-window and all-time premises must retain their actual scope.
+
 The core also provides a small checker protocol. Applications can record case-bounded semantic
 facts—such as database rows matching the visible DOM—without adding database, browser, queue, or UI
-concepts to the core ontology. These support observed claims; they do not establish derived system
-properties.
+concepts to the core ontology. These results belong in run reports and supporting evidence; they
+do not establish certificate promises by themselves.
 
 ### From a plain-English requirement to a formal certificate
 
@@ -282,7 +314,7 @@ The English requirements are the source of truth, not documentation added after 
 ```text
 english_requirements.json
         |
-        | each claim declares observed/derived/chance basis, assumptions, and references
+        | each claim declares derived/chance basis, assumptions, and references
         v
 dag_contract.json: workers + tasks + resources + timings + compositions
         |
@@ -296,8 +328,8 @@ certificate.json
 ```
 
 1. `english_requirements.json` states every promised behavior in ordinary language. Each claim has
-   a stable ID, observed/derived/chance basis, explicit assumptions, and exact references. Derived
-   and chance claims have kernel formulas and cannot cite a checker as proof.
+   a stable ID, derived/chance basis, explicit assumptions, and exact references. Every claim has a
+   kernel formula and cannot cite a checker as proof.
 2. `dag_contract.json` is the formal translation using the five primitives.
 3. Runtime evidence records real task executions, timings, worker identity, actual runtime outcome
    variants, concurrency, resource effects, and failures. Source types never come from evidence.
@@ -449,13 +481,9 @@ digest-pinned Maledictus backend. The platform timing is explicitly assumed. Run
 [`examples/certified_vote`](examples/certified_vote/README.md) is a deliberately narrow in-process
 example showing how the core primitives express performance and conditional flow guarantees.
 
-Its checked-in v10 certificate establishes:
+Its guarantee certificate establishes:
 
-- ten successful measured executions for every declared task;
-- no structural blocked state under the stated scheduling/resource assumptions;
-- `<16ms` in-process vote preview and `<50ms` in-process commit;
 - strict-mypy-checked, Nagini-proved source-owned task boundaries; and
-- dependency edges whose upstream outcome types match the downstream source input types.
 - a 98% lower engineering success budget for one finite preview-to-commit path, conditional on two
   declared 1% leaf bad-event budgets and composed without an independence assumption.
 
@@ -469,10 +497,12 @@ claim makes its leaf failure assumptions explicit.
 This example deliberately makes no browser, HTTP, database, or production worker-pool promise. Its
 requirements state those limitations plainly.
 
-### Database-to-UI certification example
+### Database-to-UI run-report example — not a certificate
 
-[`examples/certified_database_ui`](examples/certified_database_ui/README.md) is a real SQLite, HTTP,
-JavaScript, and Selenium application.
+[`examples/certified_database_ui`](examples/certified_database_ui/README.md) is retained as a
+legacy SQLite/HTTP/JavaScript/Selenium measurement and semantic-audit example. Its directory name is
+historical. **It is not a current Dagcert certificate example and `dagcert issue` rejects its
+observation-only requirements.**
 
 Its workflow checks:
 
@@ -484,15 +514,14 @@ Its workflow checks:
 - `<50ms` measured non-streaming HTTP work; and
 - `<16ms` immediate browser feedback and local rendering for the measured workload.
 
-Its first rollback-journal hardened run retained a safety-adjusted HTTP timing failure. After the
-application changed to use SQLite WAL mode, the first new exact-source run passed the unchanged
-bounds; the current artifacts are reissued as a verified [v10 certificate](examples/certified_database_ui/artifacts/certificate.json).
-This example's tasks are observational instrumentation: strict mypy checks their source types, but
-the certificate does not misstate SQLite, browser JavaScript, or Selenium behavior as Nagini-proved.
+Its checked-in historical artifact demonstrates the now-forbidden observation-only path. It may be
+inspected as a run record, but current Dagcert deliberately refuses to issue or verify it as a
+guarantee certificate. Do not copy this workflow when asked to certify an application.
 See the complete [status record](examples/certified_database_ui/artifacts/STATUS.md),
 [plain-English requirements](examples/certified_database_ui/english_requirements.json), and
 [formal contract](examples/certified_database_ui/dag_contract.json).
-Run `python -m dagcert help database-ui` for the reusable certification workflow.
+Run `python -m dagcert help database-ui` for the run-report boundary and the explanation of what a
+future source-proved browser guarantee would still need.
 
 ## Manual CLI workflow
 

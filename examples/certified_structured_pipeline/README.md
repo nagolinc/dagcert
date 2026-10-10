@@ -10,9 +10,12 @@ application architecture. It demonstrates:
 - `finite_repeat`; and
 - a conservative union-bound chance claim over the two parallel branches.
 
-The operation timings are measured. The producer/consumer service envelopes and dispatch bound are
-explicit assumptions; the certificate therefore presents the supply result as conditional. The
-example does not use a pipeline observer or an aggregate stopwatch.
+The measured operation timings remain evidence for the engineering error-budget checks. Separate
+assumed service envelopes support the latency promise: prepare takes at most 10 ms, validation and
+checksum each take at most 10 ms in parallel, and publication takes at most 20 ms. The kernel
+derives `3 × (10 + max(10, 10) + 20) = 120 ms` for the three-job success path. The producer/consumer
+service envelopes and dispatch bound are also explicit assumptions, so the latency and supply
+results are conditional. A passing measurement is not promoted into a future timing guarantee.
 
 To issue with the independently built Maledictus backend:
 

@@ -57,6 +57,52 @@ def _set_checker_refs(project, *checker_names: str):
     return load_requirements(path)
 
 
+def test_observation_only_claim_is_refused_as_run_report_material(project):
+    path = Path(project["requirements"])
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["claims"] = [{
+        "id": "successful-run",
+        "statement": "The retained work executions completed within the measured bound.",
+        "primitive_refs": ["task:work", "timing:work/normal"],
+        "checker_refs": [],
+        "assumptions": [],
+        "basis": "observed",
+        "formula": None,
+    }]
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(CertificateError, match="observation-only claims.*bad path"):
+        issue_certificate(
+            project["contract"], project["evidence"],
+            Path(project["root"]) / "artifacts" / "certificate.json",
+            requirements_path=path, source_root=project["root"],
+        )
+
+
+def test_measured_timing_cannot_be_promoted_to_future_guarantee(project):
+    path = Path(project["requirements"])
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["claims"] = [{
+        "id": "future-speed",
+        "statement": "Future work always completes within ten milliseconds.",
+        "primitive_refs": ["task:work", "timing:work/normal"],
+        "checker_refs": [],
+        "assumptions": [],
+        "basis": "derived",
+        "formula": {
+            "lte": [{"timing_upper_ms": "timing:work/normal"}, 10],
+        },
+    }]
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(CertificateError, match="measured timing results as proof premises"):
+        issue_certificate(
+            project["contract"], project["evidence"],
+            Path(project["root"]) / "artifacts" / "certificate.json",
+            requirements_path=path, source_root=project["root"],
+        )
+
+
 def test_issue_verify_and_source_tamper(project):
     certificate = Path(project["root"]) / "artifacts" / "certificate.json"
     issue_certificate(
@@ -88,7 +134,7 @@ def test_certificate_embeds_and_digest_binds_plain_english_requirements(project)
     assert document["translation_audit"]["schema"] == "dagcert-translation-audit/v1"
     assert document["translation_audit"]["passed"] is True
     assert document["translation_audit"]["covered_tasks"] == ["task:work"]
-    assert document["translation_audit"]["covered_timings"] == ["timing:work/normal"]
+    assert document["translation_audit"]["covered_timings"] == []
     assert document["schema"] == "dagcert-certificate/v10"
     assert document["type_enforcement"]["operation_marker"] == "type-preserving/v1"
     assert document["type_enforcement"]["mypy_import_surface"] == "sealed-type-preserving-dagcert-stub/v1"
@@ -118,12 +164,21 @@ def test_certificate_embeds_and_digest_binds_plain_english_requirements(project)
     assert verification["signatures"][0]["outcome_types"] == ["WorkCompleted"]
     assert document["claim_analysis"] == [{
         "claim_id": "work-completes",
-        "basis": "observed",
+        "basis": "derived",
         "passed": True,
-        "scope": "retained evidence only",
-        "formula": None,
+        "scope": "declared connected task/resource DAG",
+        "formula": {
+            "eq": [
+                {
+                    "task_guaranteed_acquire": ["task:work", "resource:state"],
+                },
+                1,
+            ],
+        },
         "composition_refs": [],
-        "primitive_refs": ["task:work", "timing:work/normal"],
+        "primitive_refs": [
+            "guarantee:work/acquire/state", "resource:state", "task:work",
+        ],
     }]
 
     raw = json.loads(Path(project["requirements"]).read_text(encoding="utf-8"))
@@ -200,8 +255,8 @@ def test_issue_rejects_unknown_primitive_in_english_claim(project):
 @pytest.mark.parametrize(
     ("remaining_refs", "message"),
     [
-        (["timing:work/normal"], "formal tasks lack an English claim"),
-        (["task:work"], "formal timings lack an English claim"),
+        (["task:work"], "formula references are not declared"),
+        (["resource:state"], "formula references are not declared"),
     ],
 )
 def test_issue_rejects_incomplete_english_to_formal_coverage(
@@ -232,9 +287,9 @@ def test_assumed_timing_requires_an_explicit_english_assumption(project):
         )
 
 
-def test_issue_rejects_required_checker_that_was_not_run(project):
+def test_issue_rejects_claim_delegation_even_before_checker_selection(project):
     _set_checker_refs(project, "application.projection/v1")
-    with pytest.raises(CertificateError, match="unselected checkers"):
+    with pytest.raises(CertificateError, match="cannot delegate proof to arbitrary checkers"):
         issue_certificate(
             project["contract"], project["evidence"],
             Path(project["root"]) / "artifacts" / "certificate.json",
@@ -263,7 +318,7 @@ def test_derived_claim_cannot_delegate_proof_to_checker(project):
 
 def test_generic_checker_is_exactly_bound(project):
     root = Path(project["root"])
-    requirements = _set_checker_refs(project, "example/v1")
+    requirements = load_requirements(project["requirements"])
     check_path = root / "artifacts" / "app-check.json"
     context = CheckContext(
         contract=load_contract(project["contract"]), timings=load_evidence(project["evidence"]),
@@ -278,11 +333,13 @@ def test_generic_checker_is_exactly_bound(project):
         primitive_refs=("task:work",), facts={"application_owned": True},
     ), context, check_path)
     certificate = root / "artifacts" / "certificate.json"
-    issue_certificate(
+    document = issue_certificate(
         project["contract"], project["evidence"], certificate, source_root=root,
         requirements_path=project["requirements"],
         check_result_paths=[check_path],
     )
+    assert document["translation_audit"]["supplementary_checkers"] == ["example/v1"]
+    assert document["translation_audit"]["required_checkers"] == []
     assert verify_certificate(
         certificate, contract_path=project["contract"], evidence_path=project["evidence"],
         requirements_path=project["requirements"],
@@ -292,7 +349,7 @@ def test_generic_checker_is_exactly_bound(project):
 
 def test_checker_digest_binding_is_independent_of_path_spelling(project, monkeypatch):
     root = Path(project["root"])
-    requirements = _set_checker_refs(project, "example/v1")
+    requirements = load_requirements(project["requirements"])
     check_path = root / "artifacts" / "app-check.json"
     context = CheckContext(
         contract=load_contract(project["contract"]), timings=load_evidence(project["evidence"]),

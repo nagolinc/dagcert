@@ -405,7 +405,7 @@ def test_derived_claim_extra_prose_references_do_not_fake_formal_coverage(tmp_pa
         "task:pipeline.observe" in finding and "lack an English claim" in finding
         for finding in audit.findings
     )
-    assert any(
+    assert not any(
         "timing:pipeline.observe/aggregate" in finding and "lack an English claim" in finding
         for finding in audit.findings
     )

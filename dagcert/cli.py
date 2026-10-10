@@ -31,7 +31,8 @@ CONTRACT_TEMPLATE = """{
     {"id": "app", "concurrency": 1}
   ],
   "resources": [
-    {"id": "replace_me", "capacity": 1, "initial": 0, "unit": "slots"}
+    {"id": "free-slot", "capacity": 1, "initial": 1, "unit": "slots"},
+    {"id": "running", "capacity": 1, "initial": 0, "unit": "slots"}
   ],
   "tasks": [
     {
@@ -40,21 +41,40 @@ CONTRACT_TEMPLATE = """{
       "worker": "app",
       "implementation": {"language": "python", "path": "app.py", "symbol": "replace_me"},
       "outcomes": [
-        {"type": "ReplaceMeCompleted", "resources": {"replace_me": {"acquire": 1}}, "metadata": {}}
+        {
+          "type": "ReplaceMeCompleted",
+          "resources": {
+            "running": {"consume": 1},
+            "free-slot": {"produce": 1}
+          },
+          "metadata": {}
+        }
       ],
       "error_budget": null,
       "external_contract": null,
-      "start_resources": {},
+      "start_resources": {
+        "free-slot": {"consume": 1},
+        "running": {"produce": 1}
+      },
       "depends_on": [],
       "timings": {
-        "replace_me": {"metric": "duration", "upper_ms": 1000, "minimum_samples": 10, "policy": "max", "safety_factor": 1.30}
+        "observed-duration": {"metric": "duration", "upper_ms": 1000, "minimum_samples": 10, "policy": "max", "safety_factor": 1.30}
       }
     }
   ],
   "channels": [],
   "external_handoffs": [],
   "compositions": [],
-  "state_claims": [],
+  "state_claims": [
+    {
+      "id": "slot-conserved",
+      "kind": "linear_invariant",
+      "expression": {"free-slot": 1, "running": 1},
+      "operator": "eq",
+      "bound": 1,
+      "metadata": {}
+    }
+  ],
   "metadata": {}
 }
 """
@@ -64,12 +84,12 @@ REQUIREMENTS_TEMPLATE = """{
   "claims": [
     {
       "id": "replace_me",
-      "statement": "Replace this with the exact plain-English behavior being certified.",
-      "primitive_refs": ["task:replace_me", "timing:replace_me/replace_me"],
+      "statement": "Across every typed task outcome, the declared worker lifecycle conserves exactly one slot.",
+      "primitive_refs": ["state-claim:slot-conserved"],
       "checker_refs": [],
       "assumptions": [],
-      "basis": "observed",
-      "formula": null
+      "basis": "derived",
+      "formula": {"eq": [{"state_claim_proved": "state-claim:slot-conserved"}, 1]}
     }
   ],
   "metadata": {}
@@ -97,12 +117,16 @@ def replace_me(request: ReplaceMeInput) -> ReplaceMeCompleted:
 """
 
 HELP_TOPICS = {
+    "timing-algebra": (
+        "real-time calculus: service, arrivals, inventory, burst recovery, and timing expressiveness",
+        "docs/timing-algebra.md",
+    ),
     "app-surfaces": (
         "required literal /stats viewer and dismissible runtime-violation banner",
         "docs/app-surfaces.md",
     ),
     "database-ui": (
-        "certified SQLite/browser example plus reusable exact-projection workflow",
+        "legacy SQLite/browser run report; observation-only issuance is refused",
         "docs/database-ui.md",
     ),
     "fork-join": (
@@ -164,7 +188,8 @@ def parser() -> ArgumentParser:
     root = ArgumentParser(
         prog="dagcert",
         description=(
-            "Certificates binding plain-English claims to workers, tasks, resources, and timings"
+            "Guarantee certificates derived from real workers, tasks, resources, and timings; "
+            "retained observations are run evidence, not certificates"
         ),
     )
     root.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -202,7 +227,10 @@ def parser() -> ArgumentParser:
     check = commands.add_parser("check-result", help="validate one optional checker result artifact")
     check.add_argument("result")
 
-    issue = commands.add_parser("issue", help="issue when primitive analysis and every selected checker pass")
+    issue = commands.add_parser(
+        "issue",
+        help="issue only derived/chance DAG guarantees; observation-only claims are refused",
+    )
     _certificate_arguments(issue)
     issue.add_argument("--output", required=True)
 
@@ -283,6 +311,9 @@ def main(argv: list[str] | None = None) -> int:
                 lint_root, exclude=lint_exclusions,
             )
             lint_fingerprint = sha256(canonical_json(lint_manifest)).hexdigest()
+            translation_audit = audit_translation(requirements, contract)
+            if not translation_audit.passed:
+                raise RequirementsError("; ".join(translation_audit.findings))
             source_verification = check_python_sources(
                 lint_root,
                 (task.source_signature for task in contract.tasks if task.source_signature is not None),
@@ -299,9 +330,6 @@ def main(argv: list[str] | None = None) -> int:
                 ),
                 proof_backend=_proof_backend(args),
             )
-            translation_audit = audit_translation(requirements, contract)
-            if not translation_audit.passed:
-                raise RequirementsError("; ".join(translation_audit.findings))
             print(f"valid: {len(contract.workers)} workers, {len(contract.tasks)} tasks, {len(contract.resources)} resources, {sum(len(item.timings) for item in contract.tasks)} timings")
             print(f"human-readable requirements: {len(requirements.claims)} claims")
             print("English-to-formal coverage audit: passed")
@@ -389,6 +417,10 @@ def _relative_inputs(root: str | Path, paths: list[str | Path]) -> list[str]:
 def _help(args: Namespace) -> int:
     if args.topic is None:
         print(
+            "CERTIFICATES ARE GUARANTEE-FIRST: every certificate promise must be derived or "
+            "chance-based over the real worker/task/resource DAG. An observed successful run "
+            "belongs in `dagcert analyze`, not in a certificate. The observation-only route is "
+            "the bad path: it says nothing about the next run, and the user will be disappointed.\n\n"
             "UNLESS EXPLICITLY DECLINED: use the shipped /stats viewer and dismissible "
             "violation banner literally; they are application surfaces, not example code.\n"
         )

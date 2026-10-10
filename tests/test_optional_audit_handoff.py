@@ -5,6 +5,7 @@ import pytest
 
 from examples.optional_openai_luna_audit import (
     DEFAULT_MAX_AUDIT_PACKET_BYTES,
+    RESPONSE_SCHEMA,
     accept_handoffs,
     build_context,
     prepare_handoffs,
@@ -81,19 +82,10 @@ def test_each_claim_gets_a_separate_sealed_handoff_and_response(project):
     for handoff in handoffs:
         prompt = handoff.prompt_path.read_text(encoding="utf-8")
         packet = json.loads(handoff.packet_path.read_text(encoding="utf-8"))
-        assert "RULE 0" in prompt
-        assert "DAG and proof integrity" in prompt
-        assert "synthetic observer, monitor, pipeline, batch, summary" in prompt
-        assert "closed return union come from the bound source symbol" in prompt
-        assert "typed adapter, wrapper, or certification-only function" in prompt
-        assert "success production to an explicit failure branch" in prompt
-        assert "digest-pinned Nagini/Viper `proved` result" in prompt
-        assert "operation-level Nagini `Requires`" in prompt
-        assert "claim-relevant logic outside" in prompt
-        assert "Distinguish may-reachability from must-reachability" in prompt
-        assert "union-bound calculation must not multiply" in prompt
-        assert "complete good-outcome set must equal" in prompt
-        assert "direct probability-bound comparison" in prompt
+        # Check the actual handoff payload, not selected words in the audit policy.
+        assert handoff.packet_sha256 in prompt
+        assert json.dumps(RESPONSE_SCHEMA, ensure_ascii=False, indent=2) in prompt
+        assert json.loads(prompt.split("\naudit_packet:\n", 1)[1]) == packet
         assert "claim" in packet and "claims" not in packet
         assert packet["schema"] == "dagcert-semantic-audit-packet/v4"
         assert packet["source_verification"]["type_checker"]["mode"] == "strict"

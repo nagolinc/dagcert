@@ -115,12 +115,17 @@ def audit_translation(
     valid_primitives.update(
         f"guarantee:{task.id}/{kind}/{resource.id}"
         for task in contract.tasks
-        for kind in ("produce", "consume")
+        for kind in ("acquire", "produce", "consume")
         for resource in contract.resources
     )
     required_tasks = {f"task:{item.id}" for item in contract.tasks}
+    # Measured timing cases are retained run evidence, not promises. Only explicit assumed
+    # envelopes are formal premises which must be covered by certificate claims.
     required_timings = {
-        f"timing:{task.id}/{case}" for task in contract.tasks for case in task.timings
+        f"timing:{task.id}/{case}"
+        for task in contract.tasks
+        for case, timing in task.timings.items()
+        if timing.evidence == "assumed"
     }
     assumed_timings = {
         f"timing:{task.id}/{case}"
@@ -135,6 +140,12 @@ def audit_translation(
     timing_owners = {
         f"timing:{task.id}/{case}": f"task:{task.id}"
         for task in contract.tasks for case in task.timings
+    }
+    formula_timing_premises = {
+        reference
+        for claim in requirements.claims
+        if claim.formula is not None
+        for reference in _formula_timing_premises(claim.formula, contract)
     }
     if requirements.schema == "dagcert-english-requirements/v2":
         from .formula import formula_references
@@ -166,7 +177,10 @@ def audit_translation(
 
         coverage_primitives.update(f"task:{step.task}" for step in composition.steps)
         coverage_primitives.update(
-            f"timing:{step.task}/{step.timing}" for step in composition.steps
+            reference
+            for step in composition.steps
+            for reference in (f"timing:{step.task}/{step.timing}",)
+            if reference in formula_timing_premises
         )
         if composition.expression is not None:
             coverage_primitives.update(
@@ -177,7 +191,11 @@ def audit_translation(
         if f"state-claim:{state_claim.id}" not in referenced_primitives:
             continue
         specification = state_claim.specification
-        if state_claim.kind == "linear_invariant":
+        if state_claim.kind == "curve_bound":
+            from .temporal import temporal_references
+
+            coverage_primitives.update(temporal_references(specification))
+        elif state_claim.kind == "linear_invariant":
             coverage_primitives.update(
                 f"resource:{resource_id}"
                 for resource_id in specification["expression"]
@@ -216,6 +234,18 @@ def audit_translation(
     selected = set(selected_checkers) if selected_checkers is not None else None
     findings: list[str] = []
 
+    observed_claims = sorted(
+        claim.id for claim in requirements.claims if claim.basis == "observed"
+    )
+    if observed_claims:
+        findings.append(
+            "observation-only claims are run-report material, not certifiable guarantees: "
+            f"{observed_claims}. Keep retained measurements in the evidence file and inspect "
+            "them with `dagcert analyze`; express certificate promises as derived or chance "
+            "claims over the real worker/task/resource DAG. The observation-only route is the "
+            "bad path: it says nothing about the next run, and the user will be disappointed."
+        )
+
     unknown_primitives = referenced_primitives - valid_primitives
     if unknown_primitives:
         findings.append(f"English claims cite unknown primitives: {sorted(unknown_primitives)}")
@@ -253,6 +283,18 @@ def audit_translation(
                 except FormulaError as exc:
                     findings.append(f"{claim.basis} claim {claim.id} has invalid formula: {exc}")
                     continue
+                measured_premises = sorted(
+                    reference
+                    for reference in _formula_timing_premises(claim.formula, contract)
+                    if _timing_evidence_kind(reference, contract) == "measured"
+                )
+                if measured_premises:
+                    findings.append(
+                        f"{claim.basis} claim {claim.id} uses measured timing results as proof "
+                        f"premises: {measured_premises}. Retained measurements are run evidence, "
+                        "not future guarantees; add explicit assumed envelope timing cases and "
+                        "derive the claim from those envelopes."
+                    )
                 missing_formula_refs = formula_refs - set(claim.primitive_refs)
                 if missing_formula_refs:
                     findings.append(
@@ -310,6 +352,19 @@ def audit_translation(
                     findings.append(
                         f"derived claim {claim.id} uses probabilistic error budgets; mark it chance"
                     )
+                for reference in formula_refs:
+                    if not reference.startswith("state-claim:"):
+                        continue
+                    temporal_claim = contract.state_claim_by_id.get(reference.split(":", 1)[1])
+                    if temporal_claim is None or temporal_claim.kind != "curve_bound":
+                        continue
+                    from .temporal import temporal_failure_upper
+
+                    if not claim.assumptions:
+                        findings.append(f"claim {claim.id} must disclose its temporal envelope assumptions")
+                    if (temporal_failure_upper(temporal_claim.specification) > 0
+                        and reference not in _temporal_probability_references(claim.formula)):
+                        findings.append(f"claim {claim.id} has probabilistic temporal envelopes; use state_claim_success_probability_lower in a chance claim")
                 if claim.basis == "chance":
                     if not claim.assumptions:
                         findings.append(
@@ -392,6 +447,90 @@ def audit_translation(
             claim.id for claim in requirements.claims if claim.assumptions
         )),
     )
+
+
+def _temporal_probability_references(formula: Mapping[str, Any]) -> set[str]:
+    references: set[str] = set()
+    for operator, operand in formula.items():
+        if operator == "state_claim_success_probability_lower" and isinstance(operand, str):
+            references.add(operand)
+        else:
+            children = operand if isinstance(operand, list) else [operand]
+            for child in children:
+                if isinstance(child, Mapping):
+                    references.update(_temporal_probability_references(child))
+    return references
+
+
+def _timing_evidence_kind(reference: str, contract: "Contract") -> str | None:
+    if not reference.startswith("timing:") or "/" not in reference:
+        return None
+    task_id, case = reference.split(":", 1)[1].split("/", 1)
+    task = contract.task_by_id.get(task_id)
+    timing = None if task is None else task.timings.get(case)
+    return None if timing is None else timing.evidence
+
+
+def _formula_timing_premises(
+    formula: Mapping[str, Any], contract: "Contract",
+) -> set[str]:
+    """Return timing bounds that materially support one kernel formula."""
+
+    result: set[str] = set()
+
+    def add_composition(reference: object) -> None:
+        if not isinstance(reference, str) or not reference.startswith("composition:"):
+            return
+        composition = contract.composition_by_id.get(reference.split(":", 1)[1])
+        if composition is None:
+            return
+        result.update(
+            f"timing:{step.task}/{step.timing}" for step in composition.steps
+        )
+
+    def add_state_claim(reference: object) -> None:
+        if not isinstance(reference, str) or not reference.startswith("state-claim:"):
+            return
+        state_claim = contract.state_claim_by_id.get(reference.split(":", 1)[1])
+        if state_claim is None:
+            return
+        specification = state_claim.specification
+        if state_claim.kind == "curve_bound":
+            from .temporal import temporal_references
+
+            result.update(ref for ref in temporal_references(specification) if ref.startswith("timing:"))
+        elif state_claim.kind == "bounded_non_starvation":
+            for endpoint in ("producer", "consumer"):
+                endpoint_spec = specification[endpoint]
+                result.add(
+                    f"timing:{endpoint_spec['task']}/{endpoint_spec['timing']}"
+                )
+        elif state_claim.kind == "bounded_response":
+            result.add(
+                f"timing:{specification['response_task']}/"
+                f"{specification['response_timing']}"
+            )
+
+    def visit(value: object) -> None:
+        if isinstance(value, Mapping):
+            for operator, operand in value.items():
+                if operator in {"timing_upper_ms", "timing_lower_ms"}:
+                    if isinstance(operand, str):
+                        result.add(operand)
+                elif operator in {
+                    "composition_upper_ms",
+                }:
+                    add_composition(operand)
+                elif operator in {"state_claim_proved", "state_claim_success_probability_lower"}:
+                    add_state_claim(operand)
+                else:
+                    visit(operand)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    visit(formula)
+    return result
 
 
 def load_requirements(path: str | Path) -> EnglishRequirements:

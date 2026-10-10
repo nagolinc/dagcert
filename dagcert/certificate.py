@@ -148,7 +148,7 @@ def _primitive_refs(contract: Contract) -> set[str]:
     refs.update(
         f"guarantee:{task.id}/{kind}/{resource.id}"
         for task in contract.tasks
-        for kind in ("produce", "consume")
+        for kind in ("acquire", "produce", "consume")
         for resource in contract.resources
     )
     return refs
@@ -521,6 +521,11 @@ def issue_certificate(
     if requirements.schema != "dagcert-english-requirements/v2":
         raise CertificateError(
             "new certificate issuance requires dagcert-english-requirements/v2 with claim bases"
+        )
+    preflight_translation = audit_translation(requirements, contract)
+    if not preflight_translation.passed:
+        raise CertificateError(
+            "certificate refused: " + "; ".join(preflight_translation.findings)
         )
     try:
         source_verification = check_python_sources(

@@ -87,6 +87,13 @@
           "minimum_samples": 5,
           "policy": "max",
           "safety_factor": 1
+        },
+        "service-envelope": {
+          "metric": "duration",
+          "upper_ms": 10,
+          "minimum_samples": 0,
+          "evidence": "assumed",
+          "safety_factor": 1
         }
       }
     },
@@ -120,6 +127,13 @@
           "upper_ms": 10,
           "minimum_samples": 5,
           "policy": "max",
+          "safety_factor": 1
+        },
+        "service-envelope": {
+          "metric": "duration",
+          "upper_ms": 10,
+          "minimum_samples": 0,
+          "evidence": "assumed",
           "safety_factor": 1
         }
       }
@@ -223,6 +237,48 @@
               "kind": "leaf",
               "task": "publish",
               "timing": "duration",
+              "outcome_type": "PublishedJob"
+            }
+          ]
+        }
+      },
+      "metadata": {}
+    },
+    {
+      "id": "three-jobs-service-envelope",
+      "expression": {
+        "kind": "finite_repeat",
+        "count": 3,
+        "body": {
+          "kind": "sequence",
+          "children": [
+            {
+              "kind": "leaf",
+              "task": "prepare",
+              "timing": "service-envelope",
+              "outcome_type": "PreparedJob"
+            },
+            {
+              "kind": "parallel_all",
+              "children": [
+                {
+                  "kind": "leaf",
+                  "task": "validate",
+                  "timing": "service-envelope",
+                  "outcome_type": "ValidatedJob"
+                },
+                {
+                  "kind": "leaf",
+                  "task": "checksum",
+                  "timing": "service-envelope",
+                  "outcome_type": "ChecksummedJob"
+                }
+              ]
+            },
+            {
+              "kind": "leaf",
+              "task": "publish",
+              "timing": "service-envelope",
               "outcome_type": "PublishedJob"
             }
           ]

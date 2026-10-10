@@ -16,6 +16,16 @@ product behavior introduced to satisfy a check. Treat a test-shaped
 implementation, measurement of a trivial stand-in instead of the promised
 operation, or evidence that bypasses real boundaries as a serious risk.
 
+OBSERVATION-ONLY REFUSAL
+
+An observation-only artifact is a run report, not a Dagcert guarantee. Reject
+any claim with `basis: observed`, any null-formula promise, and any attempt to
+promote a retained successful run, aggregate stopwatch, or measured maximum
+into a claim about the next run. This is the bad path: it does not certify
+continued behavior and will disappoint the user. Measurements may check the
+consistency of explicit engineering premises, but every certificate promise
+must be a `derived` or `chance` kernel formula over the actual execution DAG.
+
 Required review
 
 1. Read every relevant UTF-8 file in `source_files` and name it in
@@ -127,8 +137,8 @@ source typing. For every `operation`, require the certificate's sealed source ve
 strict mypy success and a digest-pinned Nagini/Viper `proved` result for the complete bound source
 file. Treat a missing verifier, missing image, unsupported construct, translation failure, timeout,
 internal verifier error, skipped function, declared `Exsures` exit on the task operation, or a
-`not-applicable` result as failure. Instrumentation may be Nagini-not-applicable only for an
-`observed` claim and must not participate in a derived composition.
+`not-applicable` result as failure. Instrumentation that is not source-proved may appear in a run
+report, but it cannot support a certificate claim or participate in a derived composition.
 
 Reject an operation-level Nagini `Requires`, any executable-module `Assume`, or any executable
 application implementation marked `ContractOnly`. A `ContractOnly` declaration is permitted only
@@ -170,6 +180,21 @@ finite non-starvation claims expose their horizon and work-conserving/service pr
 is proved separately from supply. Reject a state-claim result when omitted transitions, favorable
 event ordering, or a hidden scheduler assumption is required for it to pass.
 
+For a `curve_bound`, reconstruct the real-time calculus over actual task activations, service,
+departures, and resource effects. Worker capacity is not production: confirm the arrival lower
+bound, effective worker-time availability, assumed duration/dispatch bounds, and useful output on
+the allowed typed outcomes. Include every consumer and reservation, failed/nonproducing outcome,
+and explicit lossless routing/delay premise. Type compatibility alone does not prove delivery.
+Check worker/resource allocations for overcommit and inventory upper bounds for overflow; a
+clipped bucket must not retain discarded production in its later reserve calculation. The kernel
+recomputes generic exact rational curve expressions, not sampled points or a plugin boolean.
+
+Check every envelope and routing horizon, including time advances. Finite invocation budgets and
+finite-session evidence cannot imply forever. A conditional all-time curve result is permitted
+when all premises explicitly cover all time; do not reject it merely because it is not a finite
+composition. Preserve the scope in the English claim. Read `dagcert help timing-algebra` for the
+generic core language; new application nouns do not justify new trusted proof types.
+
 Confirm that the finite source return union contains every normal success and expected failure.
 An unexpected Python exception is not an outcome and must make the proof fail. Reject a certificate
 that catches all exceptions into a generic result, turns a missing output into a probability budget,
@@ -193,20 +218,27 @@ source outcome, while success-conditioned claims name the exact typed outcome
 path. Reject either extreme: calling every success-only branch structurally
 impossible, or silently promoting that branch into an unconditional guarantee.
 
-For a chance claim, verify that it covers either a finite composition of real operation/external
-tasks or one explicitly declared external contract. For a composition, every selected step outcome
+For a chance claim, verify that it covers a finite composition of real operation/external tasks,
+one explicitly declared external contract, or a kernel-proved temporal state claim using
+`state_claim_success_probability_lower`. For a composition, every selected step outcome
 must be explicitly classified as good by that task's error budget; the complete good-outcome set must equal
 that exact selected typed outcome. For a standalone external claim, recompute success as
 one minus its declared engineering bad-event upper bound. Do not require or invent a failure branch
 merely to make a budget nontrivial. Confirm the invocation counts and horizon,
-require one direct probability-bound comparison rather than an `or`/`not`/implication escape, then
+require the kernel probability comparison without an `or`/`not`/implication escape, then
 recompute the system bad-event upper bound by summing count times leaf budget
 and capping the result at one. This union-bound calculation must not multiply
 success probabilities, assume independence, or become tighter because failures
 appear uncorrelated in a small sample. Treat each engineering error budget as an
 explicit premise: retained observations are only a consistency check and do not
-statistically establish the declared probability. Reject unbounded "never"
-claims, omitted failure outcomes, an unexpected exception hidden as an outcome,
+statistically establish the declared probability. For a temporal claim, first require the
+conditional curve proof, then union the whole-window envelope and routing failure budgets.
+If a service envelope restricts `outcomes`, confirm the subset belongs to the actual source union
+and its explicit joint premise covers every invocation's outcome and service in the whole window.
+This is not a per-call success rate; failures remain declared in source and outside that
+conditional event. Without a subset, all source outcomes must determine the resource bounds.
+Reject unsupported unbounded "never" claims derived only from finite premises,
+omitted failure outcomes, an unexpected exception hidden as an outcome,
 or a whole-pipeline pass rate substituted for the typed DAG derivation.
 
 Verdict rules

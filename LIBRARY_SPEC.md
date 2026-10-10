@@ -7,14 +7,16 @@ resources, typed asynchronous channels, and timings. Those are its only applicat
 primitives.
 
 The library is not a scheduler, runtime, queue, HTTP framework, browser harness, retry manager,
-rate limiter, or deployment gate. Certification observes and reports by default. It must not add a
-queue limit, timeout, rejection, cancellation, retry, debounce, serialization point, or other
+rate limiter, or deployment gate. Certification derives the declared promises from the modeled
+workers, tasks, resources, and explicit assumptions. Runtime observations are supporting evidence.
+It must not add a queue limit, timeout, rejection, cancellation, retry, debounce, serialization point, or other
 behavioral regression merely to make a claim pass.
 
 ## 2. Contract schema
 
-New issuance uses `dagcert-contract/v12`. The loader retains v2-v11 support for verification of
-existing certificates. JSON is built in; YAML is available with PyYAML.
+New issuance uses `dagcert-contract/v12`. The loader retains v2-v11 support for reading existing
+contract data. Current issuance and verification still require every certificate claim
+to pass the current guarantee checks. JSON is built in; YAML is available with PyYAML.
 
 ### Worker
 
@@ -129,7 +131,8 @@ JavaScript/TypeScript operation is admitted only through Maledictus's advertised
 fragment. Its `verified_interface` supports one synchronous primitive parameter and primitive
 return. The contract declaration is an assertion: the backend returns the interface extracted by
 pinned TypeScript 5.9.3, and Dagcert requires exact equality. Browser/DOM/platform behavior remains
-an explicit assumption or observed boundary. `tsc --strict` alone is not an exception proof.
+an explicit assumption, with runtime observations available as supporting evidence. `tsc --strict`
+alone is not an exception proof.
 
 Resource effects remain formal transitions, but any unconditional derived amount is the minimum
 effect across the complete source outcome union. Thus a success outcome producing one queue item
@@ -197,7 +200,7 @@ policy, or queue liveness.
 
 ### State claims
 
-V7 state claims remain fixed proof schemas rather than arbitrary temporal logic:
+State claims combine lifecycle proof schemas with a generic real-time calculus:
 
 - `linear_invariant` checks one affine resource expression in the initial state and every declared
   start/completion transition;
@@ -205,9 +208,22 @@ V7 state claims remain fixed proof schemas rather than arbitrary temporal logic:
   all-outcome production, worker concurrency, producer maximum duration, and consumer minimum
   duration; tied completion events are ordered conservatively; and
 - `bounded_response` checks a separate bounded `wait` timing for the task that consumes a trigger
-  resource at start.
+  resource at start; and
+- `curve_bound` evaluates a curve expression over source-bound task activations, available service,
+  completions, and typed resource effects, then checks a lower or upper bound over its entire
+  declared time interval. Explicit all-time premises permit `end_ms: null`.
 
-Failures report the concrete transition or finite-horizon counterexample trace.
+Curve expressions use exact rational continuous piecewise-affine curves with an affine tail.
+Arithmetic, min/max, time shifts, min-plus convolution, and deconvolution are generic operations;
+new application properties do not introduce new task or claim types. Service derives from effective
+worker availability, allocated slots, and assumed duration/dispatch bounds. Actual input and typed
+outcome effects determine production. Inventory includes every affecting task and rejects possible
+overflow instead of silently clipping it. Flow routing requires explicit lossless one-to-one
+handoff assumptions in addition to matching source types; shared worker/resource slots cannot be
+overallocated. See [the timing algebra guide](dagcert/docs/timing-algebra.md) or
+`dagcert help timing-algebra` for the schema and examples. Source verification is unchanged.
+
+Failures report the concrete transition, finite-horizon trace, or exact curve extremum.
 
 ### Timing
 
@@ -247,17 +263,26 @@ supporting documentation. It contains at least one claim. Each claim has:
 - `primitive_refs` naming the workers, tasks, resources, channels, and timings that support it;
 - `checker_refs` naming any application checkers required to establish it;
 - explicit `assumptions`, including workload or environment limits.
-- `basis`: `observed`, `derived`, or `chance`;
-- `formula`: null for observed claims and a fixed-algebra kernel formula for derived/chance claims.
+- `basis`: `derived` or `chance`;
+- `formula`: a kernel formula deriving the promised behavior from the declared model.
+
+The observation-only route is the bad path for application certification: it says nothing about
+the next run, and the user will be disappointed. The loader can read historical `observed` claims
+for diagnostics, but issuance and verification refuse them. Keep observations in run reports and
+supporting evidence; they cannot replace a derived or conditional chance guarantee.
 
 Every reference must resolve. Every checker named by a claim must be supplied, pass, and bind to
 the exact source, contract, evidence, and requirements document. Additional checker results may be
 attached as supplementary evidence; the optional independent semantic audit is one such result.
-Derived claims cannot name checkers as proof. Their formulas must use a declared composition or a
-connected multi-task worker/resource surface that Dagcert evaluates itself.
-Chance claims also cannot name checkers as proof. They must use a finite composition, cite every
-participating `error-budget:TASK`, state the engineering premise in English, and use the kernel's
-union-bound operators. A deterministic claim cannot silently use those probabilistic operators.
+Derived claims cannot name checkers as proof. Their formulas must use a declared composition, a
+kernel-proved state claim, a connected multi-task worker/resource surface, or guaranteed typed
+resource effects that Dagcert evaluates itself. Timing premises must be explicitly assumed
+envelopes; measured timing statistics cannot establish a promise about future executions.
+Chance claims also cannot name checkers as proof. They use a finite composition, external contract,
+or `state_claim_success_probability_lower` for a proved temporal claim. Finite compositions cite
+every participating `error-budget:TASK`; temporal claims disclose whole-window envelope and routing
+premises. Each kind uses the kernel's probability rules and states its assumptions in English.
+A deterministic claim cannot silently use nonzero probabilistic premises.
 
 The requirements document does not enlarge the five-primitive ontology. It is the certificate's
 mandatory human-readable promise and traceability map. Issuance embeds its complete normalized
@@ -265,11 +290,12 @@ contents and byte digest. Verification requires the exact file and rejects chang
 assumptions, or references, even if the formal contract is unchanged.
 
 Issuance and verification also recompute `dagcert-translation-audit/v1`. Passing is mandatory. The
-audit requires every formal task and every formal timing guarantee to appear in at least one
+audit requires every formal task and every assumed timing guarantee to appear in at least one
 English claim, every primitive reference to resolve, every claim-required checker to be selected,
 and every referenced assumed timing to have an explicit English assumption. The complete audit is
-embedded in the certificate. Additional selected checkers are labeled supplementary rather than
-silently treated as English promises.
+embedded in the certificate. Measured timing cases remain evidence and need not become English
+promises. Additional selected checkers are labeled supplementary rather than silently treated as
+English promises.
 
 This deterministic audit proves coverage and traceability, not natural-language entailment. On
 explicit user request, the independent Luna workflow performs the semantic audit of each exact
@@ -282,7 +308,7 @@ The claim algebra is deliberately closed and small. Numeric expressions support 
 certified timing upper/lower bounds, worker concurrency, resource capacity/initial state,
 minimum all-outcome task production/consumption, composition upper bounds,
 finite-composition failure-probability upper bounds and success-probability lower bounds,
-kernel-owned state-claim results, addition,
+kernel-owned state-claim results and temporal success-probability lower bounds, addition,
 multiplication, division, and maximum. Boolean expressions
 support comparison, conjunction, disjunction, negation, and implication. Unknown operators fail.
 
@@ -372,7 +398,15 @@ independence declaration and never multiplies success probabilities. Missing bud
 selected outcomes, mismatched evidence cases, or failing consistency analysis make the formula
 unprovable. A chance claim is one direct `success_lower >= threshold` or
 `failure_upper <= threshold` comparison with a literal probability in `[0,1]`; boolean escape
-branches are forbidden. Infinite-horizon claims are unsupported.
+branches are forbidden. A finite invocation budget cannot imply an infinite-horizon claim.
+
+For a `curve_bound` chance claim, the kernel proves the conditional curve bound and unions each
+declared envelope and routing event's whole-window failure probability. A service envelope may
+declare a subset of real source outcomes as part of that joint event: every invocation in its
+horizon then has one of those outcomes and the stated service. Without that explicit restriction,
+all outcomes determine effect bounds. These premises are engineering assumptions, not estimates
+inferred from retained samples. An all-time result is conditional on explicitly all-time premises;
+finite horizons cannot be widened by the claim or an advanced curve expression.
 
 This is a claim about the declared DAG. Undeclared waits or work cannot be proven away; the model
 must first represent them as tasks, resources, or timings.
@@ -392,8 +426,8 @@ digests. A Python `Checker` emits `CheckResult`; any language may emit equivalen
 
 Dagcert does not register checker categories or interpret their facts. A route inventory, DOM test,
 or independent semantic audit can evolve without growing the application ontology. Because those
-facts are untrusted by the kernel, a checker can support an observed claim but cannot establish a
-derived formula. Attaching a result is explicit through repeated `--check-result` options.
+facts are untrusted by the kernel, a checker supplies supplementary validation but cannot establish
+a certificate claim. Attaching a result is explicit through repeated `--check-result` options.
 
 The optional semantic-audit workflow reads the mandatory requirements document directly, creates
 one sealed packet per English claim, and requires a
@@ -444,8 +478,10 @@ visible.
 
 An agent can act on "certify this app using dagcert." It first writes the exact promises and
 assumptions in `english_requirements.json`, then maps actual work to the smallest useful
-task/resource flow, records real timings, applies the 50ms/16ms standard profiles where applicable,
-runs tests and selected checkers, issues, and verifies.
+task/resource flow and writes the derivation for each promise. It records real timings as
+supporting evidence, applies the 50ms/16ms standard profiles where applicable, runs tests and
+selected checkers, issues, and verifies. An observation-only run report is not completion of this
+workflow.
 
 It must not invent requirements, samples, capacities, assumptions, or passing results. It must not
 introduce finite queues, timeouts, rate limits, retries, debounce, cancellation, serialization, or

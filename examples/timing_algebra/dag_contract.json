@@ -1,0 +1,161 @@
+{
+  "schema": "dagcert-contract/v12",
+  "workers": [
+    {"id": "first-pipe", "concurrency": 1},
+    {"id": "second-pipe", "concurrency": 1},
+    {"id": "consumer", "concurrency": 1}
+  ],
+  "resources": [
+    {"id": "reserve", "capacity": 100, "initial": 50, "unit": "items"}
+  ],
+  "tasks": [
+    {
+      "id": "produce-first",
+      "role": "operation",
+      "worker": "first-pipe",
+      "implementation": {"language": "python", "path": "operations.py", "symbol": "produce_first"},
+      "outcomes": [
+        {"type": "ProducedItem", "resources": {"reserve": {"produce": 1}}, "metadata": {}}
+      ],
+      "error_budget": null,
+      "external_contract": null,
+      "start_resources": {},
+      "depends_on": [],
+      "timings": {
+        "duration": {"metric": "duration", "upper_ms": 9, "minimum_samples": 0, "evidence": "assumed", "safety_factor": 1},
+        "dispatch": {"metric": "wait", "upper_ms": 1, "minimum_samples": 0, "evidence": "assumed", "safety_factor": 1}
+      }
+    },
+    {
+      "id": "produce-second",
+      "role": "operation",
+      "worker": "second-pipe",
+      "implementation": {"language": "python", "path": "operations.py", "symbol": "produce_second"},
+      "outcomes": [
+        {"type": "ProducedItem", "resources": {"reserve": {"produce": 1}}, "metadata": {}}
+      ],
+      "error_budget": null,
+      "external_contract": null,
+      "start_resources": {},
+      "depends_on": [],
+      "timings": {
+        "duration": {"metric": "duration", "upper_ms": 9, "minimum_samples": 0, "evidence": "assumed", "safety_factor": 1},
+        "dispatch": {"metric": "wait", "upper_ms": 1, "minimum_samples": 0, "evidence": "assumed", "safety_factor": 1}
+      }
+    },
+    {
+      "id": "consume",
+      "role": "operation",
+      "worker": "consumer",
+      "implementation": {"language": "python", "path": "operations.py", "symbol": "consume"},
+      "outcomes": [
+        {"type": "ConsumptionReceipt", "resources": {}, "metadata": {}}
+      ],
+      "error_budget": null,
+      "external_contract": null,
+      "start_resources": {"reserve": {"consume": 1}},
+      "depends_on": [],
+      "timings": {
+        "duration": {"metric": "duration", "upper_ms": 9, "minimum_samples": 0, "evidence": "assumed", "safety_factor": 1},
+        "dispatch": {"metric": "wait", "upper_ms": 1, "minimum_samples": 0, "evidence": "assumed", "safety_factor": 1}
+      }
+    }
+  ],
+  "channels": [],
+  "external_handoffs": [],
+  "external_boundaries": [],
+  "compositions": [],
+  "state_claims": [
+    {
+      "id": "reserve-at-least-thirty-percent",
+      "kind": "curve_bound",
+      "envelopes": [
+        {
+          "id": "first-arrivals",
+          "kind": "arrival",
+          "task": "produce-first",
+          "assumption": "Admitted first-pipe requests are bounded by max(0, (t-100)/100) and 1+t/100 over every interval of t milliseconds.",
+          "horizon_ms": null,
+          "failure_probability_upper": 0,
+          "window": "interval",
+          "lower": {"points": [[0, 0], [100, 0]], "tail_slope": "1/100"},
+          "upper": {"points": [[0, 1]], "tail_slope": "1/100"}
+        },
+        {
+          "id": "second-arrivals",
+          "kind": "arrival",
+          "task": "produce-second",
+          "assumption": "Admitted second-pipe requests are bounded by max(0, (t-100)/100) and 1+t/100 over every interval of t milliseconds.",
+          "horizon_ms": null,
+          "failure_probability_upper": 0,
+          "window": "interval",
+          "lower": {"points": [[0, 0], [100, 0]], "tail_slope": "1/100"},
+          "upper": {"points": [[0, 1]], "tail_slope": "1/100"}
+        },
+        {
+          "id": "consumption-arrivals",
+          "kind": "arrival",
+          "task": "consume",
+          "assumption": "Consumer admissions reserve one item immediately; their count is bounded by max(0, (t-50)/50) and 1+t/50 over every interval of t milliseconds.",
+          "horizon_ms": null,
+          "failure_probability_upper": 0,
+          "window": "interval",
+          "lower": {"points": [[0, 0], [50, 0]], "tail_slope": "1/50"},
+          "upper": {"points": [[0, 1]], "tail_slope": "1/50"}
+        },
+        {
+          "id": "first-service",
+          "kind": "service",
+          "task": "produce-first",
+          "assumption": "The dedicated first-pipe worker is work-conserving and supplies one worker-millisecond per millisecond in every backlogged interval; each dispatch plus execution costs at most 10 ms.",
+          "horizon_ms": null,
+          "failure_probability_upper": 0,
+          "availability": {"points": [[0, 0]], "tail_slope": 1},
+          "slots": 1,
+          "duration_timing": "duration",
+          "dispatch_timing": "dispatch"
+        },
+        {
+          "id": "second-service",
+          "kind": "service",
+          "task": "produce-second",
+          "assumption": "The dedicated second-pipe worker is work-conserving and supplies one worker-millisecond per millisecond in every backlogged interval; each dispatch plus execution costs at most 10 ms.",
+          "horizon_ms": null,
+          "failure_probability_upper": 0,
+          "availability": {"points": [[0, 0]], "tail_slope": 1},
+          "slots": 1,
+          "duration_timing": "duration",
+          "dispatch_timing": "dispatch"
+        },
+        {
+          "id": "consumption-service",
+          "kind": "service",
+          "task": "consume",
+          "assumption": "The dedicated consumer worker is work-conserving and supplies one worker-millisecond per millisecond in every backlogged interval; each dispatch plus execution costs at most 10 ms.",
+          "horizon_ms": null,
+          "failure_probability_upper": 0,
+          "availability": {"points": [[0, 0]], "tail_slope": 1},
+          "slots": 1,
+          "duration_timing": "duration",
+          "dispatch_timing": "dispatch"
+        }
+      ],
+      "flows": [
+        {"task": "produce-first", "input": {"arrival": "first-arrivals"}, "service": "first-service"},
+        {"task": "produce-second", "input": {"arrival": "second-arrivals"}, "service": "second-service"},
+        {"task": "consume", "input": {"arrival": "consumption-arrivals"}, "service": "consumption-service"}
+      ],
+      "expression": {"inventory_lower": "reserve"},
+      "operator": "gte",
+      "bound": 30,
+      "start_ms": 0,
+      "end_ms": null,
+      "metadata": {
+        "purpose": "Two independent producing workers maintain a shared reserve above thirty percent capacity."
+      }
+    }
+  ],
+  "metadata": {
+    "purpose": "Generic source-bound real-time calculus example with all-time admitted-flow assumptions."
+  }
+}

@@ -1,5 +1,4 @@
 from pathlib import Path
-import json
 import sqlite3
 
 from dagcert import (
@@ -105,11 +104,8 @@ def test_exact_projection_checks_identity_duplicates_and_visible_fields(project)
     }
 
 
-def test_exact_projection_result_is_required_by_certificate(project):
+def test_supplementary_projection_result_is_sealed_by_certificate(project):
     root = Path(project["root"])
-    raw = json.loads(Path(project["requirements"]).read_text(encoding="utf-8"))
-    raw["claims"][0]["checker_refs"] = ["test.database-ui/v1"]
-    Path(project["requirements"]).write_text(json.dumps(raw), encoding="utf-8")
     requirements = load_requirements(project["requirements"])
     context = CheckContext(
         contract=project["loaded_contract"],
@@ -135,7 +131,7 @@ def test_exact_projection_result_is_required_by_certificate(project):
         check_path,
     )
     certificate_path = root / "artifacts" / "certificate.json"
-    issue_certificate(
+    document = issue_certificate(
         project["contract"],
         project["evidence"],
         certificate_path,
@@ -143,6 +139,8 @@ def test_exact_projection_result_is_required_by_certificate(project):
         requirements_path=project["requirements"],
         check_result_paths=(check_path,),
     )
+    assert document["translation_audit"]["supplementary_checkers"] == ["test.database-ui/v1"]
+    assert document["translation_audit"]["required_checkers"] == []
     verification = verify_certificate(
         certificate_path,
         contract_path=project["contract"],

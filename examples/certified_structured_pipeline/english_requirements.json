@@ -3,15 +3,27 @@
   "claims": [
     {
       "id": "composed-latency",
-      "statement": "For the retained exact-source operation timings, three jobs have a kernel-composed upper bound below 90 ms; each job is prepare, both independent branches, then publish, and no aggregate stopwatch is used.",
-      "primitive_refs": ["composition:three-jobs"],
+      "statement": "Conditional on the declared service envelopes and typed success paths, three jobs have a kernel-composed duration upper bound of 120 ms; each job is prepare, both independent branches, then publish.",
+      "primitive_refs": [
+        "composition:three-jobs-service-envelope",
+        "timing:prepare/service-envelope",
+        "timing:validate/service-envelope",
+        "timing:checksum/service-envelope",
+        "timing:publish/service-envelope"
+      ],
       "checker_refs": [],
-      "assumptions": [],
+      "assumptions": [
+        "timing:prepare/service-envelope is an assumed duration upper bound of 10 ms.",
+        "timing:validate/service-envelope is an assumed duration upper bound of 10 ms.",
+        "timing:checksum/service-envelope is an assumed duration upper bound of 10 ms.",
+        "timing:publish/service-envelope is an assumed duration range of 8 ms through 20 ms.",
+        "The composition follows the named successful typed outcomes for all three jobs."
+      ],
       "basis": "derived",
       "formula": {
         "lte": [
-          {"composition_upper_ms": "composition:three-jobs"},
-          90
+          {"composition_upper_ms": "composition:three-jobs-service-envelope"},
+          120
         ]
       }
     },

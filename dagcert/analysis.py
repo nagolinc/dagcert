@@ -262,6 +262,25 @@ def analyze_contract(
             f"{handoff.bad_event_probability_upper:g} per crossing"
         )
 
+    for state_claim in contract.state_claims:
+        if state_claim.kind != "curve_bound":
+            continue
+        from .temporal import temporal_premises
+
+        assumptions.append(
+            f"state-claim:{state_claim.id} starts with the declared resource inventory and "
+            "no preexisting active invocations or undelivered handoff values; arrival counts "
+            "refer to actual invocation activation where start effects occur; availability "
+            "is effective service for pending work under the declared scheduler/resource conditions"
+        )
+        for premise in temporal_premises(state_claim.specification):
+            assumptions.append(
+                f"state-claim:{state_claim.id}/{premise['id']} assumes {premise['assumption']}; "
+                f"whole-envelope failure probability <= {premise['failure_probability_upper']}; "
+                f"horizon_ms={premise['horizon_ms']} (null means all time); "
+                f"outcomes={premise.get('outcomes', 'complete source union')}"
+            )
+
     may_reachable = _reachable_tasks(contract, guaranteed=False)
     must_reachable = _reachable_tasks(contract, guaranteed=True)
     blocked = _structurally_blocked_tasks(contract, reachable=may_reachable)

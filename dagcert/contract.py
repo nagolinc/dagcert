@@ -1670,10 +1670,17 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
                     row.get("upper_ms"), f"state_claim {claim_id}.upper_ms",
                 ),
             }
+        elif kind == "curve_bound":
+            from .temporal import TemporalError, parse_temporal_spec
+
+            try:
+                specification = parse_temporal_spec(row)
+            except TemporalError as exc:
+                raise ContractError(f"state_claim {claim_id}: {exc}") from exc
         else:
             raise ContractError(
                 f"state_claim {claim_id}.kind must be linear_invariant, "
-                "bounded_non_starvation, or bounded_response"
+                "bounded_non_starvation, bounded_response, or curve_bound"
             )
         state_claims.append(StateClaim(
             claim_id,
@@ -2676,7 +2683,14 @@ def _validate(contract: Contract) -> None:
             )
     for claim in contract.state_claims:
         spec = claim.specification
-        if claim.kind == "linear_invariant":
+        if claim.kind == "curve_bound":
+            from .temporal import TemporalError, validate_temporal_spec
+
+            try:
+                validate_temporal_spec(spec, contract)
+            except TemporalError as exc:
+                raise ContractError(f"state_claim {claim.id}: {exc}") from exc
+        elif claim.kind == "linear_invariant":
             unknown_resources = set(spec["expression"]) - set(resources)
             if unknown_resources:
                 raise ContractError(

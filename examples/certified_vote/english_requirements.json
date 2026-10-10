@@ -2,34 +2,45 @@
   "schema": "dagcert-english-requirements/v2",
   "claims": [
     {
-      "id": "completion-and-structural-progress",
-      "statement": "Each declared task's exact in-process Python implementation has ten successful completion samples for the retained workload.",
+      "id": "successful-branch-resource-drain",
+      "statement": "Every typed summary.advance outcome consumes one summary-lag unit and every typed snapshot.render outcome consumes one snapshot-work unit.",
       "primitive_refs": [
-        "task:vote.preview",
-        "task:vote.commit",
         "task:summary.advance",
         "task:snapshot.render",
-        "timing:vote.preview/completion",
-        "timing:vote.commit/completion",
-        "timing:summary.advance/completion",
-        "timing:snapshot.render/completion"
+        "resource:summary-lag",
+        "resource:snapshot-work",
+        "guarantee:summary.advance/consume/summary-lag",
+        "guarantee:snapshot.render/consume/snapshot-work"
       ],
       "checker_refs": [],
       "assumptions": [],
-      "basis": "observed",
-      "formula": null
-    },
-    {
-      "id": "in-process-responsiveness",
-      "statement": "For the measured exact-source in-process workload, preview_vote_total completes in less than 16ms and commit_vote_total completes in less than 50ms; this claim makes no browser, network, or persistence promise.",
-      "primitive_refs": [
-        "timing:vote.preview/completion",
-        "timing:vote.commit/completion"
-      ],
-      "checker_refs": [],
-      "assumptions": [],
-      "basis": "observed",
-      "formula": null
+      "basis": "derived",
+      "formula": {
+        "and": [
+          {
+            "eq": [
+              {
+                "task_guaranteed_consume": [
+                  "task:summary.advance",
+                  "resource:summary-lag"
+                ]
+              },
+              1
+            ]
+          },
+          {
+            "eq": [
+              {
+                "task_guaranteed_consume": [
+                  "task:snapshot.render",
+                  "resource:snapshot-work"
+                ]
+              },
+              1
+            ]
+          }
+        ]
+      }
     },
     {
       "id": "vote-cast-error-budget",

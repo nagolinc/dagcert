@@ -1,5 +1,15 @@
 # Dagcert command and artifact reference
 
+## Guarantee-first boundary
+
+**The observation-only route is the bad path.** Retained successful executions belong in the
+evidence file and `dagcert analyze`; they say nothing about the next run and are not certificate
+claims. Presenting a run report as a guarantee will disappoint the user. Dagcert refuses
+`basis: observed` during lint, issuance, and verification. Every certificate claim must be
+`derived` or `chance`, must use a kernel formula over the actual worker/task/resource DAG, and must
+depend on explicit engineering premises rather than promoting a measured maximum into a future
+bound.
+
 ## Commands
 
 ```text
@@ -146,6 +156,16 @@ typed outcome retains its own completion effects. Evidence records both phases s
 producer/consumer horizon from explicit service envelopes, and `bounded_response` proves the
 separate dispatch wait. A failing state proof returns the concrete transition or finite trace.
 
+`curve_bound` adds generic real-time calculus for resource inventory, backlog, throughput, and
+delay. It binds actual activations at `start_resources`, assumed duration/dispatch cases, effective
+worker availability, source outcome effects, and explicit lossless routing premises. The kernel
+uses exact rational piecewise-affine curves with affine tails, computing arithmetic, shifts,
+min/max, convolution/deconvolution, and extrema without a time grid. Shared worker/resource slots
+must fit capacity; inventory includes every affecting task and must exclude overflow or model
+discards. Source proof requirements remain unchanged. See `dagcert help timing-algebra` and
+`python -m examples.timing_algebra`; additional applications construct expressions in this language,
+not new application-specific kernel types.
+
 Each v7 task also contains `error_budget`, either null or an object with basis
 `engineering_assumption`, one canonical duration `evidence_case`, source-derived `good_outcomes`, a
 `bad_event_probability_upper` in `[0,1)`, and positive `minimum_observations`. A finite chance
@@ -175,20 +195,24 @@ undeclared exception into an acceptable probabilistic branch.
 ## Mandatory English requirements
 
 `dagcert-english-requirements/v2` is required for new issuance.
-Each claim has a stable ID, complete plain-English statement, exact primitive and required-checker
-references, explicit assumptions, a basis (`observed`, `derived`, or `chance`), and a formula. Observed claims
-use a null formula and describe retained executions. Derived claims use the fixed kernel algebra
-and cannot cite application checkers as proof. The certificate embeds both its normalized content and exact
+Each claim has a stable ID, complete plain-English statement, exact primitive references, explicit
+assumptions, a basis (`derived` or `chance`), and a formula. Derived claims use the fixed kernel
+algebra and cannot cite application checkers as proof. The certificate embeds both its normalized content and exact
 file digest. This is the source of truth for what the certificate means; it is not a separate audit
 input and cannot be reconstructed from checker output.
 
-Chance claims use a finite composition operator or
-`external_failure_probability_upper`/`external_success_probability_lower`. They cite every
-participating declared `error-budget:TASK` and state the simplified engineering probability premises in
-English. These are conditional envelopes, not statistical estimates from the retained sample.
+Chance claims use a finite composition operator,
+`external_failure_probability_upper`/`external_success_probability_lower`, or
+`state_claim_success_probability_lower` for a proved `curve_bound`. Finite compositions cite every
+participating `error-budget:TASK`. Temporal claims disclose whole-window envelope and routing
+events and union their failure budgets; service `outcomes` may restrict the real source union only
+as an explicit joint event applying to every invocation in that window. All-time curve bounds are
+supported when all premises explicitly cover all time. Finite call budgets, finite-session
+envelopes, and retained runs cannot imply forever. These are simplified engineering premises,
+not statistical estimates from the retained sample.
 
 `dagcert lint` and issuance run the mandatory deterministic translation audit. All formal tasks and
-timings must be covered by the English claims; primitive references must resolve; assumed timings
+assumed timings must be covered by the English claims; primitive references must resolve; assumed timings
 must have explicit English assumptions; and issuance requires every checker named by a claim.
 `dagcert-certificate/v11` embeds source type extraction, strict-mypy result, the digest-pinned
 Nagini/Viper proof result and scope, the exact source-verification descriptor plus its core-file
@@ -207,9 +231,8 @@ Checkers are ordinary application tools. Dagcert does not register checker kinds
 their free-form facts; it validates their identity bindings, result, and primitive references.
 They may support observed application facts but cannot prove a derived formula.
 
-The kernel not implementing a derivation does not make the behavior uncertifiable. For example,
-“the database entries appear as the correct UI rows” is checked by comparing an application-defined
-read-only database projection with Selenium observations and emitting a bound check result. See
+An application check can compare a read-only database projection with Selenium observations and
+emit a bound run-report result, but it does not establish the future UI guarantee. See
 `python -m dagcert help database-ui` and `examples.optional_browser_checker`. The application owns
 the query, equivalence key, selectors, user/session setup, and test cases; Dagcert owns result
 binding and certificate verification. Do not invent a new primitive for this structure.
@@ -220,9 +243,10 @@ It separately reports may-reachable, must-reachable, and outcome-conditional tas
 The result assumes reachable producer task types can recur, resource effects match runtime,
 acquisition is atomic, and scheduling is fair. A timing-based checker may diagnose sustained
 throughput, non-starvation, or bounded lag, but its boolean cannot prove those derived properties.
-The installed `fork-join`, `reservation-lifecycle`, `bounded-buffer`, `finite-confidence`,
+The installed `timing-algebra`, `fork-join`, `reservation-lifecycle`, `bounded-buffer`, `finite-confidence`,
 `external-verified-leaf`, and `composed-worker-pipeline` help topics show the supported proof
-shapes. Anything beyond those restricted kernels remains uncertified.
+shapes. Application-specific helpers may construct generic kernel expressions; arbitrary checker
+booleans remain supplementary evidence.
 
 ## User-requested independent audit handoff
 

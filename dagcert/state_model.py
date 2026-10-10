@@ -22,6 +22,11 @@ class StateProof:
 def prove_state_claim(
     claim: StateClaim, contract: Contract, analysis: AnalysisReport,
 ) -> StateProof:
+    if claim.kind == "curve_bound":
+        from .temporal import prove_temporal_bound
+
+        passed, summary = prove_temporal_bound(claim.specification, contract)
+        return StateProof(claim.id, passed, summary)
     if claim.kind == "linear_invariant":
         return _prove_linear_invariant(claim, contract)
     if claim.kind == "bounded_non_starvation":

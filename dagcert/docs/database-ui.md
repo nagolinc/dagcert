@@ -1,25 +1,33 @@
-# Certifying that database entries appear correctly in the UI
+# Database-to-UI run-report workflow — not a certificate
 
-This common Dagcert claim does not require a database, browser, row, or projection primitive. The
-certificate combines the four core primitives with an application-owned exact-projection checker:
+The historical workflow records that database entries appeared correctly in retained browser runs.
+That is useful semantic run evidence, but it is not a Dagcert guarantee and current Dagcert refuses
+to issue its observation-only requirements.
+
+**The observation-only route is the bad path.** A passing projection checker says nothing about
+the next request or browser session. Presenting this run report as a certificate will disappoint
+the user. A real guarantee requires source-proved application operations, typed external HTTP/JSON
+handoffs, explicit platform premises, and a `derived` or `chance` kernel formula over that DAG.
+
+The historical run report combines application primitives with an exact-projection checker:
 
 ```text
 database/application state -> render task -> browser-visible rows
                                       |              |
                                  timing evidence     Selenium observation
                                       |              |
-                                      +-- exact-projection check result -- certificate
+                                      +-- exact-projection result -- run report
 ```
 
-"The core analyzer cannot derive this claim" does not mean "Dagcert cannot certify this claim."
-A passing application checker selected during issuance is a required, digest-bound part of the
-certificate and must be supplied again during verification.
+An application checker may retain semantic evidence or invalidate a premise. Its boolean result
+cannot establish a certificate promise. If the kernel cannot derive the requested property, report
+`NOT CERTIFIED`; do not substitute the checker result or a successful browser run.
 
 ## Complete installed reference application
 
-Dagcert ships `examples.certified_database_ui`, a real SQLite-backed HTTP and browser application,
-not a pseudocode fragment. Its checked-in exact-source certificate and per-claim independent audit
-cover:
+Dagcert retains `examples.certified_database_ui`, a real SQLite-backed HTTP and browser application,
+as a historical run-report example. Its old directory name and artifact are not a current
+certificate. Its retained evidence covers:
 
 - initial database-to-DOM membership and ordering;
 - ascending and descending sorting;
@@ -29,23 +37,18 @@ cover:
 - the standard 50 ms non-streaming HTTP and 16 ms local UI deadlines for its measured sequential
   reference workload.
 
-Read `examples.certified_database_ui/english_requirements.json` first. It is the mandatory,
-human-readable source of all three promises, assumptions, primitive references, and required
-projection checkers. The certificate embeds that exact document, and the optional audit consumes
-it directly; there is no separate audit-claims file.
+Read `examples.certified_database_ui/english_requirements.json` only as a historical example of the
+now-refused `basis: observed` shape. Do not copy it into a certificate.
 
 Inspect `examples.certified_database_ui.README.md` and run:
 
 ```text
 python -m examples.certified_database_ui.app --reset
 python -m examples.certified_database_ui.certify collect
-python -m examples.certified_database_ui.certify issue
 ```
 
-The checked-in certificate includes the accepted per-claim audit result. The audit remains
-optional and runs only when the user asks for it; it is not a build or release gate. The README
-contains the exact subscription-backed `gpt-5.6-luna` handoff sequence. Collecting new evidence
-invalidates the checked-in audit, so including a new audit requires fresh workers.
+The checked-in historical artifact is deliberately invalid under current Dagcert. Collection and
+projection comparison remain useful run-report tools.
 
 ## 1. Model the work with the five primitives
 
@@ -161,18 +164,12 @@ by default because row identity, not DOM position, defines correspondence. Set `
 when ordering or pagination is part of the promise; the helper then compares and records the exact
 semantic-key sequence as the complete reference app does.
 
-## 5. Make the result part of the certificate
+## 5. Keep the result as supporting evidence
 
-Attach the same result during issuance and verification:
-
-```text
-dagcert issue ... --check-result artifacts/results-page-projection.json
-dagcert verify ... --check-result artifacts/results-page-projection.json
-```
-
-The certificate is valid only while the check result passes and its source fingerprint, contract
-digest, evidence digest, and primitive references match. Report the narrow claim that was tested;
-one page/case does not imply that every database row appears on every page or for every user.
+The projection result describes only the retained cases. It may accompany a run report or challenge
+an explicit platform premise in a separately derived certificate. It cannot itself satisfy a
+certificate claim. Report the narrow observation that was tested; one page/case does not imply
+that every database row appears on every page or for every user.
 
 ## Required cases
 

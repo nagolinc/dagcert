@@ -8,7 +8,7 @@ import pytest
 from dagcert.analysis import analyze_contract
 from dagcert.contract import ContractError, load_contract
 from dagcert.evidence import TimingSample
-from dagcert.formula import evaluate_formula
+from dagcert.formula import FormulaError, evaluate_formula, validate_claim_formula
 
 
 APP_SOURCE = '''from dataclasses import dataclass
@@ -381,6 +381,95 @@ def test_threshold_repeat_uses_markov_envelope_and_worker_waves(tmp_path: Path) 
     assert confidence.primitive_refs == (
         "composition:prepare-threshold", "error-budget:prepare",
     )
+
+
+def test_threshold_repeat_proves_probability_and_finite_window_rate_together(
+    tmp_path: Path,
+) -> None:
+    contract = _load(tmp_path)
+    analysis = _analysis(contract)
+    formula = {
+        "and": [
+            {
+                "gte": [
+                    {
+                        "composition_success_probability_lower":
+                            "composition:prepare-threshold",
+                    },
+                    0.75,
+                ],
+            },
+            {
+                "gt": [
+                    {
+                        "divide": [
+                            {
+                                "composition_required_successes":
+                                    "composition:prepare-threshold",
+                            },
+                            {
+                                "divide": [
+                                    {
+                                        "composition_upper_ms":
+                                            "composition:prepare-threshold",
+                                    },
+                                    1000,
+                                ],
+                            },
+                        ],
+                    },
+                    400,
+                ],
+            },
+        ],
+    }
+
+    validate_claim_formula(formula, basis="chance")
+    evaluation = evaluate_formula(formula, contract, analysis)
+
+    assert evaluation.passed
+    assert evaluation.primitive_refs == (
+        "composition:prepare-threshold", "error-budget:prepare",
+    )
+
+
+def test_chance_throughput_requires_probability_and_rate_for_same_threshold() -> None:
+    with pytest.raises(FormulaError, match="same composition"):
+        validate_claim_formula({
+            "and": [
+                {
+                    "gte": [
+                        {
+                            "composition_success_probability_lower":
+                                "composition:first",
+                        },
+                        0.9,
+                    ],
+                },
+                {
+                    "gte": [
+                        {
+                            "divide": [
+                                {
+                                    "composition_required_successes":
+                                        "composition:second",
+                                },
+                                {
+                                    "divide": [
+                                        {
+                                            "composition_upper_ms":
+                                                "composition:second",
+                                        },
+                                        1000,
+                                    ],
+                                },
+                            ],
+                        },
+                        1,
+                    ],
+                },
+            ],
+        }, basis="chance")
 
 
 def test_threshold_repeat_is_not_an_all_attempts_union_bound(tmp_path: Path) -> None:

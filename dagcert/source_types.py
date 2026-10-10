@@ -75,7 +75,7 @@ def type_enforcement_descriptor() -> dict[str, object]:
         "_version.py", "__init__.py", "analysis.py", "certificate.py", "contract.py",
         "evidence.py", "formula.py", "requirements.py", "runtime.py", "runtime.pyi",
         "maledictus_verifier.py", "proof_sources.py", "python_verifier.py", "source_types.py",
-        "state_model.py", "javascript_interfaces.py", "source_calls.py",
+        "state_model.py", "curves.py", "temporal.py", "javascript_interfaces.py", "source_calls.py",
         "nagini_stubs/dagcert/__init__.pyi", "nagini_stubs/dagcert/runtime.pyi",
         "mypy_stubs/dagcert/__init__.pyi", "mypy_stubs/dagcert/runtime.pyi",
         "mypy_stubs/dagcert/surfaces.pyi",
