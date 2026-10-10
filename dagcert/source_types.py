@@ -69,13 +69,16 @@ class SourceProofBackend:
 def type_enforcement_descriptor() -> dict[str, object]:
     """Return the exact source/runtime type kernel sealed into new certificates."""
     from ._version import VERSION
+    import z3  # type: ignore[import-untyped]
 
     package = Path(__file__).resolve().parent
     kernel_files = (
         "_version.py", "__init__.py", "analysis.py", "certificate.py", "contract.py",
         "evidence.py", "formula.py", "requirements.py", "runtime.py", "runtime.pyi",
         "maledictus_verifier.py", "proof_sources.py", "python_verifier.py", "source_types.py",
-        "state_model.py", "curves.py", "temporal.py", "javascript_interfaces.py", "source_calls.py",
+        "state_model.py", "curves.py", "temporal.py", "quantities.py", "scheduling.py",
+        "relations.py", "relation_types.py", "induction.py", "semantic.py", "networks.py", "nagini_launcher.py",
+        "javascript_interfaces.py", "source_calls.py",
         "nagini_stubs/dagcert/__init__.pyi", "nagini_stubs/dagcert/runtime.pyi",
         "mypy_stubs/dagcert/__init__.pyi", "mypy_stubs/dagcert/runtime.pyi",
         "mypy_stubs/dagcert/surfaces.pyi",
@@ -88,9 +91,11 @@ def type_enforcement_descriptor() -> dict[str, object]:
         manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
     ).encode("utf-8")
     return {
-        "provider": "dagcert.python/v15",
+        "provider": "dagcert.python/v16",
         "dagcert_version": VERSION,
         "static_analysis": "source-ast+strict-mypy/v1",
+        "source_relations": "sealed-backend-checked-entry-to-exit-predicates/v1",
+        "induction_checker": {"name": "z3", "version": z3.get_version_string()},
         "mypy_import_surface": "sealed-type-preserving-dagcert-stub/v1",
         "decorator_provenance": "trusted-imports-and-shadow-rejection/v1",
         "operation_marker": "type-preserving/v1",

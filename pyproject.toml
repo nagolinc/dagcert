@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dagcert"
-version = "0.21.0"
+version = "0.22.0"
 description = "Plain-English certificates over workers, tasks, resources, and timings"
 readme = "readme.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{name = "dagcert contributors"}]
-dependencies = ["mypy>=1.11", "typeguard>=4.4,<5"]
+dependencies = ["mypy>=1.11", "typeguard>=4.4,<5", "z3-solver==5.1.0.0"]
 
 [project.urls]
 Repository = "https://github.com/nagolinc/dagcert"
@@ -101,6 +101,7 @@ examples = [
     "timing_algebra/*.md",
     "timing_algebra/artifacts/*.json",
     "timing_algebra/artifacts/*.jsonl",
+    "timing_systems/*.md",
     "stats_viewer/*.html",
     "stats_viewer/*.css",
     "stats_viewer/*.js",

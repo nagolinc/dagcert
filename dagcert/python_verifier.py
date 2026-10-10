@@ -27,7 +27,7 @@ class PythonVerificationError(ValueError):
 
 
 _CACHE: dict[
-    tuple[str, tuple[str, ...], tuple[tuple[str, str], ...], tuple[tuple[str, str], ...]],
+    tuple[str, str, tuple[str, ...], tuple[tuple[str, str], ...], tuple[tuple[str, str], ...]],
     dict[str, object],
 ] = {}
 
@@ -58,7 +58,11 @@ def verify_exception_freedom(
         for symbol in sorted(symbols_by_file.get(path, ()))
     )
     overlays = tuple(sorted((external_overlays or {}).items()))
-    cache_key = (source_fingerprint, normalized_files, symbol_key, overlays)
+    launcher = Path(__file__).resolve().parent / "nagini_launcher.py"
+    if not launcher.is_file():
+        raise PythonVerificationError("Dagcert's sealed Nagini launcher is missing")
+    launcher_digest = sha256(launcher.read_bytes()).hexdigest()
+    cache_key = (source_fingerprint, launcher_digest, normalized_files, symbol_key, overlays)
     cached = _CACHE.get(cache_key)
     if cached is not None:
         return dict(cached)
@@ -117,8 +121,11 @@ def verify_exception_freedom(
             "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
             "-v", f"{root}:/code:ro",
             "-v", f"{stub_root}:/tmp/dagcert-stubs:ro",
+            "-v", f"{launcher}:/tmp/dagcert-nagini-launcher.py:ro",
             *overlay_mounts,
+            "--entrypoint", "python",
             NAGINI_IMAGE,
+            "/tmp/dagcert-nagini-launcher.py",
             "--verifier", NAGINI_BACKEND,
             "--base-dir", "/tmp/dagcert-stubs",
             container_path,
@@ -138,6 +145,7 @@ def verify_exception_freedom(
             "symbols": list(sorted(symbols_by_file.get(relative, ()))),
             "module_scope": "complete-file",
             "result": "proved",
+            "union_generator_arity": _union_generator_arity(output),
         })
 
     for adapter_relative, stub_relative in overlays:
@@ -150,8 +158,11 @@ def verify_exception_freedom(
             "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
             "-v", f"{root}:/code:ro",
             "-v", f"{stub_root}:/tmp/dagcert-stubs:ro",
+            "-v", f"{launcher}:/tmp/dagcert-nagini-launcher.py:ro",
             *overlay_mounts,
+            "--entrypoint", "python",
             NAGINI_IMAGE,
+            "/tmp/dagcert-nagini-launcher.py",
             "--verifier", NAGINI_BACKEND,
             "--base-dir", "/tmp/dagcert-stubs",
             container_path,
@@ -172,6 +183,7 @@ def verify_exception_freedom(
             "stub_path": Path(stub_relative).as_posix(),
             "stub_sha256": sha256(stub.read_bytes()).hexdigest(),
             "result": "accepted-explicit-assumption",
+            "union_generator_arity": _union_generator_arity(output),
         })
 
     result: dict[str, object] = {
@@ -185,12 +197,22 @@ def verify_exception_freedom(
         "source_mount": "read-only",
         "timeout_seconds": NAGINI_TIMEOUT_SECONDS,
         "source_fingerprint": source_fingerprint,
+        "launcher_sha256": launcher_digest,
+        "union_generator": "upstream-generator-sized-from-compiler-unions/v1",
         "external_contract_overlays": overlay_rows,
         "external_contract_files": verified_external_contracts,
         "files": verified_files,
     }
     _CACHE[cache_key] = dict(result)
     return result
+
+
+def _union_generator_arity(output: str) -> int:
+    marker = "DAGCERT_NAGINI_UNION_ARITY="
+    values = [line[len(marker):] for line in output.splitlines() if line.startswith(marker)]
+    if len(values) != 1 or not values[0].isdigit() or int(values[0]) < 1:
+        raise PythonVerificationError("Nagini did not report its sealed union generator configuration")
+    return int(values[0])
 
 
 def _read_nagini_version() -> str:

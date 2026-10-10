@@ -117,6 +117,10 @@ def replace_me(request: ReplaceMeInput) -> ReplaceMeCompleted:
 """
 
 HELP_TOPICS = {
+    "timing-systems": (
+        "variable-size streams, shared workers, batches, retries, identity and source-bound induction",
+        "docs/timing-systems.md",
+    ),
     "timing-algebra": (
         "real-time calculus: service, arrivals, inventory, burst recovery, and timing expressiveness",
         "docs/timing-algebra.md",
@@ -329,6 +333,12 @@ def main(argv: list[str] | None = None) -> int:
                     contract, lint_root, source_manifest_paths=lint_manifest,
                 ),
                 proof_backend=_proof_backend(args),
+            )
+            from .semantic import verify_contract_relations
+
+            verify_contract_relations(
+                contract, lint_root, source_verification, lint_fingerprint,
+                lint_manifest, _proof_backend(args),
             )
             print(f"valid: {len(contract.workers)} workers, {len(contract.tasks)} tasks, {len(contract.resources)} resources, {sum(len(item.timings) for item in contract.tasks)} timings")
             print(f"human-readable requirements: {len(requirements.claims)} claims")

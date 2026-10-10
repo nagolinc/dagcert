@@ -94,6 +94,14 @@ declares finite source-outcome paths over those primitives.
   require new kernel types. All-time bounds require explicitly all-time premises. A finite run or
   finite invocation budget cannot establish a forever claim, but all-time claims are not generally
   forbidden. Source verification remains mandatory.
+- For variable-sized output or retained state, read `dagcert help timing-systems`.
+  Bind useful quantity to real outcome fields and prove source accounting relations.
+  Include failed/retried/discarded work in interval cost envelopes. Use source-bound
+  induction for capacity, identity, deduplication and latest-wins state; do not treat
+  normal return types as proof of these semantics. Separate actual departures from
+  available service, and analyze finite-buffer refill periods including restart
+  delay. A fast average, min of unmatched stream totals, scheduler weights, or a
+  successful model-only example does not establish the application guarantee.
 
 Reconstruct the execution graph from source before writing the contract. Represent independently
 scheduled stages, actual worker pools, queues, reservations, resource transfers, ordering rules,

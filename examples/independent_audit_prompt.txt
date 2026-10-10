@@ -90,6 +90,26 @@ burst/gap behavior with average rates; omitting worker contention; or declaring
 dependencies that are documentation rather than runtime ordering. Merely
 having multiple task names is not adequate decomposition.
 
+For quantity-valued timing models, trace what the quantity actually measures:
+attempts, completed records, unique durable bytes, or matched contiguous playable
+duration are different things. Require source-proved accounting relations for
+the chosen fields and all typed outcomes. Check that workload envelopes include
+failed attempts, retries, duplicate work, partial-batch overhead, and all work
+stranded behind missing keys. A minimum of audio/video totals is not proof of
+matching playable content. Scheduler weights are not a bounded-lag service
+guarantee. Available worker service is not completed output without ingress or
+a justified backlogged-period premise.
+
+For finite buffers, trace pause, admission, discard and restart behavior; reject
+curves that accumulate hypothetical production while the buffer was full. For
+relational invariants, inspect both the source backend's sealed postcondition
+proof and solver induction. Check real initialization, atomicity, complete
+mutation scope, and that the claimed invariant actually implies the user-facing
+promise. Do not accept an invariant as liveness. Whole-envelope probability and
+time horizon must match the claim; per-request probabilities or finite runs do
+not establish a forever guarantee. Explicit assumptions must describe genuine
+leaf/platform/scheduler premises, not restate an unproved application result.
+
 Reject the opposite distortion too: an ordinary function call is not a worker, queue, or scheduling
 boundary. In particular, preprocessing, one external-library call, and postprocessing performed by
 one worker invocation must not be inflated into three DAG tasks merely because the middle call uses

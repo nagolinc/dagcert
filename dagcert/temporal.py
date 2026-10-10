@@ -59,6 +59,13 @@ def _monotone(curve: Curve, label: str) -> None:
 
 
 def parse_temporal_spec(row: Mapping[str, Any]) -> Mapping[str, Any]:
+    if "network" in row:
+        from .networks import NetworkError, parse_network_spec
+
+        try:
+            return parse_network_spec(row)
+        except (NetworkError, CurveError) as exc:
+            raise TemporalError(str(exc)) from exc
     _fields(row, {
         "id", "kind", "envelopes", "flows", "expression", "operator", "bound",
         "start_ms", "end_ms", "metadata",
@@ -150,6 +157,10 @@ def parse_temporal_spec(row: Mapping[str, Any]) -> Mapping[str, Any]:
 
 
 def temporal_references(spec: Mapping[str, Any]) -> set[str]:
+    if "network" in spec:
+        from .networks import network_references
+
+        return network_references(spec)
     references: set[str] = set()
     for envelope in spec["envelopes"]:
         references.add(f"task:{envelope['task']}")
@@ -169,6 +180,8 @@ def temporal_failure_upper(spec: Mapping[str, Any]) -> Fraction:
 
 def temporal_premises(spec: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     """Each distinct source envelope or routing edge denotes one joint-window event."""
+    if "network" in spec:
+        return list(spec["network"]["envelopes"])
     premises: list[Mapping[str, Any]] = list(spec["envelopes"])
     for flow in spec["flows"]:
         value = flow["input"]
@@ -464,6 +477,14 @@ class TemporalModel:
 
 
 def validate_temporal_spec(spec: Mapping[str, Any], contract: Contract) -> None:
+    if "network" in spec:
+        from .networks import NetworkError, NetworkModel
+
+        try:
+            NetworkModel(spec, contract).validate()
+        except (NetworkError, CurveError) as exc:
+            raise TemporalError(str(exc)) from exc
+        return
     try:
         TemporalModel(spec, contract).validate()
     except CurveError as exc:
@@ -471,6 +492,10 @@ def validate_temporal_spec(spec: Mapping[str, Any], contract: Contract) -> None:
 
 
 def prove_temporal_bound(spec: Mapping[str, Any], contract: Contract) -> tuple[bool, str]:
+    if "network" in spec:
+        from .networks import prove_network_bound
+
+        return prove_network_bound(spec, contract)
     model = TemporalModel(spec, contract)
     try:
         model.validate()

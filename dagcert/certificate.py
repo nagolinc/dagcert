@@ -544,6 +544,11 @@ def issue_certificate(
             ),
             proof_backend=proof_backend,
         )
+        from .semantic import verify_contract_relations
+
+        verify_contract_relations(
+            contract, root, source_verification, fingerprint, manifest, proof_backend,
+        )
     except SourceTypeError as exc:
         raise CertificateError(f"certificate refused: {exc}") from exc
     evidence = load_evidence(evidence_path)
@@ -682,6 +687,10 @@ def verify_certificate(
         problems.append("English requirements digest mismatch")
     try:
         contract = load_contract(contract_path, source_root=root)
+        if certificate_schema == "dagcert-certificate/v4" and contract.schema != "dagcert-contract/v2":
+            return CertificateVerification(False, tuple(problems + [
+                "legacy v4 certificate cannot verify a source-typed contract or bypass current source proof gates",
+            ]))
         if certificate_schema in {"dagcert-certificate/v6", "dagcert-certificate/v7", "dagcert-certificate/v8"}:
             try:
                 source_typing = check_python_sources(
@@ -730,6 +739,12 @@ def verify_certificate(
                             contract, root, source_manifest_paths=manifest,
                         ),
                         proof_backend=selected_backend,
+                    )
+                    from .semantic import verify_contract_relations
+
+                    verify_contract_relations(
+                        contract, root, source_verification, fingerprint, manifest,
+                        selected_backend,
                     )
                     if stored_source_verification != source_verification:
                         problems.append("source verification no longer matches")

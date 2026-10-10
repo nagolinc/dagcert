@@ -168,6 +168,19 @@ Source verification remains mandatory. See [`dagcert help timing-algebra`](dagce
 for twenty application patterns and run `python -m examples.timing_algebra` for the two-producer
 reserve example. These rules are not arbitrary temporal logic.
 
+Variable-sized work uses quantity-valued `curve_bound` network programs:
+worker service, interval work/quantity costs (including failures), shared
+reservations, bounded batching and busy-period deficits. Source-bound
+`relational_invariant` claims use real backend postconditions plus Z3 induction
+for retained state, matching identities, capacity and duplicate accounting.
+No caller-supplied proof boolean substitutes for source verification. See
+[`dagcert help timing-systems`](dagcert/docs/timing-systems.md) and
+`python -m examples.timing_systems --certify` for five source policies and an
+infinite variable-streaming theorem. The example explicitly distinguishes
+the proved policies from whole deployed applications and their external
+timing/ownership assumptions. Pure source-policy tasks need no invented
+stopwatch timing; any timing claim still requires its actual timing premises.
+
 For Python, each v7+ task points to the production source file and symbol. Dagcert reads the real
 one-input annotation and closed return union, rejects `Any` throughout those boundary variants,
 runs strict mypy over the real implementation body itself, and requires an explicitly selected,

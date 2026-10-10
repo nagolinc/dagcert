@@ -22,6 +22,11 @@ class StateProof:
 def prove_state_claim(
     claim: StateClaim, contract: Contract, analysis: AnalysisReport,
 ) -> StateProof:
+    if claim.kind == "relational_invariant":
+        from .induction import prove_inductive_invariant
+
+        passed, summary = prove_inductive_invariant(claim.specification, contract)
+        return StateProof(claim.id, passed, summary)
     if claim.kind == "curve_bound":
         from .temporal import prove_temporal_bound
 

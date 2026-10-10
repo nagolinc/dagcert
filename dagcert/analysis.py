@@ -263,16 +263,29 @@ def analyze_contract(
         )
 
     for state_claim in contract.state_claims:
+        if state_claim.kind == "relational_invariant":
+            assumptions.append(
+                f"state-claim:{state_claim.id} initial-state and transition-scope premise: "
+                f"{state_claim.specification['assumption']}"
+            )
         if state_claim.kind != "curve_bound":
             continue
         from .temporal import temporal_premises
 
-        assumptions.append(
-            f"state-claim:{state_claim.id} starts with the declared resource inventory and "
-            "no preexisting active invocations or undelivered handoff values; arrival counts "
-            "refer to actual invocation activation where start effects occur; availability "
-            "is effective service for pending work under the declared scheduler/resource conditions"
-        )
+        if "network" in state_claim.specification:
+            assumptions.append(
+                f"state-claim:{state_claim.id} quantities refer to the source-bound fields and "
+                "complete outcome union; workload includes failed/retried/discarded work in "
+                "every backlogged interval, not merely an observed average. Initial state, "
+                "admission, identity and scheduling scope are explicit premises."
+            )
+        else:
+            assumptions.append(
+                f"state-claim:{state_claim.id} starts with the declared resource inventory and "
+                "no preexisting active invocations or undelivered handoff values; arrival counts "
+                "refer to actual invocation activation where start effects occur; availability "
+                "is effective service for pending work under the declared scheduler/resource conditions"
+            )
         for premise in temporal_premises(state_claim.specification):
             assumptions.append(
                 f"state-claim:{state_claim.id}/{premise['id']} assumes {premise['assumption']}; "

@@ -191,7 +191,11 @@ def audit_translation(
         if f"state-claim:{state_claim.id}" not in referenced_primitives:
             continue
         specification = state_claim.specification
-        if state_claim.kind == "curve_bound":
+        if state_claim.kind == "relational_invariant":
+            from .induction import induction_references
+
+            coverage_primitives.update(induction_references(specification))
+        elif state_claim.kind == "curve_bound":
             from .temporal import temporal_references
 
             coverage_primitives.update(temporal_references(specification))
@@ -356,6 +360,11 @@ def audit_translation(
                     if not reference.startswith("state-claim:"):
                         continue
                     temporal_claim = contract.state_claim_by_id.get(reference.split(":", 1)[1])
+                    if temporal_claim is not None and temporal_claim.kind == "relational_invariant":
+                        if not claim.assumptions:
+                            findings.append(
+                                f"claim {claim.id} must disclose its initial-state and transition-scope assumptions"
+                            )
                     if temporal_claim is None or temporal_claim.kind != "curve_bound":
                         continue
                     from .temporal import temporal_failure_upper

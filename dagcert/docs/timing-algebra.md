@@ -1,5 +1,11 @@
 # Timing algebra: streams, service, and inventory
 
+For variable-sized output, shared workers, batches, retry accounting, keyed
+progress, and persistent state, start with `dagcert help timing-systems` and
+`python -m examples.timing_systems --certify`. The count-only example below is
+an introduction, not an adequate model of those systems. A list of algebra
+recipes is not a set of end-to-end application certificates.
+
 Dagcert's timing language combines finite workflow composition with real-time calculus. A new
 application supplies source-bound tasks, typed effects, arrival and service assumptions, and an
 expression over them. It does not need a new bucket, video, cache, or queue-specific kernel rule.

@@ -1670,6 +1670,13 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
                     row.get("upper_ms"), f"state_claim {claim_id}.upper_ms",
                 ),
             }
+        elif kind == "relational_invariant":
+            from .induction import InductionError, parse_induction_spec
+
+            try:
+                specification = parse_induction_spec(row)
+            except InductionError as exc:
+                raise ContractError(f"state_claim {claim_id}: {exc}") from exc
         elif kind == "curve_bound":
             from .temporal import TemporalError, parse_temporal_spec
 
@@ -1680,7 +1687,7 @@ def load_contract(path: str | Path, *, source_root: str | Path | None = None) ->
         else:
             raise ContractError(
                 f"state_claim {claim_id}.kind must be linear_invariant, "
-                "bounded_non_starvation, bounded_response, or curve_bound"
+                "bounded_non_starvation, bounded_response, relational_invariant, or curve_bound"
             )
         state_claims.append(StateClaim(
             claim_id,
@@ -2263,9 +2270,12 @@ def _validate(contract: Contract) -> None:
                     "every real implementation module"
                 )
     for task in contract.tasks:
-        if not task.timings:
+        # Pure source-semantic policies need no invented stopwatch premise. Any
+        # timing composition still has to name a real declared timing case.
+        source_policy = task.role == "operation" and task.source_signature is not None
+        if not task.timings and not source_policy:
             raise ContractError(f"task {task.id} must declare at least one timing")
-        if not any(timing.metric == "duration" for timing in task.timings.values()):
+        if task.timings and not any(timing.metric == "duration" for timing in task.timings.values()):
             raise ContractError(f"task {task.id} must declare a duration timing")
         if task.worker not in workers:
             raise ContractError(f"task {task.id} references unknown worker {task.worker}")
@@ -2681,9 +2691,22 @@ def _validate(contract: Contract) -> None:
             raise ContractError(
                 f"composition {composition.id} tasks must form one connected DAG subgraph"
             )
+    from .induction import InductionError, validate_joint_initialization
+
+    try:
+        validate_joint_initialization(contract.state_claims, contract)
+    except InductionError as exc:
+        raise ContractError(f"state claims: {exc}") from exc
     for claim in contract.state_claims:
         spec = claim.specification
-        if claim.kind == "curve_bound":
+        if claim.kind == "relational_invariant":
+            from .induction import InductionError, relation_source_obligations
+
+            try:
+                relation_source_obligations(spec, contract)
+            except InductionError as exc:
+                raise ContractError(f"state_claim {claim.id}: {exc}") from exc
+        elif claim.kind == "curve_bound":
             from .temporal import TemporalError, validate_temporal_spec
 
             try:
