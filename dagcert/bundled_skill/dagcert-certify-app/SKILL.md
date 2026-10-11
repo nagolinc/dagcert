@@ -8,6 +8,36 @@ description: Certify an application with dagcert by deriving every promise from 
 This is the focused workflow. Run `python -m dagcert help` for packaged guides and examples, and
 read [references/workflow.md](references/workflow.md) for current artifact formats and commands.
 
+## First rule: typed tasks and explicit proof boundaries
+
+Before verification, define each task's statically typed input, closed success/error outcomes,
+consumer-required guarantees, resources, and timing/failure accounting. Refactor the production
+path into those tasks. Complete the microclaims in the user's agreed order.
+
+**Certify task contracts, not dependency internals.** Bind established parsers, schema validators,
+HTTP clients, and model services through explicit trusted external contracts. A schema parser's
+contract is `parse_and_validate(text, schema) -> SchemaObject | Error`: success satisfies the
+supplied schema and corresponds to that input; failure produces no useful output and costs time.
+Prove the application's schema selection, call, success/error handling, and downstream use.
+Do not prove JSON grammar, recursive JSON representations, dictionary reads, string stripping,
+or validation-library loops as prerequisites for that task. Static types alone do not establish
+schema validity: that semantic guarantee must be explicit in the trusted parser contract.
+
+**Stop at the first descent into dependency internals.** If the proposed next step is another
+container/string/parser proof or a verifier feature to support it, stop that work. Restate the
+consumer-level obligation, check the external contract, and simplify/refactor the task boundary.
+Use an established schema validator instead of proving an unnecessary custom validator. An
+unsupported annotation or verifier refusal does not authorize scope expansion. Verifier
+development is a separate task requiring explicit user scope and a retained demonstration that
+the consumer-level obligation remains after checking suitable boundaries and existing contracts.
+Do not add product limits, hide failures, or weaken the claim to obtain acceptance.
+
+Keep dependency assumptions explicit, version-bound, and distinct from proved application
+behavior. Do not relabel scheduling, joins, useful-output accounting, or other application logic
+being certified as external. A contract declaration is not a completed proof; report actual
+backend acceptance, measurements, and composition separately. See the
+[worked boundary and stop procedure](references/workflow.md#typed-task-boundaries-and-the-stop-rule).
+
 ## Required application surfaces: use the supplied APIs literally
 
 **UNLESS THE USER EXPLICITLY ASKS YOU NOT TO, USE THESE LITERALLY. THEY ARE SUPPLIED APPLICATION
@@ -144,10 +174,12 @@ use an explicit input class, explicit named outcome classes, an inline closed re
 `@dagcert.runtime.operation`. Every v7+ dependency names an upstream outcome type and must feed a downstream
 callable that accepts that exact source type. Model effects for every explicit source outcome.
 Expected failures must be return variants; an unexpected exception invalidates the proof. Keep
-parsing, normalization, lookup, reservation, and other claim-relevant argument preparation inside
-the verified boundary. Never create a typed certification wrapper that production bypasses.
+claim-relevant argument preparation and dependency invocations inside the verified task. Parsing
+through an external parser/schema contract does not require proving that library's internals.
+Never create a typed certification wrapper that production bypasses.
 Do not use operation-level Nagini `Requires` or executable-module `Assume`/`ContractOnly`; Dagcert
-must prove executable behavior for the complete declared input type without trusted axioms.
+must prove executable behavior for the complete declared input type under the sealed external
+contracts, without adding assumptions in place of application-owned behavior.
 
 Use `--proof-backend maledictus` only with both `--proof-backend-executable` and
 `--proof-backend-sha256`, and pass the same selection to lint, issue, and verify. Never switch
@@ -178,8 +210,12 @@ a p=1 premise; any observed violation then refuses issuance.
 When several contextual tasks call the same adapter, give them the same
 `external_contract.boundary_id`, require otherwise identical source bindings, and retain the call
 site by executing it inside `ExternalEvidenceMonitor.task_context(task_id)`.
-The stub body is intentionally limited to `Ensures(Result() is not None)`; arbitrary postconditions
-could make the proof vacuous and are rejected. Put richer value validation in executable code.
+This standalone external-task stub body is intentionally limited to
+`Ensures(Result() is not None)`; arbitrary postconditions there are rejected. This restriction is
+not an instruction to implement or prove a JSON validator. For richer validation, invoke an
+established schema library through its supported provider contract inside the executable
+operation and handle its outcomes. State a representation gap if that contract cannot be bound;
+apply the stop rule instead of launching parser or verifier development.
 If the call is internal to one logical operation instead, do not manufacture an external task:
 use `external_boundaries` plus the operation's `external_calls` as described above.
 
@@ -230,8 +266,9 @@ composed latency with a summary task whose measured output is the desired conclu
 2. Inventory the user's requested guarantees. Classify each as derived or chance and write its
    exact scope and assumptions before evidence collection. Put observations in the evidence/run
    report, never in the certificate promise set.
-3. Trace source paths and build the smallest faithful worker/task/resource DAG. Do not mirror every
-   function, but do not omit state or scheduling boundaries material to a claim.
+3. Trace source paths and build the smallest faithful worker/task/resource DAG. Define typed task
+   inputs, success/error outcomes, and trusted dependency contracts before proving internals.
+   Do not mirror every function or omit state/scheduling boundaries material to a claim.
 4. Declare real workers, operation tasks, instrumentation, resources, structured finite
    compositions, and any required lifecycle or temporal curve state claims.
    Bind each task to the source symbol actually called by its production worker; do not write
@@ -241,8 +278,10 @@ composed latency with a summary task whose measured output is the desired conclu
    not infer worst-case gaps or probabilities from a few favorable samples.
 6. Record every exact-source attempt, including failures. Exercise representative and adversarial
    cases. Never retry to replace a failed observation.
-7. Run `dagcert lint`, application tests, and `dagcert analyze`. Resolve every coverage, binding,
-   strict-mypy, Nagini translation/proof, resource-effect, failed-attempt, and timing finding.
+7. Run `dagcert lint`, application tests, and `dagcert analyze`. Resolve coverage, binding,
+   strict-mypy, proof, resource-effect, failed-attempt, and timing findings within the agreed
+   claim. A finding involving dependency internals triggers the stop rule, not an open-ended
+   mandate to expand the verifier.
 8. Encode derived claims as kernel formulas over the actual DAG. Do not use checker booleans or
    aggregate samples as proof premises.
 9. Run `dagcert issue`, then `dagcert verify` with identical inputs and exclusions.

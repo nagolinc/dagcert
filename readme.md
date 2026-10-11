@@ -30,10 +30,32 @@ constraint.** Preserve required behavior while changing the implementation bound
    as capacity. Use measurements to check explicit engineering premises, not to manufacture them
    from a passing run.
 
+**Certify task contracts, not dependency internals.** Before proving a task, define its statically
+typed input, closed success/error outcomes, consumer-required guarantees, resources, and timing
+accounting. Bind established parsers, schema validators, HTTP clients, and model services through
+explicit trusted external contracts. For example:
+
+```text
+parse_and_validate(text, schema) -> SchemaObject | Error
+success: the object satisfies the supplied schema
+error: no useful output; all elapsed time still counts
+```
+
+Prove the application's schema selection, call, outcome handling, and downstream use under that
+contract. Do not make JSON grammar, recursive JSON types, dictionary reads, string operations,
+or validation-library loops prerequisites for a task-level claim. Refactor production code to use
+an established parser/schema validator instead of proving an unnecessary custom implementation.
+Record what is assumed about the dependency separately from what is proved about the application.
+
+**Stop rule:** if the next step is proving dependency internals or extending Dagcert/Maledictus to
+represent them, stop that work and correct the task boundary first. A verifier refusal does not
+authorize scope expansion. Verifier development is a separate task requiring explicit user scope;
+first show the exact consumer-level obligation that remains after using suitable typed boundaries
+and existing external contracts. Do not add limits or weaken the claim to bypass the issue.
+
 Start with the smallest actual task and test its intended property and a deliberately false
-variant before expanding the proof. Do not turn a narrow backend promise into a recursive-JSON,
-database-transaction, or browser-verification project unless that work is on the promised path.
-Equally, do not omit owned code that actually implements a required transition.
+variant. Complete microclaims in the agreed order. Browser, database, parser, or verifier work
+requires its own relevance to the requested claim; being reachable in a call stack is insufficient.
 
 See the [worked certification workflow](docs/CERTIFICATION_WORKFLOW.md): a structure builder with
 explicit failures and retries, a parallel backend streaming DAG, and runnable repository examples
@@ -61,7 +83,9 @@ Give the LLM building or maintaining your app this instruction:
 > **Certify this app with https://github.com/nagolinc/dagcert. Derive every promise from the real
 > worker/task/resource DAG and source-proved operations. Start with small consumer-driven claims;
 > refactor actual production work into clean proved tasks, then compose them. Preserve required
-> product behavior. Use measurements only as supporting run evidence, never as the promise itself,
+> product behavior. Define typed inputs and success/error outcomes first; stop proofs at explicit
+> trusted dependency contracts. Do not turn task certification into parser or verifier development.
+> Use measurements only as supporting run evidence, never as the promise itself,
 > and do not add product restrictions merely to make the certificate pass.**
 
 That is the intended interface. The agent can install Dagcert, read its installed help, initialize

@@ -7,6 +7,42 @@ not to preserve a tangled implementation at any cost, nor to replace a proof wit
 This guide contains worked **design examples**, not a certificate for a deployed streaming app.
 The runnable repository examples linked below state their own narrower claims and assumptions.
 
+## Mandatory boundary rule: certify tasks, not dependency internals
+
+Before running a verifier, write down each task's statically typed request, closed success/error
+outcomes, consumer-required guarantees, resources, and timing/failure accounting. Identify which
+guarantees the application establishes and which come from explicit trusted dependency contracts.
+Types describe the interface; semantic guarantees such as schema validity belong in the contract.
+
+Established parsers, schema validators, HTTP clients, and model services are external boundaries.
+Their implementation details are not prerequisites for a task-level certificate. Keep the actual
+dependency invocation and outcome handling in the application proof; stop at the sealed contract.
+In particular, do not turn a structure-builder claim into proofs of JSON grammar, recursive JSON
+types, dictionary lookup, whitespace stripping, or validation-library loops. Refactor a custom
+validator to use an established schema validator when that supplies the required behavior.
+
+**Stop procedure, triggered by the first proposed dependency-internals proof or verifier extension:**
+
+1. Stop that line of work. State the current microclaim and the exact fact its consumer needs.
+2. Check whether an existing parser/validator/provider contract supplies that fact. Bind the real
+   dependency, relevant version/configuration, guarantees, and error outcomes explicitly.
+3. Refactor the production task to call that boundary and handle its typed outcomes. Preserve
+   failed work, retries, occupied resources, elapsed time, and required output data.
+4. Verify that small task and resume the agreed claim order. If the chosen backend cannot bind
+   the needed contract, retain the minimal diagnostic and report that precise limitation.
+   Do not substitute an hours-long sequence of container/JSON proofs or verifier changes.
+
+Verifier development is separate work requiring explicit user scope. Before proposing it, show
+the consumer-level obligation that remains after checking a suitable typed boundary and existing
+contracts. A backend refusal alone does not establish a need for a new verifier feature. Do not
+add arbitrary limits or silently weaken the claim. Do not make another task, browser workflow,
+database proof, or generic parser a prerequisite merely because it is reachable in source.
+
+This rule does not permit hiding application scheduling, joins, accounting, or the very behavior
+being certified behind assumptions. Trusted dependency behavior must stay visible in the result.
+Written contracts, accepted source proofs, measurements, and composed certificates are distinct
+milestones; report which actually finished, not the number of helper obligations attempted.
+
 ## 1. Work backward from the consumer
 
 Write the exact target claim and its scope before collecting evidence. For playback, distinguish
@@ -31,7 +67,7 @@ fields consumed by the next stage. Its logical task is:
 ```text
 prepared planning request
     -> external model call in JSON mode
-    -> application parsing and consumer-required validation
+    -> external parser/schema validator: Plan | ParseError
     -> PlanReady | PlanFailed
 ```
 
@@ -39,6 +75,63 @@ The task's success means **usable by the declared consumer**, not merely valid J
 or a value of Python type `dict`. Do not add unrelated schema restrictions or discard additional
 JSON fields that the application must preserve. JSON mode is an external interface setting; it
 does not prove the application's required fields, cardinality, or semantics.
+
+### The small contract and implementation to write first
+
+Use a real parser/schema validator with this **explicit trusted contract**:
+
+```text
+parse_and_validate(response_text, plan_schema) -> Plan | ParseError
+
+Plan: the returned object is the decoded response and satisfies plan_schema.
+ParseError: no usable plan is returned.
+```
+
+The supplied schema states the requested step count and the nonblank fields the consumer needs.
+Bind that schema and the parser's real implementation/version. Preserve additional metadata if
+the consumer requires it. Do not replace the success guarantee with merely `dict`, `object`,
+`Any`, or HTTP 200, and do not assume the model always produces a valid response.
+
+The operation should have this size and shape. This is typed design pseudocode, not a new Dagcert
+API or an issued certificate; the named external outcomes must be bound to the actual adapters:
+
+```python
+@dataclass(frozen=True)
+class PlanRequest:
+    prompt: str
+    schema: PlanSchema
+
+@dataclass(frozen=True)
+class PlanReady:
+    plan: Plan
+
+@dataclass(frozen=True)
+class PlanFailed:
+    error: str
+
+@operation
+def build_plan(request: PlanRequest) -> PlanReady | PlanFailed:
+    response: ModelText | ModelError = request_json(request.prompt)
+    if isinstance(response, ModelError):
+        return PlanFailed(response.message)
+    parsed: Plan | ParseError = parse_and_validate(response.text, request.schema)
+    if isinstance(parsed, ParseError):
+        return PlanFailed(parsed.message)
+    return PlanReady(parsed)
+```
+
+If the library reports errors by raising exceptions, the adapter/task catches the declared
+exceptions into the same failure outcome. The trusted contract must include those exits.
+The application proof checks the right schema was supplied, only the validated result becomes
+`PlanReady`, and all failure outcomes are handled. The provider and parser contracts supply their
+internal behavior. Resource and timing composition charges the entire invocation, including
+unsuccessful attempts. Existing retries remain accounted for in the task or its actual controller.
+
+**Wrong next step:** build recursive JSON types in Maledictus, prove dictionary/string semantics,
+or add verifier machinery for nested validation loops. **Correct next step:** use the typed
+parser/schema contract, prove this small outcome-handling task, and complete the next agreed
+microclaim. If the contract cannot be represented, apply the stop procedure above; an unresolved
+binding is not permission to start verifier development.
 
 ### Refactor the implementation, not just the diagram
 
@@ -77,11 +170,13 @@ ownership.
 
 ### Separate external assumptions from owned behavior
 
-The real HTTP client, model service, and standard-library decoder may have explicit, sealed
-external contracts. These specify normal results, relevant permissions, and possible exceptional
-exits. The owned request builder, response extraction, validator, retry controller, and outcome
-classification remain application code to prove. Renaming an owned method "external" is not a
-shortcut.
+The real HTTP client, model service, and parser/schema validator use explicit, sealed external
+contracts. These specify normal results, consumer-required semantic guarantees, relevant
+permissions, and possible exceptional exits. The owned schema selection, invocation, response
+handling, retry controller, and outcome classification remain application code to prove.
+Calling an established schema validator replaces the need to prove a custom validation algorithm;
+it does not require proving the library's implementation. Merely renaming application scheduling
+or output-credit logic "external" would hide the requested claim and is not allowed.
 
 A library call inside one invocation normally stays inside the same task. Use another DAG task
 when the application has a real scheduling, queue, retry, or handoff boundary, not merely because
@@ -145,8 +240,10 @@ Report declaration admission, semantic proof, and whole-task composition separat
 
 Check the actual task's type/exception closure and its consumer-relevant semantic relation. Then
 test meaningful negative cases: missing required fields, wrong step count, ignored validation,
-provider failure, and failure during cleanup. A frontend refusal or solver `unknown` is not a
-semantic counterexample. Record which result occurred. A concrete execution satisfying all
+provider failure, and failure during cleanup. Exercise the real schema library for malformed-input
+checks; prove the task's outcome handling under its external contract. Do not turn these tests into
+an obligation to prove every library rejection algorithm. A frontend refusal or solver `unknown`
+is not a semantic counterexample. Record which result occurred. A concrete execution satisfying all
 preconditions and violating the postcondition is also a counterexample, but must not be reported
 as an SMT refutation.
 

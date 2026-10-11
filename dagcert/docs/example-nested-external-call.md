@@ -20,3 +20,11 @@ Maledictus checks all of the following before Dagcert can issue:
 
 Local preprocessing and postprocessing remain ordinary statements in the same operation. Do not
 split them into artificial DAG nodes merely because the middle statement calls external code.
+
+The proof stops at the sealed provider contract: this example does not require proving URL
+decoding internals. Apply the same rule to a schema parser: give
+`parse_and_validate(text, schema)` a typed validated-object/error contract, then prove the task's
+call and outcome handling. Bind the actual dependency and its semantic guarantees; a type label
+alone is insufficient. Do not turn task certification into JSON grammar, container/string, or
+validation-library proofs. If a backend cannot bind the contract, retain that minimal failure and
+revisit the boundary. Verifier development requires separate explicit user scope.

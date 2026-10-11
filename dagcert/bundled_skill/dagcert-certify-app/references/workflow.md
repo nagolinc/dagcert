@@ -10,6 +10,44 @@ claims. Presenting a run report as a guarantee will disappoint the user. Dagcert
 depend on explicit engineering premises rather than promoting a measured maximum into a future
 bound.
 
+## Typed task boundaries and the stop rule
+
+Define statically typed inputs, closed success/error outcomes, consumer-required guarantees,
+resources, and timing/failure accounting before starting proof work. Prove tasks in the user's
+agreed order. Refactor actual production code around these interfaces.
+
+**Certify task contracts, not dependency internals.** Use explicit trusted contracts for real
+parsers, schema validators, HTTP clients, and model services. For a structure builder:
+
+```text
+model request -> ResponseText | ProviderError
+parse_and_validate(ResponseText, PlanSchema) -> Plan | ParseError
+Plan -> PlanReady; either error -> PlanFailed
+```
+
+Parser success guarantees the returned object is the decoded input and satisfies the supplied
+schema, including consumer-required fields and counts. Static typing or valid JSON alone is
+insufficient. Bind the actual library/version and schema; keep additional metadata as required.
+Declare exceptional exits too. Count all attempts, errors, retries, and elapsed time.
+
+The task proof covers schema selection, the actual call, handling every outcome, and handing the
+validated result to its consumer. It does not prove the dependency's JSON grammar, recursive JSON
+types, dictionary reads, string operations, or validation loops. Use an established schema
+validator instead of proving an unnecessary custom validator. Keep trusted guarantees separate
+from proved application behavior; do not assume the application scheduling or accounting claim.
+
+**At the first proposed dependency-internals proof or verifier extension:** stop that work,
+restate the consumer-level obligation, check existing external contracts, and simplify/refactor
+the task boundary. If the backend cannot bind the required contract, retain the minimal diagnostic
+and report the precise gap. A refusal is not permission to expand the task. Verifier development
+requires explicit user scope and evidence that the obligation remains after those checks.
+Do not add limits, suppress failures, weaken the claim, or switch to unrelated claims.
+
+For the full worked structure-builder example, see
+[the certification workflow](https://github.com/nagolinc/dagcert/blob/master/docs/CERTIFICATION_WORKFLOW.md).
+Contract written, source proof accepted, timing measured, and composed certificate issued are
+separate statuses. Report completed microclaims and their actual evidence.
+
 ## Commands
 
 ```text
