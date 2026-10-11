@@ -9,7 +9,37 @@ plain-English product promises into a formal task/resource model, proves those g
 real execution DAG and explicit engineering premises, and binds the result to exact source and
 supporting evidence.
 
-It is designed to catch a large class of failures involving:
+## Start here: build the app into provable tasks
+
+Start from the behavior the application must guarantee. **Refactoring actual production work
+into clean tasks is expected certification work. The existing file and class layout is not a
+constraint.** Preserve required behavior while changing the implementation boundaries.
+
+1. **Name the exact promise and trace its critical dependency path.** Include parallel feeders,
+   queues, dispatch, shared resources, and the consumer's definition of a useful result. A fast
+   final stage cannot compensate for a missing upstream supply guarantee.
+2. **Choose small, consumer-driven proof obligations.** For example: a structure request produces
+   a usable plan or an explicit failure; only matching completed media receives playback credit.
+   These "microclaims" are a way of organizing work, not additional Dagcert primitives.
+3. **Refactor the real execution path into source-proved tasks.** Give each a clear input, closed
+   outcomes, and explicit native-library boundaries. Production must call these implementations.
+   Do not substitute an observer, a copied proof-only implementation, or an assumption about
+   application-owned code. A helper or external call need not become another DAG node.
+4. **Prove each task, then compose its resource, timing, and failure contracts.** Include the time
+   and capacity spent on failed attempts and retries. Check dispatch and refill behavior as well
+   as capacity. Use measurements to check explicit engineering premises, not to manufacture them
+   from a passing run.
+
+Start with the smallest actual task and test its intended property and a deliberately false
+variant before expanding the proof. Do not turn a narrow backend promise into a recursive-JSON,
+database-transaction, or browser-verification project unless that work is on the promised path.
+Equally, do not omit owned code that actually implements a required transition.
+
+See the [worked certification workflow](docs/CERTIFICATION_WORKFLOW.md): a structure builder with
+explicit failures and retries, a parallel backend streaming DAG, and runnable repository examples
+with their precise certification status.
+
+Dagcert is designed to catch a large class of failures involving:
 
 - queues, arrival rates, throughput, and service capacity;
 - blocked states, impossible dependencies, and unavailable resources;
@@ -29,9 +59,10 @@ input and verification fails.
 Give the LLM building or maintaining your app this instruction:
 
 > **Certify this app with https://github.com/nagolinc/dagcert. Derive every promise from the real
-> worker/task/resource DAG and source-proved operations. Use measurements only as supporting run
-> evidence, never as the promise itself, and do not change product behavior merely to make the
-> certificate pass.**
+> worker/task/resource DAG and source-proved operations. Start with small consumer-driven claims;
+> refactor actual production work into clean proved tasks, then compose them. Preserve required
+> product behavior. Use measurements only as supporting run evidence, never as the promise itself,
+> and do not add product restrictions merely to make the certificate pass.**
 
 That is the intended interface. The agent can install Dagcert, read its installed help, initialize
 the focused agent guide, inspect the complete examples, instrument the real runtime boundaries, and
