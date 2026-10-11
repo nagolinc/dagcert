@@ -1,5 +1,11 @@
 # Certification scope: prove tasks, stop at dependency contracts
 
+- **Recognize the common case immediately:** if a task calls an LLM and expects structured
+  output, run `python -m dagcert --help structuredLLMOutput` BEFORE designing its proof.
+  Read `dagcert/docs/structured-llm-output.md` and copy `examples/structured_llm_output/`.
+  Use the existing `@external_boundary`, adapt the schema/call, and run the small source check.
+  Check the actual example before documenting or claiming support. Do not substitute another
+  abstract "trusted boundary" sketch, parser proof, or untested contract for this working recipe.
 - Before proof work, write the task's statically typed input, closed success/error outcomes,
   consumer-required guarantees, resources, and timing/failure accounting. Follow the user's
   microclaim order and finish the current claim before starting unrelated work.

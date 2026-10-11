@@ -1,5 +1,9 @@
 # One task with an internal external call
 
+For the LLM structured-output case, use `dagcert --help structuredLLMOutput` and
+[the structured-output example](../structured_llm_output/README.md) first. It demonstrates the
+real schema validator, explicit failures, source check, and task-level success accounting.
+
 This example demonstrates source proof for one logical application task. The task strips its input, calls the real
 `urllib.parse.unquote` adapter, handles every typed boundary outcome, and lowercases the decoded
 path. The external call is a sealed effect inside `url.normalize`; it is not a second DAG task.

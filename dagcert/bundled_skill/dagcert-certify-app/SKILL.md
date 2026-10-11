@@ -10,6 +10,13 @@ read [references/workflow.md](references/workflow.md) for current artifact forma
 
 ## First rule: typed tasks and explicit proof boundaries
 
+**LLM call with structured output? Immediately run `python -m dagcert --help structuredLLMOutput`.**
+That installed recipe contains the real `@external_boundary` API, a checked example, provider
+contract, task wiring, and commands. Copy `examples/structured_llm_output/`, adapt the consumer's
+schema and real provider call, and check it before expanding the proof. This is a routine pattern,
+not permission to design a JSON parser or extend the verifier. A written sketch is insufficient:
+run the actual example and distinguish typed adapter success from useful task success.
+
 Before verification, define each task's statically typed input, closed success/error outcomes,
 consumer-required guarantees, resources, and timing/failure accounting. Refactor the production
 path into those tasks. Complete the microclaims in the user's agreed order.

@@ -1,0 +1,34 @@
+{
+  "schema": "dagcert-contract/v12",
+  "workers": [{"id": "story", "concurrency": 1}],
+  "resources": [],
+  "channels": [],
+  "external_handoffs": [],
+  "compositions": [],
+  "state_claims": [],
+  "external_boundaries": [{
+    "id": "llm.plan.validate",
+    "implementation": {"language": "python", "path": "boundary.py", "symbol": "validate_plan"},
+    "stub_path": "provider_contract.py",
+    "assumption": "pydantic-core SchemaValidator validates the supplied core schema; validate_json(strict=True) returns normally only when the exact input JSON satisfies it. Invalid JSON, schema mismatch, and library errors may raise Exception. Schema semantics are trusted dependency behavior.",
+    "provider": {"module": "pydantic_core", "symbols": ["SchemaValidator"]},
+    "exception_policy": "declared-by-exsures"
+  }],
+  "tasks": [{
+    "id": "plan.accept",
+    "role": "operation",
+    "worker": "story",
+    "implementation": {"language": "python", "path": "app.py", "symbol": "accept_model_response"},
+    "outcomes": [
+      {"type": "PlanReady", "resources": {}, "metadata": {}},
+      {"type": "PlanFailed", "resources": {}, "metadata": {}}
+    ],
+    "external_calls": ["llm.plan.validate"],
+    "depends_on": [],
+    "error_budget": null,
+    "external_contract": null,
+    "start_resources": {},
+    "timings": {}
+  }],
+  "metadata": {"purpose": "Source-proof recipe for structured output or failure; no throughput or model-service guarantee"}
+}

@@ -1,5 +1,9 @@
 # One task containing an external call
 
+For LLM structured output, start with `dagcert --help structuredLLMOutput` and the
+[checked recipe](../dagcert/docs/structured-llm-output.md). It contains actual source, a provider
+contract, task wiring, and the verifier command; do not invent another abstract boundary.
+
 Use this shape when an external-library call is an ordinary function call inside one unit of
 application work. It is not a separate DAG task unless the application actually schedules,
 queues, retries, or hands off that work separately.

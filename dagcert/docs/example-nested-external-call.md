@@ -1,5 +1,10 @@
 # One task containing an external call
 
+**LLM structured output is the common case:** start with `dagcert --help structuredLLMOutput`.
+The [structured-output recipe](structured-llm-output.md) supplies a checked schema-validation
+adapter, operation, complete contract, and failure/timing rules. Copy that example before
+inventing a new boundary. The URL example below explains the same existing primitive.
+
 Use this shape when an external-library call is an ordinary function call inside one unit of
 application work. It is not a separate DAG task unless the application actually schedules,
 queues, retries, or hands off that work separately.

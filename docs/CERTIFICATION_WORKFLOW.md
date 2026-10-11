@@ -7,6 +7,26 @@ not to preserve a tangled implementation at any cost, nor to replace a proof wit
 This guide contains worked **design examples**, not a certificate for a deployed streaming app.
 The runnable repository examples linked below state their own narrower claims and assumptions.
 
+## LLM structured output: the first command, before designing a proof
+
+```text
+dagcert --help structuredLLMOutput
+```
+
+**Use this immediately when you recognize "LLM call, expecting a structure, may fail."**
+The [complete recipe](../dagcert/docs/structured-llm-output.md) and
+[working example](../examples/structured_llm_output/README.md) provide the actual existing
+`@external_boundary` API, source, provider stub, full contract, and verifier invocation.
+Run that small example, change the consumer's schema and real provider call, and recheck it.
+The example has passed the source verifier and actual-library behavior checks; it is not a live
+model measurement or a composed certificate. The design sketches below explain the larger DAG;
+they are not a reason to invent a different structured-output integration.
+
+The recipe explicitly handles a validation failure inside the adapter and checks its boolean
+result in the task. `ExternalSuccess(False)` means the adapter returned correctly, but the task
+failed. Count that attempt's duration and produce zero useful output. Do not begin with recursive
+JSON, dictionary/string proofs, or verifier development.
+
 ## Mandatory boundary rule: certify tasks, not dependency internals
 
 Before running a verifier, write down each task's statically typed request, closed success/error

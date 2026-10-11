@@ -154,6 +154,7 @@ def test_installed_help_exposes_generic_structured_workflow_examples(capsys):
     assert main(["help"]) == 0
     listing = capsys.readouterr().out
     for topic in (
+        "structuredLLMOutput",
         "fork-join",
         "reservation-lifecycle",
         "bounded-buffer",
@@ -186,3 +187,13 @@ def test_installed_help_exposes_generic_structured_workflow_examples(capsys):
     assert "one Dagcert task" in multi_external
     assert "Queue[PreparedJob]" in multi_external
     assert "except Full" in multi_external
+
+
+def test_structured_llm_help_flag_matches_help_command(capsys):
+    assert main(["help", "structuredLLMOutput"]) == 0
+    command_text = capsys.readouterr().out
+    assert main(["--help", "structuredLLMOutput"]) == 0
+    assert capsys.readouterr().out == command_text
+    assert "@external_boundary" in command_text
+    assert "ExternalSuccess(False)" in command_text
+    assert "examples.structured_llm_output.verify" in command_text

@@ -1,5 +1,20 @@
 # Dagcert command and artifact reference
 
+## LLM structured output: use the existing recipe immediately
+
+When a task makes an LLM call and expects a structure, start with:
+
+```text
+python -m dagcert --help structuredLLMOutput
+```
+
+Copy the complete `examples/structured_llm_output/` example and run its source check before
+customizing it. The installed guide gives the exact `@external_boundary` adapter, closed task
+outcomes, provider overlay, contract wiring, and adaptation steps. All invalid responses and
+provider failures cost time and produce no useful output; `ExternalSuccess(False)` is a task
+failure. Keep the real LLM call inside the measured task. Do not re-prove JSON/schema internals
+or infer support from a contract that has never passed the verifier.
+
 ## Guarantee-first boundary
 
 **The observation-only route is the bad path.** Retained successful executions belong in the

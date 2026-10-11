@@ -20,6 +20,7 @@ Documentation = "https://github.com/nagolinc/dagcert#readme"
 yaml = ["PyYAML>=6.0.2"]
 dev = ["pytest>=8.0", "mypy>=1.11"]
 viewer = ["selenium>=4.30"]
+structured-output = ["pydantic-core==2.50.1"]
 
 [project.scripts]
 dagcert = "dagcert.cli:main"
@@ -33,6 +34,9 @@ include = ["dagcert*", "examples*"]
 [tool.setuptools.package-data]
 dagcert = ["py.typed", "*.pyi", "mypy_stubs/**/*.pyi", "nagini_stubs/**/*.pyi", "bundled_skill/**/*.md", "bundled_skill/**/*.yaml", "docs/*.md"]
 examples = [
+    "structured_llm_output/*.json",
+    "structured_llm_output/*.md",
+    "structured_llm_output/*.txt",
     "*.txt",
     "*.js",
     "*.mjs",

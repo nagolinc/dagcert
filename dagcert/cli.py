@@ -117,6 +117,10 @@ def replace_me(request: ReplaceMeInput) -> ReplaceMeCompleted:
 """
 
 HELP_TOPICS = {
+    "structuredLLMOutput": (
+        "START HERE for LLM calls: typed structured output or failure, using external_boundary",
+        "docs/structured-llm-output.md",
+    ),
     "timing-systems": (
         "variable-size streams, shared workers, batches, retries, identity and source-bound induction",
         "docs/timing-systems.md",
@@ -199,6 +203,7 @@ def parser() -> ArgumentParser:
             "Guarantee certificates derived from real workers, tasks, resources, and timings; "
             "retained observations are run evidence, not certificates"
         ),
+        epilog="LLM call expecting structured output? Start with: dagcert --help structuredLLMOutput",
     )
     root.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     commands = root.add_subparsers(dest="command", required=True)
@@ -290,7 +295,10 @@ def _proof_backend(args: Namespace) -> SourceProofBackend:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parser().parse_args(argv)
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if len(arguments) == 2 and arguments[0] == "--help":
+        arguments = ["help", arguments[1]]
+    args = parser().parse_args(arguments)
     try:
         if args.command == "init":
             return _init(args)
@@ -453,6 +461,7 @@ def _relative_inputs(root: str | Path, paths: list[str | Path]) -> list[str]:
 
 def _help(args: Namespace) -> int:
     if args.topic is None:
+        print("LLM call expecting structured output? Start with: dagcert --help structuredLLMOutput\n")
         print(
             "CERTIFICATES ARE GUARANTEE-FIRST: every certificate promise must be derived or "
             "chance-based over the real worker/task/resource DAG. An observed successful run "

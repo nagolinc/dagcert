@@ -1,5 +1,9 @@
 # Example: one worker with several external providers
 
+For an LLM call followed by schema validation, first use `dagcert --help structuredLLMOutput`.
+Its [copyable recipe](structured-llm-output.md) covers the common structured-result-or-failure
+case. This guide explains how to keep multiple such calls inside one task.
+
 One application invocation remains one Dagcert task even when its implementation reads an
 environment value, calls a remote provider, and publishes to a standard-library queue. Those are
 ordinary calls inside the worker, not separately scheduled DAG nodes.

@@ -9,6 +9,23 @@ plain-English product promises into a formal task/resource model, proves those g
 real execution DAG and explicit engineering premises, and binds the result to exact source and
 supporting evidence.
 
+## Calling an LLM and expecting structured output? Start here.
+
+```text
+dagcert --help structuredLLMOutput
+```
+
+**This is a standard recipe, not a new proof project.** Copy the
+[working structured-output example](examples/structured_llm_output/README.md), change the
+consumer's schema and application names, and run its source check immediately. It uses the existing
+`@external_boundary` API: a real validator checks the response; the application returns a usable
+plan or explicit failure. Failed attempts cost time and produce no useful output.
+
+The [complete recipe](dagcert/docs/structured-llm-output.md) supplies the adapter, operation,
+provider contract, DAG wiring, verifier command, behavior checks, and failure accounting.
+`dagcert help structuredLLMOutput` is equivalent. **Agents: read this recipe as soon as you identify
+an LLM structured-output task. Do not begin with JSON/parser proofs or verifier changes.**
+
 ## Start here: build the app into provable tasks
 
 Start from the behavior the application must guarantee. **Refactoring actual production work
@@ -83,7 +100,9 @@ Give the LLM building or maintaining your app this instruction:
 > **Certify this app with https://github.com/nagolinc/dagcert. Derive every promise from the real
 > worker/task/resource DAG and source-proved operations. Start with small consumer-driven claims;
 > refactor actual production work into clean proved tasks, then compose them. Preserve required
-> product behavior. Define typed inputs and success/error outcomes first; stop proofs at explicit
+> product behavior. For any LLM structured-output task, first run
+> `dagcert --help structuredLLMOutput` and adapt its checked example.
+> Define typed inputs and success/error outcomes first; stop proofs at explicit
 > trusted dependency contracts. Do not turn task certification into parser or verifier development.
 > Use measurements only as supporting run evidence, never as the promise itself,
 > and do not add product restrictions merely to make the certificate pass.**
