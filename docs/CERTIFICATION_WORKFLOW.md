@@ -138,6 +138,11 @@ K-of-N attempt composition; it does not prove an unbounded retry loop live.
 
 ### Verify the small claim before composing it
 
+Exercise the complete actual task early, including the native calls it makes.
+An admitted contract declaration or a conditional helper proof does not establish
+that the invocation works or that its real caller supplies the helper's premises.
+Report declaration admission, semantic proof, and whole-task composition separately.
+
 Check the actual task's type/exception closure and its consumer-relevant semantic relation. Then
 test meaningful negative cases: missing required fields, wrong step count, ignored validation,
 provider failure, and failure during cleanup. A frontend refusal or solver `unknown` is not a
