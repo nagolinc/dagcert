@@ -86,6 +86,12 @@ through the public issuer](dagcert/docs/native-proof-support.md). Keep each comp
 native interfaces scoped to that component; certificate issuance and independent
 verification rerun the actual proofs.
 
+**Declared dependencies must match the packages actually used.** Issuance and verification
+automatically check installed versions, immutable Git pins, runtime file hashes and import
+origins. A requirements-file hash alone is insufficient, and a `PYTHONPATH` checkout cannot
+silently replace the declared package. See [Python dependency identity](dagcert/docs/python-dependencies.md)
+for selecting the runtime requirements file when a project has several environments.
+
 Dagcert is designed to catch a large class of failures involving:
 
 - queues, arrival rates, throughput, and service capacity;

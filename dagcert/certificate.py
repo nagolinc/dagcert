@@ -29,6 +29,7 @@ from .maledictus_verifier import (
 )
 from .proof_sources import ProofSourceError
 from .source_calls import resolve_python_source_calls
+from .python_dependencies import DependencyError, check_python_dependencies
 
 
 class CertificateError(RuntimeError):
@@ -503,6 +504,7 @@ def issue_certificate(
     check_result_paths: Iterable[str | Path] = (),
     source_exclude: Iterable[str] = (),
     proof_backend: SourceProofBackend | None = None,
+    python_requirements: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     check_result_paths = tuple(check_result_paths)
     source_exclude = tuple(source_exclude)
@@ -516,6 +518,11 @@ def issue_certificate(
             pass
     manifest = source_manifest(root, exclude=exclusions)
     fingerprint = sha256(canonical_json(manifest)).hexdigest()
+    python_requirements = tuple(python_requirements) if python_requirements is not None else None
+    try:
+        dependency_identity = check_python_dependencies(root, manifest, python_requirements)
+    except (ValueError, OSError) as exc:
+        raise CertificateError(f"certificate refused: Python dependencies: {exc}") from exc
     contract = load_contract(contract_path, source_root=root)
     requirements = load_requirements(requirements_path)
     if contract.schema not in {"dagcert-contract/v6", "dagcert-contract/v7", "dagcert-contract/v8", "dagcert-contract/v9", "dagcert-contract/v10", "dagcert-contract/v11", "dagcert-contract/v12"}:
@@ -576,6 +583,13 @@ def issue_certificate(
     if check_problems:
         raise CertificateError("certificate refused: " + "; ".join(check_problems))
     claim_analysis = _claim_analysis(requirements, contract, analysis)
+    try:
+        if check_python_dependencies(root, manifest, python_requirements) != dependency_identity:
+            raise DependencyError("dependency environment changed during issuance")
+    except (ValueError, OSError) as exc:
+        raise CertificateError(f"certificate refused: Python dependencies: {exc}") from exc
+    if dependency_identity is not None:
+        source_verification["python_dependencies"] = dependency_identity
     document: dict[str, Any] = {
         "schema": (
             "dagcert-certificate/v16"
@@ -627,6 +641,7 @@ def verify_certificate(
     check_result_paths: Iterable[str | Path] = (),
     source_exclude: Iterable[str] = (),
     proof_backend: SourceProofBackend | None = None,
+    python_requirements: Iterable[str] | None = None,
 ) -> CertificateVerification:
     check_result_paths = tuple(check_result_paths)
     source_exclude = tuple(source_exclude)
@@ -682,6 +697,20 @@ def verify_certificate(
         problems.append("source exclusions mismatch")
     if raw.get("source_manifest") != manifest or raw.get("source_fingerprint") != fingerprint:
         problems.append("source identity mismatch")
+    stored_verification = raw.get("source_verification")
+    stored_dependencies = stored_verification.get("python_dependencies") if isinstance(stored_verification, dict) else None
+    try:
+        if python_requirements is None and isinstance(stored_dependencies, dict):
+            selected = stored_dependencies.get("requirements")
+            if not isinstance(selected, list) or not all(isinstance(p, str) for p in selected):
+                raise DependencyError("certificate has invalid dependency requirement paths")
+            python_requirements = selected
+        python_requirements = tuple(python_requirements) if python_requirements is not None else None
+        dependency_identity = check_python_dependencies(root, manifest, python_requirements)
+        if dependency_identity != stored_dependencies:
+            raise DependencyError("installed dependency identity differs from certificate (or the certificate lacks dependency binding)")
+    except (ValueError, OSError) as exc:
+        return CertificateVerification(False, tuple(problems + [f"Python dependencies: {exc}"]))
     contract_hash, evidence_hash = sha256_file(contract_path), sha256_file(evidence_path)
     requirements_hash = sha256_file(requirements_path)
     if raw.get("contract_sha256") != contract_hash:
@@ -751,6 +780,8 @@ def verify_certificate(
                         contract, root, source_verification, fingerprint, manifest,
                         selected_backend,
                     )
+                    if dependency_identity is not None:
+                        source_verification["python_dependencies"] = dependency_identity
                     if stored_source_verification != source_verification:
                         problems.append("source verification no longer matches")
                 except SourceTypeError as exc:
@@ -812,6 +843,8 @@ def verify_certificate(
         expected_check_hashes = _check_result_digests(check_result_paths)
         if not _check_result_digests_match(raw.get("check_result_sha256"), expected_check_hashes):
             problems.append("checker result digests mismatch")
+        if check_python_dependencies(root, manifest, python_requirements) != dependency_identity:
+            problems.append("Python dependency environment changed during verification")
     except (OSError, ValueError) as exc:
         problems.append(f"current inputs are invalid: {exc}")
     return CertificateVerification(not problems, tuple(problems))

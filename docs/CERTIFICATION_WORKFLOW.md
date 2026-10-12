@@ -387,3 +387,11 @@ the selected source backend.
 Finally, collect exact-source evidence for the chosen task boundaries, issue the composed claim,
 and independently verify it. Explain remaining assumptions and gaps. Observation-only reports
 belong in `dagcert analyze`, never in place of the promised certificate.
+
+Run issuance and verification in the application's installed Python environment. The public
+gate checks declared versions and Git commits against installed package metadata, verifies
+runtime file hashes, and rejects imports from a substituted checkout. If the project has several
+environments, select its application requirements with `python_requirements=("requirements-tv.txt",)`
+or `--python-requirements requirements-tv.txt`. Do not use `PYTHONPATH` to make a stale dependency
+pin appear to work. Fix and publish the dependency, update its pin, install it, then rerun the gate.
+See [the checked dependency identity workflow](../dagcert/docs/python-dependencies.md).

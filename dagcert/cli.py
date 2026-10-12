@@ -265,6 +265,7 @@ def _certificate_arguments(command: ArgumentParser) -> None:
     command.add_argument("--source-root", default=".")
     command.add_argument("--check-result", action="append", default=[])
     command.add_argument("--exclude", action="append", default=[])
+    command.add_argument("--python-requirements", action="append", help="source-relative Python dependency file; required when several environments are declared")
     _proof_backend_arguments(command)
 
 
@@ -427,6 +428,7 @@ def main(argv: list[str] | None = None) -> int:
                 requirements_path=args.requirements,
                 check_result_paths=args.check_result, source_exclude=args.exclude,
                 proof_backend=_proof_backend(args),
+                python_requirements=args.python_requirements,
             )
             print(f"issued {args.output}: {document['certificate_sha256']}")
             return 0
@@ -436,6 +438,7 @@ def main(argv: list[str] | None = None) -> int:
                 requirements_path=args.requirements,
                 source_root=args.source_root, check_result_paths=args.check_result, source_exclude=args.exclude,
                 proof_backend=_proof_backend(args),
+                python_requirements=args.python_requirements,
             )
             if not verification.valid:
                 print("certificate invalid: " + "; ".join(verification.problems), file=sys.stderr)
