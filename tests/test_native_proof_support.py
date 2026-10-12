@@ -52,12 +52,13 @@ def support(tmp_path: Path, original: str, proof: str):
     return config
 
 
-def test_closed_operation_cannot_gain_a_precondition(tmp_path):
+@pytest.mark.parametrize('operations', [{'app.py': ('f',)}, {}])
+def test_closed_operation_cannot_gain_a_precondition(tmp_path, operations):
     source = "from dataclasses import dataclass\nfrom dagcert.runtime import operation\n@dataclass(frozen=True)\nclass V:\n    x: int\n@operation\ndef f(v: V) -> V:\n    return v\n"
     proof = "from nagini_contracts.contracts import Requires\n" + source.replace("    return v", "    Requires(False)\n    return v")
     config = support(tmp_path, source, proof)
     with pytest.raises(ValueError, match="Requires"):
-        with native_proof_view(tmp_path, ("app.py",), str(config), frozenset({"app.py"}), {"app.py": ("f",)}):
+        with native_proof_view(tmp_path, ("app.py",), str(config), frozenset({"app.py"}), operations):
             pytest.fail("closed operation was restricted")
 
 

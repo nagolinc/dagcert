@@ -172,7 +172,10 @@ def check_native_bundle(root: Any, signatures: Any, proof_signatures: Any, backe
 @contextmanager
 def native_proof_view(root: Path, files: tuple[str, ...], support_path: str,
                       manifest: frozenset[str] | None, operations: dict[str, tuple[str, ...]]) -> Iterator[tuple[Path, tuple[MaledictusExternalBoundary, ...], dict[str, Any]]]:
-    from .source_types import _resolve_external_provider, read_python_signature
+    from .source_types import (
+        _resolve_external_provider, read_python_signature,
+        _trusted_decorators, _has_operation_decorator,
+    )
 
     path = Path(support_path).resolve()
     raw = path.read_bytes()
@@ -234,11 +237,13 @@ def native_proof_view(root: Path, files: tuple[str, ...], support_path: str,
         # An annotation may strengthen checked helper preconditions, but never
         # restrict a closed operation's caller or add a trusted operation body.
         postconditions = []
-        for name in annotations.keys() & sources.keys() & operations.keys():
-            for symbol in operations[name]:
-                read_python_signature(view, name, symbol)
-                tree = ast.parse(sources[name])
-                target = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == symbol)
+        for name in annotations.keys() & sources.keys():
+            tree = ast.parse(sources[name])
+            decorators, _, _ = _trusted_decorators(tree)
+            targets = [n for n in tree.body if isinstance(n, ast.FunctionDef)
+                       and _has_operation_decorator(n.decorator_list, decorators)]
+            for target in targets:
+                read_python_signature(view, name, target.name)
                 if any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
                        and n.func.id == "Ensures" for n in ast.walk(target)):
                     postconditions.append(name)
