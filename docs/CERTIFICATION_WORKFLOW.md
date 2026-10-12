@@ -79,6 +79,15 @@ Then choose small proof obligations that compose into the target. Each should sa
 piece of production code establishes for its consumer. "Microclaim" means this working unit of
 reasoning; it is not a new schema field or core proof type.
 
+**The ideal microclaim states one concrete fact about one named node, edge, or transition,
+with an obvious "we prove it by..." method, and targets a few minutes of proof work.** If it
+expands into several independent facts or a whole-worker proof, split it again and reuse
+accepted task contracts; the few-minute target sizes the work, not the application's runtime.
+
+For example: "Entry failure never calls the plan builder." Prove it by checking that the
+failure branch returns before the sole plan-builder call, binding that check to the actual
+production code and reusing the entry task's accepted outcome contract.
+
 ## 2. Worked task: request a usable structure
 
 Suppose a story worker needs a plan with a title, summary, the requested number of steps, and the

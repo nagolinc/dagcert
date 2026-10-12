@@ -31,6 +31,12 @@ Define statically typed inputs, closed success/error outcomes, consumer-required
 resources, and timing/failure accounting before starting proof work. Prove tasks in the user's
 agreed order. Refactor actual production code around these interfaces.
 
+**Target one concrete fact about one named node, edge, or transition per microclaim, with
+an obvious "we prove it by..." method and a few minutes of proof work.** For example, prove
+"entry failure never calls the plan builder" by checking the early return before its sole
+call in production. Reuse the accepted entry contract; if the work grows into several
+independent facts or a whole-worker proof, split it again. This target is not a runtime limit.
+
 **Certify task contracts, not dependency internals.** Use explicit trusted contracts for real
 parsers, schema validators, HTTP clients, and model services. For a structure builder:
 

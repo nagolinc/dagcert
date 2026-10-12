@@ -21,6 +21,11 @@ Before verification, define each task's statically typed input, closed success/e
 consumer-required guarantees, resources, and timing/failure accounting. Refactor the production
 path into those tasks. Complete the microclaims in the user's agreed order.
 
+**Size a microclaim as one concrete fact about one named node, edge, or transition, with an
+obvious "we prove it by..." method and a target of a few minutes of proof work.** If it expands
+into several independent facts or a whole-worker proof, split it again and reuse accepted
+task contracts. This is a work-sizing target, not an application runtime limit.
+
 **Certify task contracts, not dependency internals.** Bind established parsers, schema validators,
 HTTP clients, and model services through explicit trusted external contracts. A schema parser's
 contract is `parse_and_validate(text, schema) -> SchemaObject | Error`: success satisfies the

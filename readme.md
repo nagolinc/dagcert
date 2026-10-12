@@ -38,6 +38,9 @@ constraint.** Preserve required behavior while changing the implementation bound
 2. **Choose small, consumer-driven proof obligations.** For example: a structure request produces
    a usable plan or an explicit failure; only matching completed media receives playback credit.
    These "microclaims" are a way of organizing work, not additional Dagcert primitives.
+   **Target one concrete claim about one named node, edge, or transition, with an obvious
+   "we prove it by..." method and a few minutes of proof work.** If it expands into several
+   independent facts or a whole-worker proof, split it again and reuse accepted task contracts.
 3. **Refactor the real execution path into source-proved tasks.** Give each a clear input, closed
    outcomes, and explicit native-library boundaries. Production must call these implementations.
    Do not substitute an observer, a copied proof-only implementation, or an assumption about
