@@ -87,6 +87,7 @@ def type_enforcement_descriptor() -> dict[str, object]:
         "relations.py", "relation_types.py", "induction.py", "semantic.py", "networks.py", "nagini_launcher.py",
         "linear_logic.py", "linear_certificates.py", "theorems.py", "theorem_sources.py", "network_transfer.py",
         "javascript_interfaces.py", "source_calls.py", "native_proof_support.py", "python_dependencies.py",
+        "promises.py", "promise_events.py",
         "nagini_stubs/dagcert/__init__.pyi", "nagini_stubs/dagcert/runtime.pyi",
         "mypy_stubs/dagcert/__init__.pyi", "mypy_stubs/dagcert/runtime.pyi",
         "mypy_stubs/dagcert/surfaces.pyi",

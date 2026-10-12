@@ -1,5 +1,11 @@
 # DOES YOUR LLM ALSO STRUGGLE WITH QUEUE THEORY?
 
+**Runtime promises:** enforce startup preconditions in the application and declare
+native timing/output bounds as [executable runtime promises](dagcert/docs/runtime-promises.md).
+Dagcert retains violations automatically, with expected/observed values and execution
+identity. No environment flag or additional logging setup is required. An English
+assumption without an admission gate or runtime observation is unfinished integration.
+
 Your app compiles. The happy-path tests pass. Then real users discover that a worker can starve, a
 resource can never become available, work arrives faster than it completes, derived state becomes
 permanently stale, or an “async” action quietly blocks the UI.

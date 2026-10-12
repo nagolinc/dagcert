@@ -13,6 +13,7 @@ from typing import Any, Protocol, cast
 from .certificate import canonical_json, sha256_file
 from .evidence import load_evidence
 from .runtime import runtime_violations
+from .promise_events import promise_violations
 
 
 class SurfaceError(ValueError):
@@ -274,6 +275,8 @@ def banner(
             rows.append(row)
         if extra_events is not None:
             rows.extend(dict(event) for event in extra_events())
+        rows.extend(promise_violations())
+        rows.sort(key=lambda row: float(row.get("recorded_at", 0)))
         payload = {
             "violation_count": len(rows),
             "violations": rows,

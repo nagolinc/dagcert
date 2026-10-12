@@ -245,11 +245,18 @@ def clear_runtime_violations() -> None:
 
     with _observer_lock:
         _runtime_violations.clear()
+    from .promise_events import clear_promise_violations
+    clear_promise_violations()
 
 
 def _publish_external_event(event: ExternalBoundaryEvent) -> None:
     with _observer_lock:
         if not event.succeeded:
+            from .promise_events import record_violation
+            record_violation(event.boundary_id, expected=event.expected_type,
+                             observed=event.observed_type or event.outcome_type,
+                             context={"boundary_id": event.boundary_id, "elapsed_ms": event.elapsed_ms},
+                             message=event.message or "External contract failed", remember=False)
             _runtime_violations.append(event)
             _LOG.error(
                 "DAGCERT VIOLATION external boundary %s produced %s: %s",
