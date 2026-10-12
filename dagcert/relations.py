@@ -491,14 +491,24 @@ def verify_source_relations(
     signatures = tuple(
         task.source_signature for task in contract.tasks
         if task.source_signature is not None and task.source_signature.language == "python"
+        and (task.source_signature.path, task.source_signature.symbol) in groups
     )
     proof_signatures = tuple(
         task.source_signature for task in contract.tasks
         if task.role == "operation" and task.source_signature is not None
         and task.source_signature.language == "python"
+        and (task.source_signature.path, task.source_signature.symbol) in groups
     )
-    external = external_source_contracts(contract)
-    bindings = maledictus_callable_bindings(contract)
+    # The initial source gate already proves the other operations. A relation
+    # view needs its owners and their real transitive dependencies only.
+    from dataclasses import replace
+    selected_tasks = tuple(task for task in contract.tasks if task.source_signature is not None
+        and (task.source_signature.path, task.source_signature.symbol) in groups)
+    boundary_ids = {name for task in selected_tasks for name in task.external_calls}
+    relation_contract = replace(contract, tasks=selected_tasks,
+        external_boundaries=tuple(b for b in contract.external_boundaries if b.id in boundary_ids))
+    external = external_source_contracts(relation_contract)
+    bindings = maledictus_callable_bindings(relation_contract)
     manifest_paths = tuple(
         source_manifest(root) if source_manifest_paths is None else source_manifest_paths
     )
@@ -599,7 +609,7 @@ def verify_source_relations(
                 external_contracts=external,
                 callable_bindings=bindings,
                 embedded_external_calls=maledictus_embedded_external_calls(
-                    contract, view, source_manifest_paths=proof_content,
+                    relation_contract, view, source_manifest_paths=proof_content,
                 ),
                 proof_backend=proof_backend,
                 required_postcondition_files=(

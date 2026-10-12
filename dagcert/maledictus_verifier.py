@@ -120,7 +120,7 @@ def verify_with_maledictus(
     source_fingerprint: str,
     executable: str | Path,
     expected_executable_sha256: str,
-    timeout_seconds: float = 120.0,
+    timeout_seconds: float | None = 120.0,
     proof_only_files: Iterable[str] = (),
     callable_bindings: Iterable[MaledictusCallableBinding] = (),
     external_boundaries: Iterable[MaledictusExternalBoundary] = (),

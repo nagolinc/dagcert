@@ -81,6 +81,11 @@ See the [worked certification workflow](docs/CERTIFICATION_WORKFLOW.md): a struc
 explicit failures and retries, a parallel backend streaming DAG, and runnable repository examples
 with their precise certification status.
 
+For existing accepted component proofs, [carry native contracts and proof annotations
+through the public issuer](dagcert/docs/native-proof-support.md). Keep each component's
+native interfaces scoped to that component; certificate issuance and independent
+verification rerun the actual proofs.
+
 Dagcert is designed to catch a large class of failures involving:
 
 - queues, arrival rates, throughput, and service capacity;

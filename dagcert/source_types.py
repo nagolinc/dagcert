@@ -5,9 +5,10 @@ The contract points at code.  It does not get to restate the code's types.
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, cast
 import ast
 import dataclasses as dataclasses_module
 from hashlib import sha256
@@ -44,16 +45,22 @@ class SourceProofBackend:
     name: str = "nagini"
     executable: str | None = None
     executable_sha256: str | None = None
+    native_proof_support: str | None = None
+    timeout_seconds: float | None = 120.0
 
     @classmethod
     def maledictus(
-        cls, executable: str | Path, executable_sha256: str,
+        cls, executable: str | Path, executable_sha256: str, *,
+        native_proof_support: str | Path | None = None,
+        timeout_seconds: float | None = 120.0,
     ) -> SourceProofBackend:
-        return cls("maledictus", str(Path(executable).resolve()), executable_sha256.lower())
+        return cls("maledictus", str(Path(executable).resolve()), executable_sha256.lower(),
+                   str(Path(native_proof_support).resolve()) if native_proof_support is not None else None,
+                   timeout_seconds)
 
     def validate(self) -> None:
         if self.name == "nagini":
-            if self.executable is not None or self.executable_sha256 is not None:
+            if self.executable is not None or self.executable_sha256 is not None or self.native_proof_support is not None:
                 raise SourceTypeError(
                     "Nagini backend does not accept a local executable or digest override"
                 )
@@ -79,7 +86,7 @@ def type_enforcement_descriptor() -> dict[str, object]:
         "state_model.py", "curves.py", "temporal.py", "quantities.py", "scheduling.py",
         "relations.py", "relation_types.py", "induction.py", "semantic.py", "networks.py", "nagini_launcher.py",
         "linear_logic.py", "linear_certificates.py", "theorems.py", "theorem_sources.py", "network_transfer.py",
-        "javascript_interfaces.py", "source_calls.py",
+        "javascript_interfaces.py", "source_calls.py", "native_proof_support.py",
         "nagini_stubs/dagcert/__init__.pyi", "nagini_stubs/dagcert/runtime.pyi",
         "mypy_stubs/dagcert/__init__.pyi", "mypy_stubs/dagcert/runtime.pyi",
         "mypy_stubs/dagcert/surfaces.pyi",
@@ -201,6 +208,17 @@ def check_python_sources(
     selected_backend = proof_backend or SourceProofBackend()
     selected_backend.validate()
     required_postcondition_files = tuple(Path(path).as_posix() for path in required_postcondition_files)
+    if selected_backend.native_proof_support and prove_exceptions:
+        from .native_proof_support import check_native_bundle
+        bundle_result = check_native_bundle(
+            source_root, bound_signatures, proof_bound_signatures, selected_backend,
+            source_fingerprint=source_fingerprint, source_manifest_paths=source_manifest_paths,
+            external_contracts=external_boundaries, callable_bindings=concrete_callable_bindings,
+            embedded_external_calls=concrete_embedded_calls,
+            required_postcondition_files=required_postcondition_files,
+        )
+        if bundle_result is not None:
+            return bundle_result
     if required_postcondition_files:
         if not prove_exceptions or selected_backend.name != "maledictus":
             raise SourceTypeError("joint native postcondition scope requires an enabled Maledictus operation proof")
@@ -260,7 +278,10 @@ def check_python_sources(
     # An installed Dagcert's bundled stubs can live below the selected interpreter's
     # site-package directory.  Mypy deliberately rejects any such MYPYPATH entry, so
     # give it an isolated copy instead of exposing a path inside the application venv.
-    if python_files:
+    native_typecheck = bool(
+        prove_exceptions and proof_bound_signatures and selected_backend.native_proof_support
+    )
+    if python_files and not native_typecheck:
         with tempfile.TemporaryDirectory(prefix="dagcert-mypy-stubs-") as temporary_root:
             mypy_stub_root = Path(temporary_root) / "mypy_stubs"
             shutil.copytree(bundled_stub_root, mypy_stub_root)
@@ -385,68 +406,82 @@ def check_python_sources(
             assert selected_backend.executable is not None
             assert selected_backend.executable_sha256 is not None
             try:
-                maledictus_response = verify_with_maledictus(
-                    root,
-                    proof_files,
-                    symbols_by_file,
-                    source_fingerprint=source_fingerprint,
-                    executable=selected_backend.executable,
-                    expected_executable_sha256=selected_backend.executable_sha256,
-                    required_postcondition_files=required_postcondition_files,
-                    proof_only_files=(
-                        proof_source_closure.proof_only_files
-                        if proof_source_closure is not None else ()
-                    ),
-                    callable_bindings=concrete_callable_bindings,
-                    external_boundaries=tuple(
-                        MaledictusExternalBoundary(
-                            item.boundary_id,
-                            item.adapter_path,
-                            item.symbol,
-                            item.stub_path,
-                            item.provider_module,
-                            item.provider_symbols,
-                            item.exception_policy,  # type: ignore[arg-type]
+                with ExitStack() as proof_inputs:
+                    native_boundaries: tuple[MaledictusExternalBoundary, ...] = ()
+                    native_identity: dict[str, object] | None = None
+                    verification_root = root
+                    if selected_backend.native_proof_support is not None:
+                        from .native_proof_support import native_proof_view
+                        verification_root, native_boundaries, native_identity = proof_inputs.enter_context(
+                            native_proof_view(root, python_files, selected_backend.native_proof_support, manifest_paths, symbols_by_file)
                         )
-                        for item in external_boundaries
-                        if any(
-                            call.boundary_id == item.boundary_id
-                            for call in concrete_embedded_calls
-                        )
-                    ),
-                    embedded_external_calls=concrete_embedded_calls,
-                    languages_by_file={
-                        **{
-                            item.path: item.language for item in proof_bound_signatures
-                        },
-                        **{
-                            path: "python"
-                            for path in (
-                                proof_source_closure.proof_only_files
-                                if proof_source_closure is not None else ()
+                    maledictus_response = verify_with_maledictus(
+                        verification_root,
+                        proof_files,
+                        symbols_by_file,
+                        source_fingerprint=source_fingerprint,
+                        executable=selected_backend.executable,
+                        expected_executable_sha256=selected_backend.executable_sha256,
+                        timeout_seconds=selected_backend.timeout_seconds,
+                        required_postcondition_files=tuple(sorted(set(required_postcondition_files) | set(
+                            cast(list[str], native_identity["required_postcondition_files"]) if native_identity else ()
+                        ))),
+                        proof_only_files=(
+                            proof_source_closure.proof_only_files
+                            if proof_source_closure is not None else ()
+                        ),
+                        callable_bindings=concrete_callable_bindings,
+                        external_boundaries=native_boundaries + tuple(
+                            MaledictusExternalBoundary(
+                                item.boundary_id,
+                                item.adapter_path,
+                                item.symbol,
+                                item.stub_path,
+                                item.provider_module,
+                                item.provider_symbols,
+                                item.exception_policy,  # type: ignore[arg-type]
                             )
+                            for item in external_boundaries
+                            if any(
+                                call.boundary_id == item.boundary_id
+                                for call in concrete_embedded_calls
+                            )
+                        ),
+                        embedded_external_calls=concrete_embedded_calls,
+                        languages_by_file={
+                            **{
+                                item.path: item.language for item in proof_bound_signatures
+                            },
+                            **{
+                                path: "python"
+                                for path in (
+                                    proof_source_closure.proof_only_files
+                                    if proof_source_closure is not None else ()
+                                )
+                            },
                         },
-                    },
-                    verified_interfaces=tuple(
-                        MaledictusVerifiedInterface(
-                            item.path,
-                            item.language,  # type: ignore[arg-type]
-                            item.symbol,
-                            item.input_fields,
-                            item.outcome_types[0],
-                            execution=item.execution,
-                            record_parameters=item.record_parameters,
-                        )
-                        for item in proof_bound_signatures
-                        if item.language in {"javascript", "typescript"}
-                    ),
-                )
-                exception_verification = {
-                    **maledictus_response,
-                    "checker": "maledictus",
-                    "result": "proved",
-                }
-            except MaledictusVerificationError as exc:
+                        verified_interfaces=tuple(
+                            MaledictusVerifiedInterface(
+                                item.path,
+                                item.language,  # type: ignore[arg-type]
+                                item.symbol,
+                                item.input_fields,
+                                item.outcome_types[0],
+                                execution=item.execution,
+                                record_parameters=item.record_parameters,
+                            )
+                            for item in proof_bound_signatures
+                            if item.language in {"javascript", "typescript"}
+                        ),
+                    )
+                    exception_verification = {
+                        **maledictus_response,
+                        "checker": "maledictus",
+                        "result": "proved",
+                    }
+                    if native_identity is not None:
+                        exception_verification["native_proof_support"] = native_identity
+            except (MaledictusVerificationError, ValueError, OSError) as exc:
                 raise SourceTypeError(str(exc)) from exc
     else:
         exception_verification = {
@@ -458,15 +493,22 @@ def check_python_sources(
             "source_fingerprint": source_fingerprint,
             "files": [],
         }
+    type_checker: dict[str, object] = {
+        "checker": "mypy", "version": mypy_version, "mode": "strict",
+        "dagcert_import_surface": "sealed-type-preserving-stub", "files": list(python_files),
+    }
+    if native_typecheck:
+        # Maledictus already runs a stricter, mandatory, closed mypy check with
+        # these same native interfaces. Running the host's unrelated typeshed
+        # first discards those contracts (e.g. operator.floordiv's int result).
+        native_checker = exception_verification.get("python_typechecker")
+        if not isinstance(native_checker, dict):
+            raise SourceTypeError("native proof lacks its mandatory pinned Python typecheck")
+        type_checker = {"checker": "mypy", "mode": "sealed-native-contracts",
+                        "files": list(python_files), "verification": native_checker}
     return {
         "provider": "dagcert.python-source-verification/v3",
-        "type_checker": {
-            "checker": "mypy",
-            "version": mypy_version,
-            "mode": "strict",
-            "dagcert_import_surface": "sealed-type-preserving-stub",
-            "files": list(python_files),
-        },
+        "type_checker": type_checker,
         "exception_verifier": exception_verification,
         "proof_source_closure": (
             proof_source_closure.to_mapping(root)
